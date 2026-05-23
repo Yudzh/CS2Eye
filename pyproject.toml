@@ -12,7 +12,10 @@ dependencies = [
     "uvicorn[standard] (>=0.47.0,<0.48.0)",
     "pydantic-settings>=2.4.0",
     "python-multipart (>=0.0.29,<0.0.30)",
-    "httpx (>=0.28.1,<0.29.0)"
+    "httpx (>=0.28.1,<0.29.0)",
+    "rarfile (>=4.2,<5.0)",
+    "py7zr (>=1.1.0,<2.0.0)",
+    "demoparser2 (>=0.41.3,<0.42.0)"
 ]
 
 [project.optional-dependencies]
