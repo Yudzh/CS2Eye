@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: cs2eye-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cs2eye
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+    ports:
+      - "5433:5432"
+    volumes:
+      - cs2eye_pg_data:/var/lib/postgresql/data
+
+volumes:
+  cs2eye_pg_data:
