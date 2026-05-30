@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 
@@ -51,6 +53,7 @@ class DemoPlayerDamageStats(BaseModel):
 
 
 class DemoBasicStatsAnalyzeResponse(BaseModel):
+    parse_run_id: UUID
     demo_file_path: str
     rounds: int
     players: list[DemoPlayerDamageStats]

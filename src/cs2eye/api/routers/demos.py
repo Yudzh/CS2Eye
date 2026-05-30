@@ -1,12 +1,16 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 from starlette.concurrency import run_in_threadpool
 
 from cs2eye.api.schemas.demos import DemoListResponse, DemoUploadResponse, DemoArtifactPrepareResponse, \
     DemoArtifactPrepareRequest, DemoBasicStatsAnalyzeResponse, DemoBasicStatsAnalyzeRequest, DemoPlayerDamageStats
+from cs2eye.db.session import get_db_session
 from cs2eye.services.demo_artifact_extractor import prepare_demo_artifact, DemoArtifactExtractionError
 from cs2eye.services.demo_artifact_storage import save_uploaded_demo_artifact, DemoArtifactStorageError
 from cs2eye.services.demo_basic_stats_analyzer import analyze_demo_basic_stats, DemoBasicStatsAnalyzeError
+from cs2eye.services.demo_parse_run_service import create_demo_parse_run, mark_demo_parse_run_failed, \
+    mark_demo_parse_run_success_with_player_damage_stats
 
 router = APIRouter(prefix="/demos", tags=["demos"])
 
@@ -64,19 +68,40 @@ async def prepare_uploaded_demo_artifact(
 @router.post("/analyze/basic", response_model=DemoBasicStatsAnalyzeResponse)
 async def analyze_demo_basic_stats_endpoint(
         payload: DemoBasicStatsAnalyzeRequest,
+        session: AsyncSession = Depends(get_db_session),
 ) -> DemoBasicStatsAnalyzeResponse:
+    parse_run = await create_demo_parse_run(
+        session=session,
+        demo_file_path=payload.demo_file_path,
+    )
+
     try:
         stats = await run_in_threadpool(
             analyze_demo_basic_stats,
             payload.demo_file_path,
         )
     except DemoBasicStatsAnalyzeError as error:
+        await mark_demo_parse_run_failed(
+            session=session,
+            parse_run=parse_run,
+            error_message=str(error),
+        )
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(error),
         ) from error
 
+    parse_run = await mark_demo_parse_run_success_with_player_damage_stats(
+        session=session,
+        parse_run=parse_run,
+        demo_file_path=str(stats.demo_file_path),
+        rounds_count=stats.rounds,
+        players=stats.players,
+    )
+
     return DemoBasicStatsAnalyzeResponse(
+        parse_run_id=parse_run.id,
         demo_file_path=str(stats.demo_file_path),
         rounds=stats.rounds,
         players=[
@@ -91,3 +116,5 @@ async def analyze_demo_basic_stats_endpoint(
         ],
         status="analyzed",
     )
+
+

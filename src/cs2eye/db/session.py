@@ -2,7 +2,7 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from src.cs2eye.core.config import settings
+from cs2eye.core.config import settings
 
 
 engine = create_async_engine(
