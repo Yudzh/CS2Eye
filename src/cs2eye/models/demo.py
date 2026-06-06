@@ -103,3 +103,70 @@ class DemoPlayerDamageStat(Base):
         server_default=func.now(),
         nullable=False,
     )
+
+class DemoBombRoundStat(Base):
+    __tablename__ = "demo_bomb_round_stats"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    parse_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("demo_parse_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    round_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    planter_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    planter_team_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    defuser_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    defuser_team_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    outcome: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    plant_tick: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    defuse_tick: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    explosion_tick: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )

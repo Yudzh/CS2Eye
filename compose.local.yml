@@ -11,6 +11,71 @@ services:
       - "5433:5432"
     volumes:
       - cs2eye_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U admin -d cs2eye" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cs2eye-migrate
+    restart: "no"
+    environment:
+      APP_ENV: local
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://admin:admin@db:5432/cs2eye
+    depends_on:
+      db:
+        condition: service_healthy
+    command: [ "alembic", "upgrade", "head" ]
+    volumes:
+      - ./src:/app/src
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini:ro
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cs2eye-api
+    restart: unless-stopped
+    environment:
+      APP_ENV: local
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://admin:admin@db:5432/cs2eye
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini:ro
+      - cs2eye_storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: [ "uvicorn", "cs2eye.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload" ]
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: cs2eye-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@cs2eye.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    volumes:
+      - cs2eye_pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   cs2eye_pg_data:
+  cs2eye_storage:
+  cs2eye_pgadmin_data:

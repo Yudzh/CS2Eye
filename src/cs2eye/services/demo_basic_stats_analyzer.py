@@ -19,12 +19,24 @@ class PlayerDamageStats:
     rounds: int
     average_damage_per_round: float
 
+@dataclass(frozen=True)
+class BombRoundStats:
+    round_number: int
+    planter_name: str | None
+    planter_team_name: str | None
+    defuser_name: str | None
+    defuser_team_name: str | None
+    outcome: str  # planted / exploded / defused
+    plant_tick: int | None
+    defuse_tick: int | None
+    explosion_tick: int | None
 
 @dataclass(frozen=True)
 class DemoBasicStats:
     demo_file_path: Path
     rounds: int
     players: list[PlayerDamageStats]
+    bomb_rounds: list[BombRoundStats]
 
 
 def _resolve_prepared_demo_path(demo_file_path: str) -> Path:
@@ -123,6 +135,7 @@ def analyze_demo_basic_stats(demo_file_path: str) -> DemoBasicStats:
         )
 
     rounds_count = _count_played_rounds(parser, hurt_df)
+    bomb_rounds = _analyze_bomb_rounds(parser)
 
     group_columns = ["attacker_name"]
 
@@ -162,5 +175,160 @@ def analyze_demo_basic_stats(demo_file_path: str) -> DemoBasicStats:
     return DemoBasicStats(
         demo_file_path=resolved_demo_path,
         rounds=rounds_count,
+        bomb_rounds=bomb_rounds,
         players=players,
     )
+
+def _safe_parse_event(parser: DemoParser, event_name: str, player: list[str] | None = None, other: list[str] | None = None):
+    try:
+        return parser.parse_event(
+            event_name,
+            player=player or [],
+            other=other or [],
+        )
+    except Exception:
+        return None
+
+
+def _clean_string(value) -> str | None:
+    if value is None:
+        return None
+
+    if value != value:  # NaN check
+        return None
+
+    value_as_string = str(value).strip()
+
+    if not value_as_string:
+        return None
+
+    return value_as_string
+
+
+def _get_optional_int(row: dict, column_names: list[str]) -> int | None:
+    for column_name in column_names:
+        if column_name not in row:
+            continue
+
+        value = row[column_name]
+
+        if value is None or value != value:
+            continue
+
+        return int(value)
+
+    return None
+
+
+def _get_event_round_number(row: dict) -> int:
+    total_rounds_played = _get_optional_int(row, ["total_rounds_played"])
+
+    if total_rounds_played is None:
+        return 1
+
+    return total_rounds_played + 1
+
+
+def _get_event_tick(row: dict) -> int | None:
+    return _get_optional_int(row, ["tick", "event_tick"])
+
+
+def _event_rows_without_warmup(event_df) -> list[dict]:
+    if event_df is None or event_df.empty:
+        return []
+
+    if "is_warmup_period" in event_df.columns:
+        event_df = event_df[event_df["is_warmup_period"] == False]
+
+    return event_df.to_dict(orient="records")
+
+
+def _analyze_bomb_rounds(parser: DemoParser) -> list[BombRoundStats]:
+    plant_df = _safe_parse_event(
+        parser,
+        "bomb_planted",
+        player=["team_name"],
+        other=["total_rounds_played", "is_warmup_period"],
+    )
+
+    defuse_df = _safe_parse_event(
+        parser,
+        "bomb_defused",
+        player=["team_name"],
+        other=["total_rounds_played", "is_warmup_period"],
+    )
+
+    explosion_df = _safe_parse_event(
+        parser,
+        "bomb_exploded",
+        other=["total_rounds_played", "is_warmup_period"],
+    )
+
+    bomb_rounds_by_number: dict[int, dict] = {}
+
+    for row in _event_rows_without_warmup(plant_df):
+        round_number = _get_event_round_number(row)
+
+        bomb_rounds_by_number[round_number] = {
+            "round_number": round_number,
+            "planter_name": _clean_string(row.get("user_name")),
+            "planter_team_name": _clean_string(row.get("user_team_name")),
+            "defuser_name": None,
+            "defuser_team_name": None,
+            "outcome": "planted",
+            "plant_tick": _get_event_tick(row),
+            "defuse_tick": None,
+            "explosion_tick": None,
+        }
+
+    for row in _event_rows_without_warmup(explosion_df):
+        round_number = _get_event_round_number(row)
+
+        bomb_round = bomb_rounds_by_number.setdefault(
+            round_number,
+            {
+                "round_number": round_number,
+                "planter_name": None,
+                "planter_team_name": None,
+                "defuser_name": None,
+                "defuser_team_name": None,
+                "outcome": "exploded",
+                "plant_tick": None,
+                "defuse_tick": None,
+                "explosion_tick": None,
+            },
+        )
+
+        bomb_round["outcome"] = "exploded"
+        bomb_round["explosion_tick"] = _get_event_tick(row)
+
+    for row in _event_rows_without_warmup(defuse_df):
+        round_number = _get_event_round_number(row)
+
+        bomb_round = bomb_rounds_by_number.setdefault(
+            round_number,
+            {
+                "round_number": round_number,
+                "planter_name": None,
+                "planter_team_name": None,
+                "defuser_name": None,
+                "defuser_team_name": None,
+                "outcome": "defused",
+                "plant_tick": None,
+                "defuse_tick": None,
+                "explosion_tick": None,
+            },
+        )
+
+        bomb_round["outcome"] = "defused"
+        bomb_round["defuser_name"] = _clean_string(row.get("user_name"))
+        bomb_round["defuser_team_name"] = _clean_string(row.get("user_team_name"))
+        bomb_round["defuse_tick"] = _get_event_tick(row)
+
+    return [
+        BombRoundStats(**bomb_round)
+        for bomb_round in sorted(
+            bomb_rounds_by_number.values(),
+            key=lambda item: item["round_number"],
+        )
+    ]

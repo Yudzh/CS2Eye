@@ -1,16 +1,19 @@
+from uuid import UUID
+
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 from starlette.concurrency import run_in_threadpool
 
 from cs2eye.api.schemas.demos import DemoListResponse, DemoUploadResponse, DemoArtifactPrepareResponse, \
-    DemoArtifactPrepareRequest, DemoBasicStatsAnalyzeResponse, DemoBasicStatsAnalyzeRequest, DemoPlayerDamageStats
+    DemoArtifactPrepareRequest, DemoBasicStatsAnalyzeResponse, DemoBasicStatsAnalyzeRequest, DemoPlayerDamageStats, \
+    DemoBombRoundStats, DemoBombRoundStatsResponse
 from cs2eye.db.session import get_db_session
 from cs2eye.services.demo_artifact_extractor import prepare_demo_artifact, DemoArtifactExtractionError
 from cs2eye.services.demo_artifact_storage import save_uploaded_demo_artifact, DemoArtifactStorageError
 from cs2eye.services.demo_basic_stats_analyzer import analyze_demo_basic_stats, DemoBasicStatsAnalyzeError
 from cs2eye.services.demo_parse_run_service import create_demo_parse_run, mark_demo_parse_run_failed, \
-    mark_demo_parse_run_success_with_player_damage_stats
+    mark_demo_parse_run_success_with_player_damage_stats, get_demo_bomb_round_stats
 
 router = APIRouter(prefix="/demos", tags=["demos"])
 
@@ -18,6 +21,38 @@ router = APIRouter(prefix="/demos", tags=["demos"])
 @router.get("", response_model=DemoListResponse)
 async def list_demos() -> DemoListResponse:
     return DemoListResponse()
+
+@router.get(
+    "/parse-runs/{parse_run_id}/bomb-rounds",
+    response_model=DemoBombRoundStatsResponse,
+)
+async def get_demo_bomb_rounds(
+        parse_run_id: UUID,
+        session: AsyncSession = Depends(get_db_session),
+) -> DemoBombRoundStatsResponse:
+    bomb_rounds = await get_demo_bomb_round_stats(
+        session=session,
+        parse_run_id=parse_run_id,
+    )
+
+    return DemoBombRoundStatsResponse(
+        parse_run_id=parse_run_id,
+        items=[
+            DemoBombRoundStats(
+                round_number=bomb_round.round_number,
+                planter_name=bomb_round.planter_name,
+                planter_team_name=bomb_round.planter_team_name,
+                defuser_name=bomb_round.defuser_name,
+                defuser_team_name=bomb_round.defuser_team_name,
+                outcome=bomb_round.outcome,
+                plant_tick=bomb_round.plant_tick,
+                defuse_tick=bomb_round.defuse_tick,
+                explosion_tick=bomb_round.explosion_tick,
+            )
+            for bomb_round in bomb_rounds
+        ],
+        total=len(bomb_rounds),
+    )
 
 
 @router.post("/upload", response_model=DemoUploadResponse)
@@ -98,6 +133,7 @@ async def analyze_demo_basic_stats_endpoint(
         demo_file_path=str(stats.demo_file_path),
         rounds_count=stats.rounds,
         players=stats.players,
+        bomb_rounds=stats.bomb_rounds,
     )
 
     return DemoBasicStatsAnalyzeResponse(
@@ -113,6 +149,20 @@ async def analyze_demo_basic_stats_endpoint(
                 average_damage_per_round=player.average_damage_per_round,
             )
             for player in stats.players
+        ],
+        bomb_rounds=[
+            DemoBombRoundStats(
+                round_number=bomb_round.round_number,
+                planter_name=bomb_round.planter_name,
+                planter_team_name=bomb_round.planter_team_name,
+                defuser_name=bomb_round.defuser_name,
+                defuser_team_name=bomb_round.defuser_team_name,
+                outcome=bomb_round.outcome,
+                plant_tick=bomb_round.plant_tick,
+                defuse_tick=bomb_round.defuse_tick,
+                explosion_tick=bomb_round.explosion_tick,
+            )
+            for bomb_round in stats.bomb_rounds
         ],
         status="analyzed",
     )

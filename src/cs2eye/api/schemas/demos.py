@@ -51,6 +51,21 @@ class DemoPlayerDamageStats(BaseModel):
     rounds: int
     average_damage_per_round: float
 
+class DemoBombRoundStats(BaseModel):
+    round_number: int
+    planter_name: str | None
+    planter_team_name: str | None
+    defuser_name: str | None
+    defuser_team_name: str | None
+    outcome: str
+    plant_tick: int | None
+    defuse_tick: int | None
+    explosion_tick: int | None
+
+class DemoBombRoundStatsResponse(BaseModel):
+    parse_run_id: UUID
+    items: list[DemoBombRoundStats]
+    total: int
 
 class DemoBasicStatsAnalyzeResponse(BaseModel):
     parse_run_id: UUID
@@ -58,3 +73,4 @@ class DemoBasicStatsAnalyzeResponse(BaseModel):
     rounds: int
     players: list[DemoPlayerDamageStats]
     status: str
+    bomb_rounds: list[DemoBombRoundStats]
