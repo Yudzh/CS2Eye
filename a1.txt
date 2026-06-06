@@ -1,0 +1,36 @@
+{
+  "artifact_id": "c425e8c3-3d10-4148-85f8-e0f58d98654f",
+  "stored_filename": "c425e8c3-3d10-4148-85f8-e0f58d98654f__cs-asia-championships-2026-falcons-vs-mouz-bo3--bPrjLQ2TP-mMaeM2Zy1DS.rar",
+  "artifact_type": "archive",
+  "prepared_dir": "storage/demos/prepared/c425e8c3-3d10-4148-85f8-e0f58d98654f",
+  "demo_files": [
+    {
+      "demo_file_path": "storage/demos/prepared/c425e8c3-3d10-4148-85f8-e0f58d98654f/falcons-vs-mouz-m1-mirage.dem",
+      "file_name": "falcons-vs-mouz-m1-mirage.dem",
+      "artifact_id": "c425e8c3-3d10-4148-85f8-e0f58d98654f",
+      "detected_team_a_name": "Falcons",
+      "detected_team_b_name": "Mouz",
+      "detected_map_name": "de_mirage",
+      "metadata_detected_from_filename": true
+    },
+    {
+      "demo_file_path": "storage/demos/prepared/c425e8c3-3d10-4148-85f8-e0f58d98654f/falcons-vs-mouz-m2-dust2.dem",
+      "file_name": "falcons-vs-mouz-m2-dust2.dem",
+      "artifact_id": "c425e8c3-3d10-4148-85f8-e0f58d98654f",
+      "detected_team_a_name": "Falcons",
+      "detected_team_b_name": "Mouz",
+      "detected_map_name": "de_dust2",
+      "metadata_detected_from_filename": true
+    },
+    {
+      "demo_file_path": "storage/demos/prepared/c425e8c3-3d10-4148-85f8-e0f58d98654f/falcons-vs-mouz-m3-nuke.dem",
+      "file_name": "falcons-vs-mouz-m3-nuke.dem",
+      "artifact_id": "c425e8c3-3d10-4148-85f8-e0f58d98654f",
+      "detected_team_a_name": "Falcons",
+      "detected_team_b_name": "Mouz",
+      "detected_map_name": "de_nuke",
+      "metadata_detected_from_filename": true
+    }
+  ],
+  "status": "prepared"
+}

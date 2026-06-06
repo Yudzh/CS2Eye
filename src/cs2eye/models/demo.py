@@ -1,7 +1,7 @@
+import datetime
 import uuid
-from datetime import datetime
 
-from sqlalchemy import Text, String, Integer, DateTime, func, ForeignKey, Float
+from sqlalchemy import Text, String, Integer, DateTime, func, ForeignKey, Date
 from sqlalchemy.dialects.postgresql.base import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,10 +18,50 @@ class DemoParseRun(Base):
         default=uuid.uuid4,
     )
 
-    # Путь к файлу
+    artifact_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True,
+    )
+
     demo_file_path: Mapped[str] = mapped_column(
         Text,
-        nullable=False
+        nullable=False,
+    )
+
+    demo_file_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    tournament_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    match_date: Mapped[datetime.date | None] = mapped_column(
+        Date,
+        nullable=True,
+        index=True,
+    )
+
+    map_name: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+
+    team_a_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    team_b_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
     )
 
     # Название парсера
@@ -47,62 +87,16 @@ class DemoParseRun(Base):
         nullable=True,
     )
 
-    started_at: Mapped[datetime] = mapped_column(
+    started_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now()
     )
 
-    finished_at: Mapped[datetime | None] = mapped_column(
+    finished_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
 
-class DemoPlayerDamageStat(Base):
-    __tablename__ = "demo_player_damage_stats"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-
-    parse_run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("demo_parse_runs.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    player_name: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-    )
-
-    team_name: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
-
-    total_damage: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-    )
-
-    rounds_count: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-    )
-
-    average_damage_per_round: Mapped[float] = mapped_column(
-        Float,
-        nullable=False,
-    )
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
 
 class DemoBombRoundStat(Base):
     __tablename__ = "demo_bomb_round_stats"

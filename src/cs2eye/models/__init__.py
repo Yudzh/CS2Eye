@@ -1,7 +1,6 @@
-from cs2eye.models.demo import DemoParseRun, DemoPlayerDamageStat, DemoBombRoundStat
+from cs2eye.models.demo import DemoParseRun, DemoBombRoundStat
 
 __all__ = [
     "DemoParseRun",
-    "DemoPlayerDamageStat",
     "DemoBombRoundStat",
 ]

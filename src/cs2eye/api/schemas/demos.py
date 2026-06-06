@@ -30,26 +30,29 @@ class HltvDemoResolveResponse(HltvDemoResolveRequest):
 class DemoArtifactPrepareRequest(BaseModel):
     stored_filename: str
 
+class PreparedDemoFile(BaseModel):
+    demo_file_path: str
+    file_name: str
+    artifact_id: str | None
+    detected_team_a_name: str | None
+    detected_team_b_name: str | None
+    detected_map_name: str | None
+    metadata_detected_from_filename: bool
 
 class DemoArtifactPrepareResponse(BaseModel):
     artifact_id: str
     stored_filename: str
     artifact_type: str
     prepared_dir: str
-    demo_files: list[str]
+    demo_files: list[PreparedDemoFile]
     status: str
 
 
 class DemoBasicStatsAnalyzeRequest(BaseModel):
     demo_file_path: str
-
-
-class DemoPlayerDamageStats(BaseModel):
-    player_name: str
-    team_name: str | None
-    total_damage: int
-    rounds: int
-    average_damage_per_round: float
+    map_name: str | None = None
+    team_a_name: str | None = None
+    team_b_name: str | None = None
 
 class DemoBombRoundStats(BaseModel):
     round_number: int
@@ -70,7 +73,29 @@ class DemoBombRoundStatsResponse(BaseModel):
 class DemoBasicStatsAnalyzeResponse(BaseModel):
     parse_run_id: UUID
     demo_file_path: str
+    map_name: str | None
+    team_a_name: str | None
+    team_b_name: str | None
     rounds: int
-    players: list[DemoPlayerDamageStats]
     status: str
     bomb_rounds: list[DemoBombRoundStats]
+
+class DemoBombAnalysisMeeting(BaseModel):
+    parse_run_id: UUID
+    demo_file_path: str
+    map_name: str | None
+    team_a_name: str | None
+    team_b_name: str | None
+    rounds_count: int | None
+    exploded_bombs: int
+    defused_bombs: int
+
+
+class DemoBombAnalysisResponse(BaseModel):
+    map_name: str
+    team_a_name: str | None
+    team_b_name: str | None
+    matches_count: int
+    average_exploded_bombs_per_map: float
+    average_defused_bombs_per_map: float
+    meetings: list[DemoBombAnalysisMeeting]

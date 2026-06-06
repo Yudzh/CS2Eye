@@ -4,42 +4,30 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cs2eye.models.demo import DemoParseRun, DemoPlayerDamageStat, DemoBombRoundStat
-from cs2eye.services.demo_basic_stats_analyzer import PlayerDamageStats, BombRoundStats
+from cs2eye.models.demo import DemoParseRun, DemoBombRoundStat
+from cs2eye.services.demo_basic_stats_analyzer import BombRoundStats
 
 
 async def create_demo_parse_run(
         session: AsyncSession,
         demo_file_path: str,
+        map_name: str | None = None,
+        team_a_name: str | None = None,
+        team_b_name: str | None = None,
         parser_name: str = "demoparser2",
 ) -> DemoParseRun:
     parse_run = DemoParseRun(
         demo_file_path=demo_file_path,
         parser_name=parser_name,
+        map_name=map_name,
+        team_a_name=team_a_name,
+        team_b_name=team_b_name,
         status="running",
         rounds_count=None,
         error_message=None,
     )
 
     session.add(parse_run)
-    await session.commit()
-    await session.refresh(parse_run)
-
-    return parse_run
-
-
-async def mark_demo_parse_run_success(
-        session: AsyncSession,
-        parse_run: DemoParseRun,
-        demo_file_path: str,
-        rounds_count: int,
-) -> DemoParseRun:
-    parse_run.demo_file_path = demo_file_path
-    parse_run.status = "success"
-    parse_run.rounds_count = rounds_count
-    parse_run.error_message = None
-    parse_run.finished_at = datetime.now(timezone.utc)
-
     await session.commit()
     await session.refresh(parse_run)
 
@@ -61,12 +49,11 @@ async def mark_demo_parse_run_failed(
     return parse_run
 
 
-async def mark_demo_parse_run_success_with_player_damage_stats(
+async def mark_demo_parse_run_success(
         session: AsyncSession,
         parse_run: DemoParseRun,
         demo_file_path: str,
         rounds_count: int,
-        players: list[PlayerDamageStats],
         bomb_rounds: list[BombRoundStats],
 ) -> DemoParseRun:
     parse_run.demo_file_path = demo_file_path
@@ -74,18 +61,6 @@ async def mark_demo_parse_run_success_with_player_damage_stats(
     parse_run.rounds_count = rounds_count
     parse_run.error_message = None
     parse_run.finished_at = datetime.now(timezone.utc)
-
-    player_damage_rows = [
-        DemoPlayerDamageStat(
-            parse_run_id=parse_run.id,
-            player_name=player.player_name,
-            team_name=player.team_name,
-            total_damage=player.total_damage,
-            rounds_count=player.rounds,
-            average_damage_per_round=player.average_damage_per_round,
-        )
-        for player in players
-    ]
 
     bomb_round_rows = [
         DemoBombRoundStat(
@@ -103,7 +78,6 @@ async def mark_demo_parse_run_success_with_player_damage_stats(
         for bomb_round in bomb_rounds
     ]
 
-    session.add_all(player_damage_rows)
     session.add_all(bomb_round_rows)
 
     await session.commit()
