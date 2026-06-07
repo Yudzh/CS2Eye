@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from uuid import UUID
 
 from sqlalchemy import select
@@ -11,6 +11,8 @@ from cs2eye.services.demo_basic_stats_analyzer import BombRoundStats
 async def create_demo_parse_run(
         session: AsyncSession,
         demo_file_path: str,
+        tournament_name: str | None = None,
+        match_date: date | None = None,
         map_name: str | None = None,
         team_a_name: str | None = None,
         team_b_name: str | None = None,
@@ -18,6 +20,8 @@ async def create_demo_parse_run(
 ) -> DemoParseRun:
     parse_run = DemoParseRun(
         demo_file_path=demo_file_path,
+        tournament_name=tournament_name,
+        match_date=match_date,
         parser_name=parser_name,
         map_name=map_name,
         team_a_name=team_a_name,

@@ -1,34 +1,34 @@
 {
-  "artifact_id": "c425e8c3-3d10-4148-85f8-e0f58d98654f",
-  "stored_filename": "c425e8c3-3d10-4148-85f8-e0f58d98654f__cs-asia-championships-2026-falcons-vs-mouz-bo3--bPrjLQ2TP-mMaeM2Zy1DS.rar",
+  "artifact_id": "41b91669-7270-4ff5-b2f2-16a28a8f601f",
+  "stored_filename": "41b91669-7270-4ff5-b2f2-16a28a8f601f__pgl-cluj-napoca-2026-aurora-vs-pain-bo3-h-pKFfaoyhUKz65nrWaW2A.rar",
   "artifact_type": "archive",
-  "prepared_dir": "storage/demos/prepared/c425e8c3-3d10-4148-85f8-e0f58d98654f",
+  "prepared_dir": "storage/demos/prepared/41b91669-7270-4ff5-b2f2-16a28a8f601f",
   "demo_files": [
     {
-      "demo_file_path": "storage/demos/prepared/c425e8c3-3d10-4148-85f8-e0f58d98654f/falcons-vs-mouz-m1-mirage.dem",
-      "file_name": "falcons-vs-mouz-m1-mirage.dem",
-      "artifact_id": "c425e8c3-3d10-4148-85f8-e0f58d98654f",
-      "detected_team_a_name": "Falcons",
-      "detected_team_b_name": "Mouz",
-      "detected_map_name": "de_mirage",
-      "metadata_detected_from_filename": true
-    },
-    {
-      "demo_file_path": "storage/demos/prepared/c425e8c3-3d10-4148-85f8-e0f58d98654f/falcons-vs-mouz-m2-dust2.dem",
-      "file_name": "falcons-vs-mouz-m2-dust2.dem",
-      "artifact_id": "c425e8c3-3d10-4148-85f8-e0f58d98654f",
-      "detected_team_a_name": "Falcons",
-      "detected_team_b_name": "Mouz",
-      "detected_map_name": "de_dust2",
-      "metadata_detected_from_filename": true
-    },
-    {
-      "demo_file_path": "storage/demos/prepared/c425e8c3-3d10-4148-85f8-e0f58d98654f/falcons-vs-mouz-m3-nuke.dem",
-      "file_name": "falcons-vs-mouz-m3-nuke.dem",
-      "artifact_id": "c425e8c3-3d10-4148-85f8-e0f58d98654f",
-      "detected_team_a_name": "Falcons",
-      "detected_team_b_name": "Mouz",
+      "demo_file_path": "storage/demos/prepared/41b91669-7270-4ff5-b2f2-16a28a8f601f/aurora-vs-pain-m1-nuke.dem",
+      "file_name": "aurora-vs-pain-m1-nuke.dem",
+      "artifact_id": "41b91669-7270-4ff5-b2f2-16a28a8f601f",
+      "detected_team_a_name": "Aurora",
+      "detected_team_b_name": "Pain",
       "detected_map_name": "de_nuke",
+      "metadata_detected_from_filename": true
+    },
+    {
+      "demo_file_path": "storage/demos/prepared/41b91669-7270-4ff5-b2f2-16a28a8f601f/aurora-vs-pain-m2-anubis.dem",
+      "file_name": "aurora-vs-pain-m2-anubis.dem",
+      "artifact_id": "41b91669-7270-4ff5-b2f2-16a28a8f601f",
+      "detected_team_a_name": "Aurora",
+      "detected_team_b_name": "Pain",
+      "detected_map_name": "de_anubis",
+      "metadata_detected_from_filename": true
+    },
+    {
+      "demo_file_path": "storage/demos/prepared/41b91669-7270-4ff5-b2f2-16a28a8f601f/aurora-vs-pain-m3-dust2.dem",
+      "file_name": "aurora-vs-pain-m3-dust2.dem",
+      "artifact_id": "41b91669-7270-4ff5-b2f2-16a28a8f601f",
+      "detected_team_a_name": "Aurora",
+      "detected_team_b_name": "Pain",
+      "detected_map_name": "de_dust2",
       "metadata_detected_from_filename": true
     }
   ],

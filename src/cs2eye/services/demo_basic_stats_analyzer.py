@@ -234,13 +234,36 @@ def _get_event_tick(row: dict) -> int | None:
 
 
 def _event_rows_without_warmup(event_df) -> list[dict]:
-    if event_df is None or event_df.empty:
+    if event_df is None:
         return []
 
-    if "is_warmup_period" in event_df.columns:
+    if isinstance(event_df, list):
+        rows: list[dict] = []
+
+        for row in event_df:
+            if not isinstance(row, dict):
+                continue
+
+            if row.get("is_warmup_period") is True:
+                continue
+
+            rows.append(row)
+
+        return rows
+
+    if hasattr(event_df, "empty") and event_df.empty:
+        return []
+
+    if hasattr(event_df, "is_empty") and event_df.is_empty():
+        return []
+
+    if hasattr(event_df, "columns") and "is_warmup_period" in event_df.columns:
         event_df = event_df[event_df["is_warmup_period"] == False]
 
-    return event_df.to_dict(orient="records")
+    if hasattr(event_df, "to_dict"):
+        return event_df.to_dict(orient="records")
+
+    return []
 
 
 def _analyze_bomb_rounds(parser: DemoParser) -> list[BombRoundStats]:

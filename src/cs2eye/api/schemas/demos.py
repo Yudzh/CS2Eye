@@ -1,3 +1,4 @@
+from datetime import date
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -50,6 +51,10 @@ class DemoArtifactPrepareResponse(BaseModel):
 
 class DemoBasicStatsAnalyzeRequest(BaseModel):
     demo_file_path: str
+
+    tournament_name: str | None = None
+    match_date: date | None = None
+
     map_name: str | None = None
     team_a_name: str | None = None
     team_b_name: str | None = None

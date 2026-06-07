@@ -1,0 +1,30 @@
+CS Asia Championships 2026
+IEM Atlanta 2026
+PGL Astana 2026
+BLAST Rivals Spring 2026
+IEM Rio 2026
+PGL Bucharest 2026
+BLAST Open Spring 2026
+ESL Pro League Season 23
+PGL Cluj-Napoca 2026
+IEM Kraków 2026
+
+
+
+IMPORTANT_TOURNAMENTS_2026 = {
+    "IEM Cologne Major 2026",
+    "PGL Major Singapore 2026",
+    "IEM Kraków 2026",
+    "BLAST Open Spring 2026",
+    "IEM Rio 2026",
+    "PGL Astana 2026",
+    "CS Asia Championships 2026",
+    "Esports World Cup 2026",
+    "BLAST Open Fall 2026",
+    "ESL Pro League Season 23",
+    "ESL Pro League Season 24",
+    "IEM Beijing 2026",
+    "PGL Fall 2026",
+    "BLAST Rivals Spring 2026",
+    "BLAST Rivals Fall 2026",
+}

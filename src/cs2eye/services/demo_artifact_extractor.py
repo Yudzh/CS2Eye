@@ -1,3 +1,4 @@
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
@@ -101,23 +102,41 @@ def _extract_zip_archive(archive_path: Path, prepared_dir: Path) -> None:
 
 def _extract_rar_archive(archive_path: Path, prepared_dir: Path) -> None:
     try:
-        with rarfile.RarFile(archive_path) as archive:
-            for member in archive.infolist():
-                if member.isdir():
-                    continue
+        list_result = subprocess.run(
+            ["bsdtar", "-tf", str(archive_path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
 
-                target_path = _safe_output_path(prepared_dir, member.filename)
-                target_path.parent.mkdir(parents=True, exist_ok=True)
+        for member_name in list_result.stdout.splitlines():
+            if not member_name.strip():
+                continue
 
-                with archive.open(member) as source_file:
-                    with target_path.open("wb") as output_file:
-                        shutil.copyfileobj(source_file, output_file)
-    except rarfile.RarCannotExec as error:
+            _safe_output_path(prepared_dir, member_name)
+
+        subprocess.run(
+            [
+                "bsdtar",
+                "-xf",
+                str(archive_path),
+                "-C",
+                str(prepared_dir),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+    except FileNotFoundError as error:
         raise DemoArtifactExtractionError(
-            "Cannot extract .rar archive: install 7-Zip, unrar, unar, or bsdtar"
+            "Cannot extract .rar archive: bsdtar is not installed in api container"
         ) from error
-    except rarfile.BadRarFile as error:
-        raise DemoArtifactExtractionError("Invalid .rar archive") from error
+
+    except subprocess.CalledProcessError as error:
+        raise DemoArtifactExtractionError(
+            f"Invalid .rar archive or extraction failed: {error.stderr.strip()}"
+        ) from error
 
 
 def _extract_7z_archive(archive_path: Path, prepared_dir: Path) -> None:

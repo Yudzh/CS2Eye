@@ -166,6 +166,8 @@ async def analyze_demo_basic_stats_endpoint(
     parse_run = await create_demo_parse_run(
         session=session,
         demo_file_path=payload.demo_file_path,
+        tournament_name=payload.tournament_name,
+        match_date=payload.match_date,
         map_name=payload.map_name,
         team_a_name=payload.team_a_name,
         team_b_name=payload.team_b_name,
