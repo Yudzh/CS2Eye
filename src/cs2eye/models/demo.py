@@ -52,6 +52,12 @@ class DemoParseRun(Base):
         index=True,
     )
 
+    map_number: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        index=True,
+    )
+
     team_a_name: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,

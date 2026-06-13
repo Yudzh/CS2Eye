@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, date
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, or_, and_, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.models.demo import DemoParseRun, DemoBombRoundStat
@@ -11,15 +11,20 @@ from cs2eye.services.demo_basic_stats_analyzer import BombRoundStats
 async def create_demo_parse_run(
         session: AsyncSession,
         demo_file_path: str,
+        artifact_id: str | None = None,
+        demo_file_name: str | None = None,
         tournament_name: str | None = None,
         match_date: date | None = None,
         map_name: str | None = None,
         team_a_name: str | None = None,
         team_b_name: str | None = None,
         parser_name: str = "demoparser2",
+        map_number: int | None = None,
 ) -> DemoParseRun:
     parse_run = DemoParseRun(
         demo_file_path=demo_file_path,
+        artifact_id=artifact_id,
+        demo_file_name=demo_file_name,
         tournament_name=tournament_name,
         match_date=match_date,
         parser_name=parser_name,
@@ -29,6 +34,7 @@ async def create_demo_parse_run(
         status="running",
         rounds_count=None,
         error_message=None,
+        map_number=map_number,
     )
 
     session.add(parse_run)
@@ -101,3 +107,48 @@ async def get_demo_bomb_round_stats(
     )
 
     return list(result.scalars().all())
+
+
+async def clear_demo_parse_data(session: AsyncSession) -> None:
+    await session.execute(
+        text("TRUNCATE TABLE demo_parse_runs CASCADE")
+    )
+    await session.commit()
+
+
+async def delete_existing_demo_parse_runs(
+        *,
+        session: AsyncSession,
+        tournament_name: str,
+        match_date: date,
+        map_name: str,
+        map_number: int | None,
+        team_a_name: str,
+        team_b_name: str,
+) -> None:
+    query = (
+        delete(DemoParseRun)
+        .where(DemoParseRun.tournament_name == tournament_name)
+        .where(DemoParseRun.match_date == match_date)
+        .where(DemoParseRun.map_name == map_name)
+        .where(
+            or_(
+                and_(
+                    DemoParseRun.team_a_name == team_a_name,
+                    DemoParseRun.team_b_name == team_b_name,
+                ),
+                and_(
+                    DemoParseRun.team_a_name == team_b_name,
+                    DemoParseRun.team_b_name == team_a_name,
+                ),
+            )
+        )
+    )
+
+    if map_number is None:
+        query = query.where(DemoParseRun.map_number.is_(None))
+    else:
+        query = query.where(DemoParseRun.map_number == map_number)
+
+    await session.execute(query)
+    await session.commit()

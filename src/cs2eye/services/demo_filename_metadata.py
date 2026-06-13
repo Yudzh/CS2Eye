@@ -1,12 +1,13 @@
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import UUID
 
 
 PREPARED_DEMOS_DIR = Path("storage/demos/prepared")
 
 DEMO_FILENAME_PATTERN = re.compile(
-    r"^(?P<team_a>.+)-vs-(?P<team_b>.+)-m(?P<map_number>\d+)-(?P<map_name>[a-zA-Z0-9_]+)$"
+    r"^(?P<team_a>.+?)-vs-(?P<team_b>.+?)(?:-m(?P<map_number>\d+))?-(?P<map_name>[a-zA-Z0-9_]+)$"
 )
 
 
@@ -17,6 +18,7 @@ class PreparedDemoFileMetadata:
     artifact_id: str | None
     detected_team_a_name: str | None
     detected_team_b_name: str | None
+    detected_map_number: int | None
     detected_map_name: str | None
     metadata_detected_from_filename: bool
 
@@ -42,14 +44,21 @@ def _normalize_map_name(value: str) -> str:
 
 def _extract_artifact_id(demo_file_path: Path) -> str | None:
     try:
-        relative_path = demo_file_path.relative_to(PREPARED_DEMOS_DIR)
+        relative_path = demo_file_path.resolve().relative_to(
+            PREPARED_DEMOS_DIR.resolve()
+        )
     except ValueError:
         return None
 
-    if not relative_path.parts:
-        return None
+    for part in relative_path.parts:
+        try:
+            UUID(part)
+        except ValueError:
+            continue
 
-    return relative_path.parts[0]
+        return part
+
+    return None
 
 
 def build_prepared_demo_file_metadata(
@@ -67,9 +76,12 @@ def build_prepared_demo_file_metadata(
             artifact_id=_extract_artifact_id(demo_file_path),
             detected_team_a_name=None,
             detected_team_b_name=None,
+            detected_map_number=None,
             detected_map_name=None,
             metadata_detected_from_filename=False,
         )
+
+    raw_map_number = match.group("map_number")
 
     return PreparedDemoFileMetadata(
         demo_file_path=demo_file_path,
@@ -77,6 +89,7 @@ def build_prepared_demo_file_metadata(
         artifact_id=_extract_artifact_id(demo_file_path),
         detected_team_a_name=_humanize_team_slug(match.group("team_a")),
         detected_team_b_name=_humanize_team_slug(match.group("team_b")),
+        detected_map_number=int(raw_map_number) if raw_map_number else None,
         detected_map_name=_normalize_map_name(match.group("map_name")),
         metadata_detected_from_filename=True,
     )

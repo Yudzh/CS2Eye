@@ -1,13 +1,11 @@
+import shutil
 import subprocess
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
-import shutil
-import zipfile
 
 import py7zr
-import rarfile
-
 
 RAW_DEMOS_DIR = Path("storage/demos/raw")
 PREPARED_DEMOS_DIR = Path("storage/demos/prepared")
@@ -29,7 +27,7 @@ class PreparedDemoArtifact:
 
 
 def _get_artifact_id_from_stored_filename(stored_filename: str) -> str:
-    artifact_id = stored_filename.split("__", 1)[0]
+    artifact_id = Path(stored_filename).name.split("__", 1)[0]
 
     try:
         UUID(artifact_id)
@@ -41,11 +39,25 @@ def _get_artifact_id_from_stored_filename(stored_filename: str) -> str:
     return artifact_id
 
 
-def _resolve_raw_artifact_path(stored_filename: str) -> Path:
-    if Path(stored_filename).name != stored_filename:
-        raise DemoArtifactExtractionError("Stored filename must not contain path parts")
+def _safe_relative_stored_path(stored_filename: str) -> Path:
+    relative_path = Path(stored_filename)
 
-    artifact_path = RAW_DEMOS_DIR / stored_filename
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise DemoArtifactExtractionError("Stored filename contains unsafe path parts")
+
+    return relative_path
+
+
+def _resolve_raw_artifact_path(stored_filename: str) -> Path:
+    relative_path = _safe_relative_stored_path(stored_filename)
+
+    artifact_path = (RAW_DEMOS_DIR / relative_path).resolve()
+    raw_root = RAW_DEMOS_DIR.resolve()
+
+    try:
+        artifact_path.relative_to(raw_root)
+    except ValueError as error:
+        raise DemoArtifactExtractionError("Stored filename points outside raw storage") from error
 
     if not artifact_path.exists():
         raise DemoArtifactExtractionError("Uploaded demo artifact was not found")
@@ -54,6 +66,36 @@ def _resolve_raw_artifact_path(stored_filename: str) -> Path:
         raise DemoArtifactExtractionError("Uploaded demo artifact is not a file")
 
     return artifact_path
+
+
+def _extract_nested_archives(prepared_dir: Path) -> None:
+    processed_archives: set[Path] = set()
+
+    while True:
+        archive_files = sorted(
+            path for path in prepared_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in ARCHIVE_EXTENSIONS
+        )
+
+        new_archives = [
+            archive_path
+            for archive_path in archive_files
+            if archive_path.resolve() not in processed_archives
+        ]
+
+        if not new_archives:
+            return
+
+        for archive_path in new_archives:
+            processed_archives.add(archive_path.resolve())
+
+            nested_output_dir = archive_path.parent / archive_path.stem
+            nested_output_dir.mkdir(parents=True, exist_ok=True)
+
+            _extract_archive(
+                archive_path=archive_path,
+                prepared_dir=nested_output_dir,
+            )
 
 
 def _safe_output_path(output_dir: Path, archive_member_name: str) -> Path:
@@ -180,7 +222,11 @@ def prepare_demo_artifact(stored_filename: str) -> PreparedDemoArtifact:
     artifact_id = _get_artifact_id_from_stored_filename(stored_filename)
 
     extension = artifact_path.suffix.lower()
-    prepared_dir = PREPARED_DEMOS_DIR / artifact_id
+
+    stored_relative_path = _safe_relative_stored_path(stored_filename)
+    prepared_parent_dir = stored_relative_path.parent
+
+    prepared_dir = PREPARED_DEMOS_DIR / prepared_parent_dir / artifact_id
 
     if prepared_dir.exists():
         shutil.rmtree(prepared_dir)
@@ -193,6 +239,7 @@ def prepare_demo_artifact(stored_filename: str) -> PreparedDemoArtifact:
     elif extension in ARCHIVE_EXTENSIONS:
         artifact_type = "archive"
         _extract_archive(artifact_path, prepared_dir)
+        _extract_nested_archives(prepared_dir)
     else:
         raise DemoArtifactExtractionError(
             f"Unsupported demo artifact extension: {extension}"
