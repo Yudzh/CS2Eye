@@ -201,3 +201,79 @@ class DemoLocalPathImportResponse(BaseModel):
 class DemoParseDataClearResponse(BaseModel):
     status: str
     message: str
+
+
+class DemoTeamMapRecentMatch(BaseModel):
+    parse_run_id: UUID
+
+    tournament_name: str | None
+    match_date: date | None
+
+    map_name: str | None
+    team_name: str
+    opponent_name: str | None
+
+    rounds_won: int
+    rounds_lost: int
+    won: bool
+
+
+class DemoTeamMapStatsItem(BaseModel):
+    team_name: str
+    map_name: str | None
+
+    total_matches_on_map: int
+    wins_on_map: int
+    losses_on_map: int
+    win_rate_on_map: float
+
+    rounds_won_total: int
+    rounds_lost_total: int
+    avg_round_diff: float
+    avg_rounds_won_per_map: float
+    avg_rounds_lost_per_map: float
+
+    win_rate_last_5_maps: float
+    win_rate_last_10_maps: float
+    win_rate_last_20_maps: float
+    current_win_streak_on_map: int
+    current_lose_streak_on_map: int
+    last_played_date_on_map: date | None
+    days_since_last_played_map: int | None
+
+    win_rate_30_days: float
+    win_rate_60_days: float
+    win_rate_90_days: float
+    matches_30_days: int
+    matches_60_days: int
+    matches_90_days: int
+
+    ct_rounds_played: int
+    ct_rounds_won: int
+    ct_win_rate: float
+
+    t_rounds_played: int
+    t_rounds_won: int
+    t_win_rate: float
+
+    avg_bomb_plants_per_map: float
+    avg_bomb_explosions_per_map: float
+    avg_bomb_defuses_per_map: float
+
+    map_sample_size_score: float
+    recent_form_score: float
+    map_strength_score: float
+    map_tier: str
+
+    is_strong_map: bool
+    is_weak_map: bool
+    is_permaban_map: bool
+
+    recent_matches: list[DemoTeamMapRecentMatch]
+
+
+class DemoTeamMapStatsResponse(BaseModel):
+    team_name: str | None = None
+    map_name: str | None = None
+    items: list[DemoTeamMapStatsItem]
+    total: int

@@ -170,3 +170,59 @@ class DemoBombRoundStat(Base):
         server_default=func.now(),
         nullable=False,
     )
+
+
+class DemoRoundStat(Base):
+    __tablename__ = "demo_round_stats"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    parse_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("demo_parse_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    round_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    winner_team_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    winner_side: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    ct_team_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    t_team_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    reason: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )

@@ -4,8 +4,8 @@ from uuid import UUID
 from sqlalchemy import select, or_, and_, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cs2eye.models.demo import DemoParseRun, DemoBombRoundStat
-from cs2eye.services.demo_basic_stats_analyzer import BombRoundStats
+from cs2eye.models.demo import DemoParseRun, DemoBombRoundStat, DemoRoundStat
+from cs2eye.services.demo_basic_stats_analyzer import BombRoundStats, RoundStats
 
 
 async def create_demo_parse_run(
@@ -59,12 +59,52 @@ async def mark_demo_parse_run_failed(
     return parse_run
 
 
+def _get_round_side_team_names(
+        *,
+        round_number: int,
+        team_a_name: str | None,
+        team_b_name: str | None,
+) -> tuple[str | None, str | None]:
+    """
+    Возвращает:
+    (ct_team_name, t_team_name)
+
+    Сейчас используем простое правило:
+    - team_a из имени демки начинает за CT
+    - team_b из имени демки начинает за T
+    - после 12 раундов стороны меняются
+
+    Пример:
+    furia-vs-fut-m1-mirage.dem
+
+    team_a = Furia
+    team_b = Fut
+
+    Раунды 1-12:
+    CT = Furia
+    T = Fut
+
+    Раунды 13-24:
+    CT = Fut
+    T = Furia
+    """
+
+    if team_a_name is None or team_b_name is None:
+        return None, None
+
+    if round_number <= 12:
+        return team_a_name, team_b_name
+
+    return team_b_name, team_a_name
+
+
 async def mark_demo_parse_run_success(
         session: AsyncSession,
         parse_run: DemoParseRun,
         demo_file_path: str,
         rounds_count: int,
         bomb_rounds: list[BombRoundStats],
+        round_stats: list[RoundStats] | None = None,
 ) -> DemoParseRun:
     parse_run.demo_file_path = demo_file_path
     parse_run.status = "success"
@@ -89,6 +129,38 @@ async def mark_demo_parse_run_success(
     ]
 
     session.add_all(bomb_round_rows)
+
+    round_rows = []
+
+    for round_stat in (round_stats or []):
+        ct_team_name, t_team_name = _get_round_side_team_names(
+            round_number=round_stat.round_number,
+            team_a_name=parse_run.team_a_name,
+            team_b_name=parse_run.team_b_name,
+        )
+
+        winner_team_name = None
+
+        if round_stat.winner_side == "CT":
+            winner_team_name = ct_team_name
+        elif round_stat.winner_side == "T":
+            winner_team_name = t_team_name
+
+        round_rows.append(
+            DemoRoundStat(
+                parse_run_id=parse_run.id,
+                round_number=round_stat.round_number,
+                winner_team_name=winner_team_name,
+                winner_side=round_stat.winner_side,
+                ct_team_name=ct_team_name,
+                t_team_name=t_team_name,
+                reason=round_stat.reason,
+            )
+        )
+
+    session.add_all(round_rows)
+
+    session.add_all(round_rows)
 
     await session.commit()
     await session.refresh(parse_run)

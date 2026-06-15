@@ -11,7 +11,8 @@ from cs2eye.api.schemas.demos import DemoListResponse, DemoUploadResponse, DemoA
     DemoArtifactPrepareRequest, DemoBasicStatsAnalyzeResponse, DemoBasicStatsAnalyzeRequest, \
     DemoBombRoundStats, DemoBombRoundStatsResponse, DemoBombAnalysisResponse, DemoBombAnalysisMeeting, PreparedDemoFile, \
     DemoPreparedPathAnalyzeRequest, DemoUploadAnalyzeItem, DemoUploadAnalyzeResponse, DemoParseDataClearResponse, \
-    DemoLocalPathImportResponse, DemoLocalPathImportRequest, DemoLocalPathImportItem, DemoBombAnalysisMap
+    DemoLocalPathImportResponse, DemoLocalPathImportRequest, DemoLocalPathImportItem, DemoBombAnalysisMap, \
+    DemoTeamMapStatsResponse, DemoTeamMapStatsItem, DemoTeamMapRecentMatch
 from cs2eye.db.session import get_db_session
 from cs2eye.services.demo_artifact_extractor import prepare_demo_artifact, DemoArtifactExtractionError
 from cs2eye.services.demo_artifact_storage import save_uploaded_demo_artifact, DemoArtifactStorageError
@@ -20,6 +21,7 @@ from cs2eye.services.demo_bomb_analysis_service import get_bomb_analysis
 from cs2eye.services.demo_filename_metadata import build_prepared_demo_file_metadata
 from cs2eye.services.demo_parse_run_service import create_demo_parse_run, mark_demo_parse_run_failed, \
     mark_demo_parse_run_success, get_demo_bomb_round_stats, clear_demo_parse_data, delete_existing_demo_parse_runs
+from cs2eye.services.demo_team_map_stats_service import get_team_map_stats
 
 router = APIRouter(prefix="/demos", tags=["demos"])
 
@@ -121,6 +123,7 @@ async def _analyze_prepared_demo_file(
         demo_file_path=str(stats.demo_file_path),
         rounds_count=stats.rounds,
         bomb_rounds=stats.bomb_rounds,
+        round_stats=stats.round_stats,
     )
 
     return DemoBasicStatsAnalyzeResponse(
@@ -198,6 +201,7 @@ async def _analyze_demo_file_and_save_bomb_stats(
         demo_file_path=str(stats.demo_file_path),
         rounds_count=stats.rounds,
         bomb_rounds=stats.bomb_rounds,
+        round_stats=stats.round_stats,
     )
 
     return DemoBasicStatsAnalyzeResponse(
@@ -325,6 +329,98 @@ async def get_demo_bomb_analysis_endpoint(
             for meeting in analysis.recent_meetings
         ],
     )
+
+
+@router.get(
+    "/analysis/team-maps",
+    response_model=DemoTeamMapStatsResponse,
+)
+async def get_demo_team_map_stats_endpoint(
+        team_name: str | None = None,
+        map_name: str | None = None,
+        session: AsyncSession = Depends(get_db_session),
+) -> DemoTeamMapStatsResponse:
+    analysis = await get_team_map_stats(
+        session=session,
+        team_name=team_name,
+        map_name=map_name,
+    )
+
+    return DemoTeamMapStatsResponse(
+        team_name=analysis.team_name,
+        map_name=analysis.map_name,
+        items=[
+            DemoTeamMapStatsItem(
+                team_name=item.team_name,
+                map_name=item.map_name,
+
+                total_matches_on_map=item.total_matches_on_map,
+                wins_on_map=item.wins_on_map,
+                losses_on_map=item.losses_on_map,
+                win_rate_on_map=item.win_rate_on_map,
+
+                rounds_won_total=item.rounds_won_total,
+                rounds_lost_total=item.rounds_lost_total,
+                avg_round_diff=item.avg_round_diff,
+                avg_rounds_won_per_map=item.avg_rounds_won_per_map,
+                avg_rounds_lost_per_map=item.avg_rounds_lost_per_map,
+
+                win_rate_last_5_maps=item.win_rate_last_5_maps,
+                win_rate_last_10_maps=item.win_rate_last_10_maps,
+                win_rate_last_20_maps=item.win_rate_last_20_maps,
+                current_win_streak_on_map=item.current_win_streak_on_map,
+                current_lose_streak_on_map=item.current_lose_streak_on_map,
+                last_played_date_on_map=item.last_played_date_on_map,
+                days_since_last_played_map=item.days_since_last_played_map,
+
+                win_rate_30_days=item.win_rate_30_days,
+                win_rate_60_days=item.win_rate_60_days,
+                win_rate_90_days=item.win_rate_90_days,
+                matches_30_days=item.matches_30_days,
+                matches_60_days=item.matches_60_days,
+                matches_90_days=item.matches_90_days,
+
+                ct_rounds_played=item.ct_rounds_played,
+                ct_rounds_won=item.ct_rounds_won,
+                ct_win_rate=item.ct_win_rate,
+
+                t_rounds_played=item.t_rounds_played,
+                t_rounds_won=item.t_rounds_won,
+                t_win_rate=item.t_win_rate,
+
+                avg_bomb_plants_per_map=item.avg_bomb_plants_per_map,
+                avg_bomb_explosions_per_map=item.avg_bomb_explosions_per_map,
+                avg_bomb_defuses_per_map=item.avg_bomb_defuses_per_map,
+
+                map_sample_size_score=item.map_sample_size_score,
+                recent_form_score=item.recent_form_score,
+                map_strength_score=item.map_strength_score,
+                map_tier=item.map_tier,
+
+                is_strong_map=item.is_strong_map,
+                is_weak_map=item.is_weak_map,
+                is_permaban_map=item.is_permaban_map,
+
+                recent_matches=[
+                    DemoTeamMapRecentMatch(
+                        parse_run_id=recent_match.parse_run_id,
+                        tournament_name=recent_match.tournament_name,
+                        match_date=recent_match.match_date,
+                        map_name=recent_match.map_name,
+                        team_name=recent_match.team_name,
+                        opponent_name=recent_match.opponent_name,
+                        rounds_won=recent_match.rounds_won,
+                        rounds_lost=recent_match.rounds_lost,
+                        won=recent_match.won,
+                    )
+                    for recent_match in item.recent_matches
+                ],
+            )
+            for item in analysis.items
+        ],
+        total=len(analysis.items),
+    )
+
 
 
 @router.post("/upload/analyze", response_model=DemoUploadAnalyzeResponse)

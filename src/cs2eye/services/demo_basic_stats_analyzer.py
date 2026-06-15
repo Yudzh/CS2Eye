@@ -1,3 +1,4 @@
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,11 +33,21 @@ class BombRoundStats:
     explosion_tick: int | None
 
 @dataclass(frozen=True)
+class RoundStats:
+    round_number: int
+    winner_team_name: str | None
+    winner_side: str | None
+    ct_team_name: str | None
+    t_team_name: str | None
+    reason: str | None
+
+@dataclass(frozen=True)
 class DemoBasicStats:
     demo_file_path: Path
     rounds: int
     players: list[PlayerDamageStats]
     bomb_rounds: list[BombRoundStats]
+    round_stats: list[RoundStats]
 
 
 def _resolve_prepared_demo_path(demo_file_path: str) -> Path:
@@ -136,6 +147,7 @@ def analyze_demo_basic_stats(demo_file_path: str) -> DemoBasicStats:
 
     rounds_count = _count_played_rounds(parser, hurt_df)
     bomb_rounds = _analyze_bomb_rounds(parser)
+    round_stats = _analyze_rounds(parser)
 
     group_columns = ["attacker_name"]
 
@@ -177,6 +189,7 @@ def analyze_demo_basic_stats(demo_file_path: str) -> DemoBasicStats:
         rounds=rounds_count,
         bomb_rounds=bomb_rounds,
         players=players,
+        round_stats=round_stats,
     )
 
 def _safe_parse_event(parser: DemoParser, event_name: str, player: list[str] | None = None, other: list[str] | None = None):
@@ -231,6 +244,156 @@ def _get_event_round_number(row: dict) -> int:
 
 def _get_event_tick(row: dict) -> int | None:
     return _get_optional_int(row, ["tick", "event_tick"])
+
+def _get_optional_string(row: dict, column_names: list[str]) -> str | None:
+    for column_name in column_names:
+        if column_name not in row:
+            continue
+
+        value = _clean_string(row.get(column_name))
+
+        if value is not None:
+            return value
+
+    return None
+
+
+def _normalize_side(value) -> str | None:
+    if value is None:
+        return None
+
+    if value != value:  # NaN check
+        return None
+
+    normalized = str(value).strip().upper()
+
+    if not normalized:
+        return None
+
+    # В CS team_num обычно:
+    # 2 = T
+    # 3 = CT
+    if normalized in {"2", "T", "TERRORIST", "TERRORISTS"}:
+        return "T"
+
+    if normalized in {
+        "3",
+        "CT",
+        "COUNTERTERRORIST",
+        "COUNTERTERRORISTS",
+        "COUNTER_TERRORIST",
+        "COUNTER-TERRORIST",
+    }:
+        return "CT"
+
+    return None
+
+
+def _is_valid_team_name(value: str | None) -> bool:
+    if value is None:
+        return False
+
+    normalized = value.strip().lower()
+
+    if not normalized:
+        return False
+
+    return normalized not in {
+        "t",
+        "ct",
+        "terrorist",
+        "terrorists",
+        "counter-terrorist",
+        "counter-terrorists",
+        "counterterrorist",
+        "counterterrorists",
+        "spectator",
+        "unassigned",
+        "none",
+    }
+
+
+def _collect_round_side_teams(parser: DemoParser) -> dict[int, dict[str, str]]:
+    """
+    Возвращает примерно такую структуру:
+
+    {
+        1: {"CT": "Spirit", "T": "NAVI"},
+        2: {"CT": "Spirit", "T": "NAVI"},
+        13: {"CT": "NAVI", "T": "Spirit"},
+    }
+
+    Берём это не из round_end, потому что round_end часто не содержит названий команд.
+    Берём из событий игроков, где есть team_name + side/team_num.
+    """
+
+    side_team_counters: dict[int, dict[str, Counter[str]]] = defaultdict(
+        lambda: {
+            "CT": Counter(),
+            "T": Counter(),
+        }
+    )
+
+    event_names = [
+        "player_hurt",
+        "player_death",
+        "weapon_fire",
+        "bomb_planted",
+        "bomb_defused",
+    ]
+
+    player_props_variants = [
+        ["team_name", "side"],
+        ["team_name", "team_num"],
+    ]
+
+    for event_name in event_names:
+        for player_props in player_props_variants:
+            event_df = _safe_parse_event(
+                parser,
+                event_name,
+                player=player_props,
+                other=["total_rounds_played", "is_warmup_period"],
+            )
+
+            for row in _event_rows_without_warmup(event_df):
+                round_number = _get_event_round_number(row)
+
+                for prefix in ["user", "attacker", "assister"]:
+                    team_name = _clean_string(row.get(f"{prefix}_team_name"))
+
+                    side = _normalize_side(
+                        row.get(f"{prefix}_side")
+                        or row.get(f"{prefix}_team_num")
+                    )
+
+                    if not _is_valid_team_name(team_name):
+                        continue
+
+                    if side is None:
+                        continue
+
+                    side_team_counters[round_number][side][team_name] += 1
+
+    result: dict[int, dict[str, str]] = {}
+
+    for round_number, side_counters in side_team_counters.items():
+        result[round_number] = {}
+
+        for side, team_counter in side_counters.items():
+            if not team_counter:
+                continue
+
+            result[round_number][side] = team_counter.most_common(1)[0][0]
+
+    return result
+
+
+def _normalize_reason(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    return value.strip().lower() or None
 
 
 def _event_rows_without_warmup(event_df) -> list[dict]:
@@ -355,3 +518,91 @@ def _analyze_bomb_rounds(parser: DemoParser) -> list[BombRoundStats]:
             key=lambda item: item["round_number"],
         )
     ]
+
+
+def _analyze_rounds(parser: DemoParser) -> list[RoundStats]:
+    round_side_teams = _collect_round_side_teams(parser)
+
+    round_end_df = _safe_parse_event(
+        parser,
+        "round_end",
+        other=[
+            "total_rounds_played",
+            "is_warmup_period",
+            "reason",
+            "winner",
+            "winner_side",
+            "winning_side",
+            "winner_team_name",
+            "winning_team_name",
+            "ct_team_name",
+            "t_team_name",
+        ],
+    )
+
+    if round_end_df is None:
+        round_end_df = _safe_parse_event(
+            parser,
+            "round_end",
+            other=[
+                "total_rounds_played",
+                "is_warmup_period",
+                "reason",
+                "winner",
+            ],
+        )
+
+    round_stats: list[RoundStats] = []
+
+    for row in _event_rows_without_warmup(round_end_df):
+        round_number = _get_event_round_number(row)
+
+        side_teams = round_side_teams.get(round_number, {})
+
+        winner_side = _normalize_side(
+            row.get("winner_side")
+            or row.get("winning_side")
+            or row.get("winner")
+        )
+
+        ct_team_name = (
+            _get_optional_string(
+                row,
+                ["ct_team_name", "counterterrorist_team_name"],
+            )
+            or side_teams.get("CT")
+        )
+
+        t_team_name = (
+            _get_optional_string(
+                row,
+                ["t_team_name", "terrorist_team_name"],
+            )
+            or side_teams.get("T")
+        )
+
+        winner_team_name = _get_optional_string(
+            row,
+            ["winner_team_name", "winning_team_name", "team_name"],
+        )
+
+        if winner_team_name is None:
+            if winner_side == "CT":
+                winner_team_name = ct_team_name
+            elif winner_side == "T":
+                winner_team_name = t_team_name
+
+        round_stats.append(
+            RoundStats(
+                round_number=round_number,
+                winner_team_name=winner_team_name,
+                winner_side=winner_side,
+                ct_team_name=ct_team_name,
+                t_team_name=t_team_name,
+                reason=_normalize_reason(
+                    _get_optional_string(row, ["reason"])
+                ),
+            )
+        )
+
+    return sorted(round_stats, key=lambda item: item.round_number)
