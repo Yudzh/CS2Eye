@@ -59,44 +59,90 @@ async def mark_demo_parse_run_failed(
     return parse_run
 
 
-def _get_round_side_team_names(
+def _get_fallback_round_side_team_names(
         *,
         round_number: int,
         team_a_name: str | None,
         team_b_name: str | None,
 ) -> tuple[str | None, str | None]:
     """
-    Возвращает:
-    (ct_team_name, t_team_name)
+    Fallback для случаев, когда parser не смог достать реальные CT/T стороны.
 
-    Сейчас используем простое правило:
-    - team_a из имени демки начинает за CT
-    - team_b из имени демки начинает за T
+    Важно:
+    это НЕ основной источник правды.
+    Основной источник — round_stat.ct_team_name / round_stat.t_team_name,
+    которые пришли из demo parser.
+
+    Здесь остаётся старое предположение:
+    - team_a начинает за CT
+    - team_b начинает за T
     - после 12 раундов стороны меняются
 
-    Пример:
-    furia-vs-fut-m1-mirage.dem
-
-    team_a = Furia
-    team_b = Fut
-
-    Раунды 1-12:
-    CT = Furia
-    T = Fut
-
-    Раунды 13-24:
-    CT = Fut
-    T = Furia
+    Для overtime не угадываем стороны, чтобы не сохранить мусор.
     """
 
     if team_a_name is None or team_b_name is None:
         return None, None
 
-    if round_number <= 12:
+    if 1 <= round_number <= 12:
         return team_a_name, team_b_name
 
-    return team_b_name, team_a_name
+    if 13 <= round_number <= 24:
+        return team_b_name, team_a_name
 
+    return None, None
+
+
+def _resolve_round_side_team_names(
+        *,
+        round_stat: RoundStats,
+        team_a_name: str | None,
+        team_b_name: str | None,
+) -> tuple[str | None, str | None]:
+    """
+    Возвращает реальные CT/T стороны раунда.
+
+    Приоритет:
+    1. Данные из parser: round_stat.ct_team_name / round_stat.t_team_name
+    2. Fallback по team_a/team_b и номеру раунда
+    """
+
+    fallback_ct_team_name, fallback_t_team_name = _get_fallback_round_side_team_names(
+        round_number=round_stat.round_number,
+        team_a_name=team_a_name,
+        team_b_name=team_b_name,
+    )
+
+    ct_team_name = round_stat.ct_team_name or fallback_ct_team_name
+    t_team_name = round_stat.t_team_name or fallback_t_team_name
+
+    return ct_team_name, t_team_name
+
+
+def _resolve_round_winner_team_name(
+        *,
+        round_stat: RoundStats,
+        ct_team_name: str | None,
+        t_team_name: str | None,
+) -> str | None:
+    """
+    Возвращает победившую команду раунда.
+
+    Приоритет:
+    1. winner_team_name из parser
+    2. Если его нет — вычисляем по winner_side и CT/T сторонам
+    """
+
+    if round_stat.winner_team_name:
+        return round_stat.winner_team_name
+
+    if round_stat.winner_side == "CT":
+        return ct_team_name
+
+    if round_stat.winner_side == "T":
+        return t_team_name
+
+    return None
 
 async def mark_demo_parse_run_success(
         session: AsyncSession,
@@ -133,18 +179,17 @@ async def mark_demo_parse_run_success(
     round_rows = []
 
     for round_stat in (round_stats or []):
-        ct_team_name, t_team_name = _get_round_side_team_names(
-            round_number=round_stat.round_number,
+        ct_team_name, t_team_name = _resolve_round_side_team_names(
+            round_stat=round_stat,
             team_a_name=parse_run.team_a_name,
             team_b_name=parse_run.team_b_name,
         )
 
-        winner_team_name = None
-
-        if round_stat.winner_side == "CT":
-            winner_team_name = ct_team_name
-        elif round_stat.winner_side == "T":
-            winner_team_name = t_team_name
+        winner_team_name = _resolve_round_winner_team_name(
+            round_stat=round_stat,
+            ct_team_name=ct_team_name,
+            t_team_name=t_team_name,
+        )
 
         round_rows.append(
             DemoRoundStat(
@@ -157,8 +202,6 @@ async def mark_demo_parse_run_success(
                 reason=round_stat.reason,
             )
         )
-
-    session.add_all(round_rows)
 
     session.add_all(round_rows)
 
@@ -224,3 +267,48 @@ async def delete_existing_demo_parse_runs(
 
     await session.execute(query)
     await session.commit()
+
+async def get_demo_round_stats(
+        session: AsyncSession,
+        parse_run_id: UUID,
+) -> list[DemoRoundStat]:
+    result = await session.execute(
+        select(DemoRoundStat)
+        .where(DemoRoundStat.parse_run_id == parse_run_id)
+        .order_by(DemoRoundStat.round_number.asc())
+    )
+
+    return list(result.scalars().all())
+
+async def list_demo_parse_runs(
+        *,
+        session: AsyncSession,
+        limit: int = 50,
+        status: str | None = None,
+        team_name: str | None = None,
+) -> list[DemoParseRun]:
+    query = select(DemoParseRun)
+
+    if status is not None:
+        query = query.where(DemoParseRun.status == status)
+
+    if team_name is not None:
+        normalized_team_name = team_name.strip()
+
+        if normalized_team_name:
+            query = query.where(
+                or_(
+                    DemoParseRun.team_a_name.ilike(f"%{normalized_team_name}%"),
+                    DemoParseRun.team_b_name.ilike(f"%{normalized_team_name}%"),
+                )
+            )
+
+    query = (
+        query
+        .order_by(DemoParseRun.started_at.desc())
+        .limit(limit)
+    )
+
+    result = await session.execute(query)
+
+    return list(result.scalars().all())

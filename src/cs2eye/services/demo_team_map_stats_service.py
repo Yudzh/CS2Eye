@@ -67,6 +67,8 @@ class TeamMapStatsItem:
     map_sample_size_score: float
     recent_form_score: float
     map_strength_score: float
+    map_confidence_score: float
+    map_confidence_level: str
     map_tier: str
     is_strong_map: bool
     is_weak_map: bool
@@ -80,6 +82,48 @@ class TeamMapStatsResult:
     team_name: str | None
     map_name: str | None
     items: list[TeamMapStatsItem]
+
+@dataclass(frozen=True)
+class TeamMapMatchupTeamStats:
+    team_name: str
+    map_name: str | None
+
+    total_matches_on_map: int
+    win_rate_on_map: float
+
+    ct_win_rate: float
+    t_win_rate: float
+
+    avg_bomb_plants_per_map: float
+    avg_bomb_explosions_per_map: float
+    avg_bomb_defuses_per_map: float
+
+    map_strength_score: float
+    map_confidence_score: float
+    map_confidence_level: str
+    map_tier: str
+
+
+@dataclass(frozen=True)
+class TeamMapMatchupItem:
+    map_name: str | None
+
+    team_a: TeamMapMatchupTeamStats
+    team_b: TeamMapMatchupTeamStats
+
+    advantage_team_name: str | None
+    advantage_score: float
+    matchup_confidence_level: str
+    recommendation: str
+
+
+@dataclass(frozen=True)
+class TeamMapMatchupResult:
+    team_a_name: str
+    team_b_name: str
+    map_name: str | None
+
+    items: list[TeamMapMatchupItem]
 
 
 @dataclass
@@ -243,6 +287,88 @@ def _get_map_tier(
         return "weak"
 
     return "average"
+
+
+def _get_freshness_score(
+        *,
+        days_since_last_played: int | None,
+) -> float:
+    """
+    Оценивает свежесть статистики карты.
+
+    100 = команда недавно играла карту
+    0 = нет данных по дате
+    """
+
+    if days_since_last_played is None:
+        return 0.0
+
+    if days_since_last_played <= 14:
+        return 100.0
+
+    if days_since_last_played <= 30:
+        return 85.0
+
+    if days_since_last_played <= 60:
+        return 70.0
+
+    if days_since_last_played <= 90:
+        return 55.0
+
+    if days_since_last_played <= 180:
+        return 35.0
+
+    return 15.0
+
+
+def _get_map_confidence_score(
+        *,
+        sample_size_score: float,
+        days_since_last_played: int | None,
+) -> float:
+    """
+    Confidence показывает не силу карты, а доверие к статистике.
+
+    Пока учитываем только:
+    - размер выборки;
+    - свежесть последнего матча.
+
+    Позже сюда можно добавить:
+    - силу соперников;
+    - LAN/online;
+    - стабильность состава;
+    - stage турнира.
+    """
+
+    freshness_score = _get_freshness_score(
+        days_since_last_played=days_since_last_played,
+    )
+
+    return round(
+        sample_size_score * 0.7
+        + freshness_score * 0.3,
+        2,
+    )
+
+
+def _get_map_confidence_level(
+        *,
+        total_matches: int,
+        map_confidence_score: float,
+) -> str:
+    if total_matches <= 0:
+        return "not_enough_data"
+
+    if total_matches < 3:
+        return "low"
+
+    if map_confidence_score >= 75:
+        return "high"
+
+    if map_confidence_score >= 50:
+        return "medium"
+
+    return "low"
 
 
 def _build_team_match_stats(
@@ -419,6 +545,16 @@ def _build_team_map_stats_item(
         2,
     )
 
+    map_confidence_score = _get_map_confidence_score(
+        sample_size_score=sample_size_score,
+        days_since_last_played=days_since_last_played,
+    )
+
+    map_confidence_level = _get_map_confidence_level(
+        total_matches=total_matches,
+        map_confidence_score=map_confidence_score,
+    )
+
     map_tier = _get_map_tier(
         total_matches=total_matches,
         map_strength_score=map_strength_score,
@@ -481,6 +617,8 @@ def _build_team_map_stats_item(
         map_sample_size_score=sample_size_score,
         recent_form_score=recent_form_score,
         map_strength_score=map_strength_score,
+        map_confidence_score=map_confidence_score,
+        map_confidence_level=map_confidence_level,
         map_tier=map_tier,
         is_strong_map=map_tier == "strong",
         is_weak_map=map_tier == "weak",
@@ -607,6 +745,246 @@ async def get_team_map_stats(
 
     return TeamMapStatsResult(
         team_name=normalized_team_name,
+        map_name=normalized_map_name,
+        items=items,
+    )
+
+
+def _build_empty_matchup_team_stats(
+        *,
+        team_name: str,
+        map_name: str | None,
+) -> TeamMapMatchupTeamStats:
+    return TeamMapMatchupTeamStats(
+        team_name=team_name,
+        map_name=map_name,
+
+        total_matches_on_map=0,
+        win_rate_on_map=0.0,
+
+        ct_win_rate=0.0,
+        t_win_rate=0.0,
+
+        avg_bomb_plants_per_map=0.0,
+        avg_bomb_explosions_per_map=0.0,
+        avg_bomb_defuses_per_map=0.0,
+
+        map_strength_score=0.0,
+        map_confidence_score=0.0,
+        map_confidence_level="not_enough_data",
+        map_tier="permaban",
+    )
+
+
+def _build_matchup_team_stats(
+        *,
+        team_name: str,
+        map_name: str | None,
+        item: TeamMapStatsItem | None,
+) -> TeamMapMatchupTeamStats:
+    if item is None:
+        return _build_empty_matchup_team_stats(
+            team_name=team_name,
+            map_name=map_name,
+        )
+
+    return TeamMapMatchupTeamStats(
+        team_name=item.team_name,
+        map_name=item.map_name,
+
+        total_matches_on_map=item.total_matches_on_map,
+        win_rate_on_map=item.win_rate_on_map,
+
+        ct_win_rate=item.ct_win_rate,
+        t_win_rate=item.t_win_rate,
+
+        avg_bomb_plants_per_map=item.avg_bomb_plants_per_map,
+        avg_bomb_explosions_per_map=item.avg_bomb_explosions_per_map,
+        avg_bomb_defuses_per_map=item.avg_bomb_defuses_per_map,
+
+        map_strength_score=item.map_strength_score,
+        map_confidence_score=item.map_confidence_score,
+        map_confidence_level=item.map_confidence_level,
+        map_tier=item.map_tier,
+    )
+
+
+def _get_matchup_confidence_level(
+        *,
+        team_a: TeamMapMatchupTeamStats,
+        team_b: TeamMapMatchupTeamStats,
+) -> str:
+    if team_a.total_matches_on_map <= 0 and team_b.total_matches_on_map <= 0:
+        return "not_enough_data"
+
+    if team_a.total_matches_on_map <= 0 or team_b.total_matches_on_map <= 0:
+        return "low"
+
+    min_confidence_score = min(
+        team_a.map_confidence_score,
+        team_b.map_confidence_score,
+    )
+
+    if min_confidence_score >= 75:
+        return "high"
+
+    if min_confidence_score >= 50:
+        return "medium"
+
+    return "low"
+
+
+def _get_matchup_recommendation(
+        *,
+        advantage_team_name: str | None,
+        advantage_score: float,
+        matchup_confidence_level: str,
+) -> str:
+    if advantage_team_name is None:
+        return "not_enough_data"
+
+    if matchup_confidence_level == "not_enough_data":
+        return "not_enough_data"
+
+    if matchup_confidence_level == "low":
+        return "no_bet_low_confidence"
+
+    if advantage_score < 8:
+        return "no_clear_advantage"
+
+    if advantage_score < 15:
+        return "small_edge"
+
+    if advantage_score < 25:
+        return "map_advantage"
+
+    return "strong_map_advantage"
+
+
+def _build_matchup_item(
+        *,
+        map_name: str | None,
+        team_a: TeamMapMatchupTeamStats,
+        team_b: TeamMapMatchupTeamStats,
+) -> TeamMapMatchupItem:
+    advantage_score = round(
+        abs(team_a.map_strength_score - team_b.map_strength_score),
+        2,
+    )
+
+    if team_a.total_matches_on_map <= 0 and team_b.total_matches_on_map <= 0:
+        advantage_team_name = None
+    elif team_a.map_strength_score > team_b.map_strength_score:
+        advantage_team_name = team_a.team_name
+    elif team_b.map_strength_score > team_a.map_strength_score:
+        advantage_team_name = team_b.team_name
+    else:
+        advantage_team_name = None
+
+    matchup_confidence_level = _get_matchup_confidence_level(
+        team_a=team_a,
+        team_b=team_b,
+    )
+
+    recommendation = _get_matchup_recommendation(
+        advantage_team_name=advantage_team_name,
+        advantage_score=advantage_score,
+        matchup_confidence_level=matchup_confidence_level,
+    )
+
+    return TeamMapMatchupItem(
+        map_name=map_name,
+        team_a=team_a,
+        team_b=team_b,
+        advantage_team_name=advantage_team_name,
+        advantage_score=advantage_score,
+        matchup_confidence_level=matchup_confidence_level,
+        recommendation=recommendation,
+    )
+
+
+async def get_team_map_matchup(
+        *,
+        session: AsyncSession,
+        team_a_name: str,
+        team_b_name: str,
+        map_name: str | None = None,
+) -> TeamMapMatchupResult:
+    normalized_team_a_name = _normalize_text(team_a_name)
+    normalized_team_b_name = _normalize_text(team_b_name)
+    normalized_map_name = _normalize_text(map_name)
+
+    if normalized_team_a_name is None:
+        raise ValueError("team_a_name is required")
+
+    if normalized_team_b_name is None:
+        raise ValueError("team_b_name is required")
+
+    team_a_stats = await get_team_map_stats(
+        session=session,
+        team_name=normalized_team_a_name,
+        map_name=normalized_map_name,
+    )
+
+    team_b_stats = await get_team_map_stats(
+        session=session,
+        team_name=normalized_team_b_name,
+        map_name=normalized_map_name,
+    )
+
+    team_a_items_by_map = {
+        item.map_name: item
+        for item in team_a_stats.items
+    }
+
+    team_b_items_by_map = {
+        item.map_name: item
+        for item in team_b_stats.items
+    }
+
+    matchup_map_names = sorted(
+        set(team_a_items_by_map.keys()) | set(team_b_items_by_map.keys()),
+        key=lambda current_map_name: current_map_name or "",
+    )
+
+    items: list[TeamMapMatchupItem] = []
+
+    for current_map_name in matchup_map_names:
+        team_a_item = team_a_items_by_map.get(current_map_name)
+        team_b_item = team_b_items_by_map.get(current_map_name)
+
+        team_a_matchup_stats = _build_matchup_team_stats(
+            team_name=normalized_team_a_name,
+            map_name=current_map_name,
+            item=team_a_item,
+        )
+
+        team_b_matchup_stats = _build_matchup_team_stats(
+            team_name=normalized_team_b_name,
+            map_name=current_map_name,
+            item=team_b_item,
+        )
+
+        items.append(
+            _build_matchup_item(
+                map_name=current_map_name,
+                team_a=team_a_matchup_stats,
+                team_b=team_b_matchup_stats,
+            )
+        )
+
+    items.sort(
+        key=lambda item: (
+            item.matchup_confidence_level != "high",
+            item.matchup_confidence_level != "medium",
+            -item.advantage_score,
+            item.map_name or "",
+        )
+    )
+
+    return TeamMapMatchupResult(
+        team_a_name=normalized_team_a_name,
+        team_b_name=normalized_team_b_name,
         map_name=normalized_map_name,
         items=items,
     )

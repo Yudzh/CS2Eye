@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -80,6 +80,33 @@ class DemoBombRoundStats(BaseModel):
 class DemoBombRoundStatsResponse(BaseModel):
     parse_run_id: UUID
     items: list[DemoBombRoundStats]
+    total: int
+
+class DemoParseRunListItem(BaseModel):
+    id: UUID
+
+    demo_file_name: str | None
+    demo_file_path: str
+
+    tournament_name: str | None
+    match_date: date | None
+
+    map_name: str | None
+    map_number: int | None
+
+    team_a_name: str | None
+    team_b_name: str | None
+
+    status: str
+    rounds_count: int | None
+    error_message: str | None
+
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class DemoParseRunListResponse(BaseModel):
+    items: list[DemoParseRunListItem]
     total: int
 
 class DemoBasicStatsAnalyzeResponse(BaseModel):
@@ -263,6 +290,8 @@ class DemoTeamMapStatsItem(BaseModel):
     map_sample_size_score: float
     recent_form_score: float
     map_strength_score: float
+    map_confidence_score: float
+    map_confidence_level: str
     map_tier: str
 
     is_strong_map: bool
@@ -276,4 +305,62 @@ class DemoTeamMapStatsResponse(BaseModel):
     team_name: str | None = None
     map_name: str | None = None
     items: list[DemoTeamMapStatsItem]
+    total: int
+
+class DemoTeamMapMatchupTeamStats(BaseModel):
+    team_name: str
+    map_name: str | None
+
+    total_matches_on_map: int
+    win_rate_on_map: float
+
+    ct_win_rate: float
+    t_win_rate: float
+
+    avg_bomb_plants_per_map: float
+    avg_bomb_explosions_per_map: float
+    avg_bomb_defuses_per_map: float
+
+    map_strength_score: float
+    map_confidence_score: float
+    map_confidence_level: str
+    map_tier: str
+
+
+class DemoTeamMapMatchupItem(BaseModel):
+    map_name: str | None
+
+    team_a: DemoTeamMapMatchupTeamStats
+    team_b: DemoTeamMapMatchupTeamStats
+
+    advantage_team_name: str | None
+    advantage_score: float
+    matchup_confidence_level: str
+    recommendation: str
+
+
+class DemoTeamMapMatchupResponse(BaseModel):
+    team_a_name: str
+    team_b_name: str
+    map_name: str | None = None
+
+    items: list[DemoTeamMapMatchupItem]
+    total: int
+
+
+class DemoRoundStats(BaseModel):
+    round_number: int
+
+    winner_team_name: str | None
+    winner_side: str | None
+
+    ct_team_name: str | None
+    t_team_name: str | None
+
+    reason: str | None
+
+
+class DemoRoundStatsResponse(BaseModel):
+    parse_run_id: UUID
+    items: list[DemoRoundStats]
     total: int

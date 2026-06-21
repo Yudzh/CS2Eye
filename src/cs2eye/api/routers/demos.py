@@ -12,7 +12,9 @@ from cs2eye.api.schemas.demos import DemoListResponse, DemoUploadResponse, DemoA
     DemoBombRoundStats, DemoBombRoundStatsResponse, DemoBombAnalysisResponse, DemoBombAnalysisMeeting, PreparedDemoFile, \
     DemoPreparedPathAnalyzeRequest, DemoUploadAnalyzeItem, DemoUploadAnalyzeResponse, DemoParseDataClearResponse, \
     DemoLocalPathImportResponse, DemoLocalPathImportRequest, DemoLocalPathImportItem, DemoBombAnalysisMap, \
-    DemoTeamMapStatsResponse, DemoTeamMapStatsItem, DemoTeamMapRecentMatch
+    DemoTeamMapStatsResponse, DemoTeamMapStatsItem, DemoTeamMapRecentMatch, DemoRoundStatsResponse, DemoRoundStats, \
+    DemoTeamMapMatchupTeamStats, DemoTeamMapMatchupResponse, DemoTeamMapMatchupItem, DemoParseRunListResponse, \
+    DemoParseRunListItem
 from cs2eye.db.session import get_db_session
 from cs2eye.services.demo_artifact_extractor import prepare_demo_artifact, DemoArtifactExtractionError
 from cs2eye.services.demo_artifact_storage import save_uploaded_demo_artifact, DemoArtifactStorageError
@@ -20,8 +22,9 @@ from cs2eye.services.demo_basic_stats_analyzer import analyze_demo_basic_stats, 
 from cs2eye.services.demo_bomb_analysis_service import get_bomb_analysis
 from cs2eye.services.demo_filename_metadata import build_prepared_demo_file_metadata
 from cs2eye.services.demo_parse_run_service import create_demo_parse_run, mark_demo_parse_run_failed, \
-    mark_demo_parse_run_success, get_demo_bomb_round_stats, clear_demo_parse_data, delete_existing_demo_parse_runs
-from cs2eye.services.demo_team_map_stats_service import get_team_map_stats
+    mark_demo_parse_run_success, get_demo_bomb_round_stats, clear_demo_parse_data, delete_existing_demo_parse_runs, \
+    get_demo_round_stats, list_demo_parse_runs
+from cs2eye.services.demo_team_map_stats_service import get_team_map_stats, get_team_map_matchup
 
 router = APIRouter(prefix="/demos", tags=["demos"])
 
@@ -234,6 +237,48 @@ async def _analyze_demo_file_and_save_bomb_stats(
 async def list_demos() -> DemoListResponse:
     return DemoListResponse()
 
+@router.get(
+    "/parse-runs",
+    response_model=DemoParseRunListResponse,
+)
+async def list_demo_parse_runs_endpoint(
+        limit: int = 50,
+        status_filter: str | None = None,
+        team_name: str | None = None,
+        session: AsyncSession = Depends(get_db_session),
+) -> DemoParseRunListResponse:
+    safe_limit = max(1, min(limit, 200))
+
+    parse_runs = await list_demo_parse_runs(
+        session=session,
+        limit=safe_limit,
+        status=status_filter,
+        team_name=team_name,
+    )
+
+    return DemoParseRunListResponse(
+        items=[
+            DemoParseRunListItem(
+                id=parse_run.id,
+                demo_file_name=parse_run.demo_file_name,
+                demo_file_path=parse_run.demo_file_path,
+                tournament_name=parse_run.tournament_name,
+                match_date=parse_run.match_date,
+                map_name=parse_run.map_name,
+                map_number=parse_run.map_number,
+                team_a_name=parse_run.team_a_name,
+                team_b_name=parse_run.team_b_name,
+                status=parse_run.status,
+                rounds_count=parse_run.rounds_count,
+                error_message=parse_run.error_message,
+                started_at=parse_run.started_at,
+                finished_at=parse_run.finished_at,
+            )
+            for parse_run in parse_runs
+        ],
+        total=len(parse_runs),
+    )
+
 
 @router.get(
     "/parse-runs/{parse_run_id}/bomb-rounds",
@@ -265,6 +310,35 @@ async def get_demo_bomb_rounds(
             for bomb_round in bomb_rounds
         ],
         total=len(bomb_rounds),
+    )
+
+@router.get(
+    "/parse-runs/{parse_run_id}/rounds",
+    response_model=DemoRoundStatsResponse,
+)
+async def get_demo_rounds(
+        parse_run_id: UUID,
+        session: AsyncSession = Depends(get_db_session),
+) -> DemoRoundStatsResponse:
+    round_stats = await get_demo_round_stats(
+        session=session,
+        parse_run_id=parse_run_id,
+    )
+
+    return DemoRoundStatsResponse(
+        parse_run_id=parse_run_id,
+        items=[
+            DemoRoundStats(
+                round_number=round_stat.round_number,
+                winner_team_name=round_stat.winner_team_name,
+                winner_side=round_stat.winner_side,
+                ct_team_name=round_stat.ct_team_name,
+                t_team_name=round_stat.t_team_name,
+                reason=round_stat.reason,
+            )
+            for round_stat in round_stats
+        ],
+        total=len(round_stats),
     )
 
 
@@ -395,6 +469,8 @@ async def get_demo_team_map_stats_endpoint(
                 map_sample_size_score=item.map_sample_size_score,
                 recent_form_score=item.recent_form_score,
                 map_strength_score=item.map_strength_score,
+                map_confidence_score=item.map_confidence_score,
+                map_confidence_level=item.map_confidence_level,
                 map_tier=item.map_tier,
 
                 is_strong_map=item.is_strong_map,
@@ -419,6 +495,77 @@ async def get_demo_team_map_stats_endpoint(
             for item in analysis.items
         ],
         total=len(analysis.items),
+    )
+
+@router.get(
+    "/analysis/matchup",
+    response_model=DemoTeamMapMatchupResponse,
+)
+async def get_demo_team_map_matchup_endpoint(
+        team_a_name: str,
+        team_b_name: str,
+        map_name: str | None = None,
+        session: AsyncSession = Depends(get_db_session),
+) -> DemoTeamMapMatchupResponse:
+    if team_a_name.strip().casefold() == team_b_name.strip().casefold():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="team_a_name and team_b_name must be different",
+        )
+
+    try:
+        matchup = await get_team_map_matchup(
+            session=session,
+            team_a_name=team_a_name,
+            team_b_name=team_b_name,
+            map_name=map_name,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+
+    return DemoTeamMapMatchupResponse(
+        team_a_name=matchup.team_a_name,
+        team_b_name=matchup.team_b_name,
+        map_name=matchup.map_name,
+        items=[
+            DemoTeamMapMatchupItem(
+                map_name=item.map_name,
+                team_a=_build_demo_team_map_matchup_team_stats(item.team_a),
+                team_b=_build_demo_team_map_matchup_team_stats(item.team_b),
+                advantage_team_name=item.advantage_team_name,
+                advantage_score=item.advantage_score,
+                matchup_confidence_level=item.matchup_confidence_level,
+                recommendation=item.recommendation,
+            )
+            for item in matchup.items
+        ],
+        total=len(matchup.items),
+    )
+
+def _build_demo_team_map_matchup_team_stats(
+        item,
+) -> DemoTeamMapMatchupTeamStats:
+    return DemoTeamMapMatchupTeamStats(
+        team_name=item.team_name,
+        map_name=item.map_name,
+
+        total_matches_on_map=item.total_matches_on_map,
+        win_rate_on_map=item.win_rate_on_map,
+
+        ct_win_rate=item.ct_win_rate,
+        t_win_rate=item.t_win_rate,
+
+        avg_bomb_plants_per_map=item.avg_bomb_plants_per_map,
+        avg_bomb_explosions_per_map=item.avg_bomb_explosions_per_map,
+        avg_bomb_defuses_per_map=item.avg_bomb_defuses_per_map,
+
+        map_strength_score=item.map_strength_score,
+        map_confidence_score=item.map_confidence_score,
+        map_confidence_level=item.map_confidence_level,
+        map_tier=item.map_tier,
     )
 
 
