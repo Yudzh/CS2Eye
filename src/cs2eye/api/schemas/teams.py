@@ -128,3 +128,27 @@ class TeamCompareResponse(BaseModel):
     role_comparisons: list[TeamRoleComparisonResponse]
 
     summary_notes: list[str]
+
+class LiquipediaTeamImportRequest(BaseModel):
+    team_page: str
+    team_name: str | None = None
+
+class LiquipediaRosterPlayerPreview(BaseModel):
+    nickname: str
+    real_name: str | None
+    country: str | None
+    status: str
+    role: str | None
+    liquipedia_url: str | None
+    source_url: str
+    source_confidence: float
+    notes: str | None
+
+class LiquipediaTeamPreviewResponse(BaseModel):
+    team_name: str
+    liquipedia_url: str
+    players: list[LiquipediaRosterPlayerPreview]
+    warnings: list[str]
+
+    total_players: int
+    active_players_count: int

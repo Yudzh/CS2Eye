@@ -1,5 +1,6 @@
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
@@ -11,8 +12,13 @@ from cs2eye.api.schemas.teams import (
     TeamListResponse,
     TeamRosterMemberResponse,
     TeamStrengthResponse, TeamCompareResponse, TeamRoleComparisonResponse,
+    LiquipediaRosterPlayerPreview,
+    LiquipediaTeamImportRequest,
+    LiquipediaTeamPreviewResponse,
 )
 from cs2eye.db.session import get_db_session
+from cs2eye.services.liquipedia_team_import_service import fetch_liquipedia_team_roster, \
+    liquipedia_draft_to_team_payload
 from cs2eye.services.team_service import (
     create_or_update_team_with_roster,
     get_team_detail,
@@ -67,6 +73,33 @@ def _build_team_detail_response(team) -> TeamDetailResponse:
         strength=_build_strength_response(team.strength),
     )
 
+
+def _build_liquipedia_preview_response(draft) -> LiquipediaTeamPreviewResponse:
+    return LiquipediaTeamPreviewResponse(
+        team_name=draft.team_name,
+        liquipedia_url=draft.liquipedia_url,
+        players=[
+            LiquipediaRosterPlayerPreview(
+                nickname=item.nickname,
+                real_name=item.real_name,
+                country=item.country,
+                status=item.status,
+                role=item.role,
+                liquipedia_url=item.liquipedia_url,
+                source_url=item.source_url,
+                source_confidence=item.source_confidence,
+                notes=item.notes,
+            )
+            for item in draft.players
+        ],
+        warnings=draft.warnings,
+        total_players=len(draft.players),
+        active_players_count=sum(
+            1
+            for item in draft.players
+            if item.status == "active"
+        ),
+    )
 
 @router.post(
     "",
@@ -209,6 +242,114 @@ async def compare_teams_by_names_endpoint(
         summary_notes=comparison.summary_notes,
     )
 
+
+@router.get(
+    "/liquipedia/preview",
+    response_model=LiquipediaTeamPreviewResponse,
+)
+async def preview_liquipedia_team_endpoint(
+        team_page: str,
+        team_name: str | None = None,
+) -> LiquipediaTeamPreviewResponse:
+    try:
+        draft = await fetch_liquipedia_team_roster(
+            team_page=team_page,
+            team_name=team_name,
+        )
+    except httpx.TimeoutException as error:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail={
+                "message": "Liquipedia request timeout",
+                "error_type": type(error).__name__,
+                "error_repr": repr(error),
+            },
+        ) from error
+    except httpx.HTTPStatusError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": "Liquipedia returned bad status",
+                "status_code": error.response.status_code,
+                "body_start": error.response.text[:500],
+            },
+        ) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": "Liquipedia request failed",
+                "error_type": type(error).__name__,
+                "error_repr": repr(error),
+            },
+        ) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+
+    return _build_liquipedia_preview_response(draft)
+
+@router.post(
+    "/liquipedia/import",
+    response_model=TeamDetailResponse,
+)
+async def import_liquipedia_team_endpoint(
+        request: LiquipediaTeamImportRequest,
+        session: AsyncSession = Depends(get_db_session),
+) -> TeamDetailResponse:
+    try:
+        draft = await fetch_liquipedia_team_roster(
+            team_page=request.team_page,
+            team_name=request.team_name,
+        )
+
+        payload = liquipedia_draft_to_team_payload(draft)
+
+        team = await create_or_update_team_with_roster(
+            session=session,
+            name=payload["name"],
+            country=payload["country"],
+            region=payload["region"],
+            liquipedia_url=payload["liquipedia_url"],
+            hltv_id=payload["hltv_id"],
+            players=payload["players"],
+        )
+    except httpx.TimeoutException as error:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail={
+                "message": "Liquipedia request timeout",
+                "error_type": type(error).__name__,
+                "error_repr": repr(error),
+            },
+        ) from error
+    except httpx.HTTPStatusError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": "Liquipedia returned bad status",
+                "status_code": error.response.status_code,
+                "body_start": error.response.text[:500],
+            },
+        ) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": "Liquipedia request failed",
+                "error_type": type(error).__name__,
+                "error_repr": repr(error),
+            },
+        ) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+
+    return _build_team_detail_response(team)
 
 @router.get(
     "/{team_id}",

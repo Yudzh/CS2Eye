@@ -485,6 +485,99 @@ DEV_UI_HTML = """
     </div>
 
     <section class="card full-width">
+  <h2>Команды и составы</h2>
+
+  <div class="row">
+    <button onclick="loadTeams()">Показать команды</button>
+  </div>
+
+  <div class="hint">
+    Показывает команды, активных игроков и рассчитанную силу состава.
+  </div>
+
+  <details class="explain">
+    <summary>Что означает сила команды</summary>
+
+    <div class="explain-grid">
+      <div class="explain-item">
+        <b>Сила команды</b> — первый технический показатель состава.
+        <span>Сейчас он считается из силы активных игроков, бонуса за стабильность и штрафов за проблемы состава.</span>
+      </div>
+
+      <div class="explain-item">
+        <b>Базовая сила игроков</b> — среднее значение силы active/stand-in игроков.
+      </div>
+
+      <div class="explain-item">
+        <b>Бонус состава</b> — плюс за стабильный состав.
+      </div>
+
+      <div class="explain-item">
+        <b>Штраф состава</b> — минус за неполный состав, stand-in, отсутствие AWP/IGL или новых игроков.
+      </div>
+
+      <div class="explain-item">
+        <b>Важно</b> — это пока не финальная сила команды.
+        <span>Позже сюда добавим реальные рейтинги, форму, роли, LAN/online, карты и статистику из демо.</span>
+      </div>
+    </div>
+  </details>
+
+  <div id="teamsError"></div>
+  <div id="teamsResult"></div>
+  <div id="teamDetails"></div>
+</section>
+
+<section class="card full-width">
+  <h2>Сравнение составов команд</h2>
+
+  <div class="row">
+    <div>
+      <label>Команда A</label>
+      <input id="rosterCompareTeamAInput" placeholder="Например: Team Spirit">
+    </div>
+
+    <div>
+      <label>Команда B</label>
+      <input id="rosterCompareTeamBInput" placeholder="Например: NAVI">
+    </div>
+
+    <button onclick="loadRosterCompare()">Сравнить составы</button>
+  </div>
+
+  <div class="hint">
+    Сравнивает две команды по общей силе состава и по ролям: AWP, IGL, rifler, support и так далее.
+  </div>
+
+  <details class="explain">
+    <summary>Как читать сравнение составов</summary>
+
+    <div class="explain-grid">
+      <div class="explain-item">
+        <b>Общая сила</b> — итоговая сила состава после бонусов и штрафов.
+      </div>
+
+      <div class="explain-item">
+        <b>Сравнение ролей</b> — средняя сила игроков на одной роли.
+        <span>Например, AWP Team A против AWP Team B.</span>
+      </div>
+
+      <div class="explain-item">
+        <b>Преимущество</b> — команда, у которой разница по роли или общей силе заметная.
+      </div>
+
+      <div class="explain-item">
+        <b>Заметки</b> — короткие выводы: кто сильнее по составу, где не указаны важные роли, есть ли проблемы.
+      </div>
+    </div>
+  </details>
+
+  <div id="rosterCompareError"></div>
+  <div id="rosterCompareResult"></div>
+</section>
+    
+
+    <section class="card full-width">
       <h2>Распарсенные матчи</h2>
 
       <div class="row">
@@ -557,6 +650,20 @@ DEV_UI_HTML = """
       "success": "успешно",
       "failed": "ошибка",
       "running": "в процессе",
+      
+      "active": "активный",
+      "bench": "скамейка",
+      "inactive": "неактивный",
+      "stand-in": "замена",
+      "coach": "тренер",
+    
+      "awper": "AWP",
+      "igl": "IGL",
+      "entry": "entry",
+      "rifler": "рифлер",
+      "lurker": "lurker",
+      "support": "support",
+      "unknown": "роль не указана",
 
       "planted": "бомба установлена",
       "exploded": "бомба взорвалась",
@@ -1133,6 +1240,287 @@ DEV_UI_HTML = """
         </div>
       `;
     }
+    
+    async function loadTeams() {
+  clearError("teamsError");
+
+  document.getElementById("teamDetails").innerHTML = "";
+
+  try {
+    const payload = await fetchJson("/api/v1/teams");
+    renderTeams(payload);
+  } catch (error) {
+    document.getElementById("teamsResult").innerHTML = "";
+    renderError("teamsError", error);
+  }
+}
+
+function renderTeams(payload) {
+  const items = payload.items || [];
+
+  const rowsHtml = items.map(item => `
+    <tr>
+      <td><b>${valueOrDash(item.name)}</b></td>
+      <td>${valueOrDash(item.country)}</td>
+      <td>${valueOrDash(item.region)}</td>
+      <td>${valueOrDash(item.active_players_count)}</td>
+      <td><b>${fixed(item.team_strength_score)}</b></td>
+      <td>
+        <button class="secondary-button" onclick="loadTeamDetails('${item.id}')">
+          Открыть состав
+        </button>
+      </td>
+    </tr>
+  `).join("");
+
+  document.getElementById("teamsResult").innerHTML = `
+    <div class="summary">
+      <div class="metric">
+        <div class="metric-title">Команд в базе</div>
+        <div class="metric-value">${items.length}</div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-title">Всего записей</div>
+        <div class="metric-value">${payload.total || 0}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Команда</th>
+          <th>Страна</th>
+          <th>Регион</th>
+          <th>Активных игроков</th>
+          <th>Сила команды</th>
+          <th>Действия</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        ${rowsHtml || `<tr><td colspan="6" class="muted">Команд пока нет</td></tr>`}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadTeamDetails(teamId) {
+  clearError("teamsError");
+
+  try {
+    const payload = await fetchJson(`/api/v1/teams/${teamId}`);
+    renderTeamDetails(payload);
+  } catch (error) {
+    document.getElementById("teamDetails").innerHTML = "";
+    renderError("teamsError", error);
+  }
+}
+
+function renderTeamDetails(payload) {
+  const roster = payload.roster || [];
+  const strength = payload.strength || {};
+  const notes = strength.notes || [];
+
+  const rowsHtml = roster.map(item => `
+    <tr>
+      <td><b>${valueOrDash(item.nickname)}</b></td>
+      <td>${valueOrDash(item.real_name)}</td>
+      <td>${valueOrDash(item.country)}</td>
+      <td>
+        <span class="pill ${pillClass(item.status)}">
+          ${valueOrDash(translateValue(item.status))}
+        </span>
+      </td>
+      <td>${valueOrDash(translateValue(item.role || "unknown"))}</td>
+      <td>${valueOrDash(item.joined_at)}</td>
+      <td>${valueOrDash(item.left_at)}</td>
+      <td>${valueOrDash(item.current_rating)}</td>
+      <td><b>${fixed(item.player_strength_score)}</b></td>
+      <td>${valueOrDash(item.source_name)}</td>
+      <td>${fixed(item.source_confidence)}</td>
+      <td>${valueOrDash(item.notes)}</td>
+    </tr>
+  `).join("");
+
+  const notesHtml = notes.map(note => `
+    <li>${valueOrDash(note)}</li>
+  `).join("");
+
+  document.getElementById("teamDetails").innerHTML = `
+    <div class="details-box">
+      <h3>${valueOrDash(payload.name)}</h3>
+
+      <div class="summary">
+        <div class="metric">
+          <div class="metric-title">Сила команды</div>
+          <div class="metric-value">${fixed(strength.team_strength_score)}</div>
+        </div>
+
+        <div class="metric">
+          <div class="metric-title">Базовая сила игроков</div>
+          <div class="metric-value">${fixed(strength.base_player_score)}</div>
+        </div>
+
+        <div class="metric">
+          <div class="metric-title">Бонус состава</div>
+          <div class="metric-value">${fixed(strength.roster_bonus)}</div>
+        </div>
+
+        <div class="metric">
+          <div class="metric-title">Штраф состава</div>
+          <div class="metric-value">${fixed(strength.roster_penalty)}</div>
+        </div>
+      </div>
+
+      <div class="hint">
+        Активных игроков: <b>${valueOrDash(strength.active_players_count)}</b>
+        · Страна: <b>${valueOrDash(payload.country)}</b>
+        · Регион: <b>${valueOrDash(payload.region)}</b>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Ник</th>
+            <th>Имя</th>
+            <th>Страна</th>
+            <th>Статус</th>
+            <th>Роль</th>
+            <th>В составе с</th>
+            <th>Вышел</th>
+            <th>Rating</th>
+            <th>Сила игрока</th>
+            <th>Источник</th>
+            <th>Доверие</th>
+            <th>Заметки</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${rowsHtml || `<tr><td colspan="12" class="muted">Состав пока не заполнен</td></tr>`}
+        </tbody>
+      </table>
+
+      <div class="details-box">
+        <h3>Заметки по составу</h3>
+
+        <ul>
+          ${notesHtml || `<li class="muted">Нет предупреждений</li>`}
+        </ul>
+      </div>
+    </div>
+  `;
+}
+
+async function loadRosterCompare() {
+  clearError("rosterCompareError");
+
+  const teamAName = document.getElementById("rosterCompareTeamAInput").value;
+  const teamBName = document.getElementById("rosterCompareTeamBInput").value;
+
+  const query = buildQuery({
+    team_a_name: teamAName,
+    team_b_name: teamBName,
+  });
+
+  const url = `/api/v1/teams/compare-by-names${query ? "?" + query : ""}`;
+
+  try {
+    const payload = await fetchJson(url);
+    renderRosterCompare(payload);
+  } catch (error) {
+    document.getElementById("rosterCompareResult").innerHTML = "";
+    renderError("rosterCompareError", error);
+  }
+}
+
+function renderPlayerNames(players) {
+  if (!players || players.length === 0) {
+    return `<span class="muted">—</span>`;
+  }
+
+  return players.map(player => `
+    <div>${valueOrDash(player)}</div>
+  `).join("");
+}
+
+function renderRosterCompare(payload) {
+  const roleComparisons = payload.role_comparisons || [];
+  const summaryNotes = payload.summary_notes || [];
+
+  const notesHtml = summaryNotes.map(note => `
+    <li>${valueOrDash(note)}</li>
+  `).join("");
+
+  const rowsHtml = roleComparisons.map(item => `
+    <tr>
+      <td><b>${valueOrDash(translateValue(item.role))}</b></td>
+      <td>
+        <b>${fixed(item.team_a_score)}</b>
+        <div class="muted">${renderPlayerNames(item.team_a_players)}</div>
+      </td>
+      <td>
+        <b>${fixed(item.team_b_score)}</b>
+        <div class="muted">${renderPlayerNames(item.team_b_players)}</div>
+      </td>
+      <td>${valueOrDash(item.advantage_team_name)}</td>
+      <td>${fixed(item.advantage_diff)}</td>
+      <td>${valueOrDash(item.note)}</td>
+    </tr>
+  `).join("");
+
+  document.getElementById("rosterCompareResult").innerHTML = `
+    <div class="summary">
+      <div class="metric">
+        <div class="metric-title">${valueOrDash(payload.team_a.team_name)}</div>
+        <div class="metric-value">${fixed(payload.team_a.team_strength_score)}</div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-title">${valueOrDash(payload.team_b.team_name)}</div>
+        <div class="metric-value">${fixed(payload.team_b.team_strength_score)}</div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-title">Преимущество</div>
+        <div class="metric-value">${valueOrDash(payload.strength_advantage_team_name)}</div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-title">Разница силы</div>
+        <div class="metric-value">${fixed(payload.strength_advantage_diff)}</div>
+      </div>
+    </div>
+
+    <div class="details-box">
+      <h3>Короткий вывод</h3>
+
+      <ul>
+        ${notesHtml || `<li class="muted">Нет заметок</li>`}
+      </ul>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Роль</th>
+          <th>${valueOrDash(payload.team_a.team_name)}</th>
+          <th>${valueOrDash(payload.team_b.team_name)}</th>
+          <th>Преимущество</th>
+          <th>Разница</th>
+          <th>Пояснение</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        ${rowsHtml || `<tr><td colspan="6" class="muted">Нет данных для сравнения ролей</td></tr>`}
+      </tbody>
+    </table>
+  `;
+}
+    
+    
   </script>
 </body>
 </html>
