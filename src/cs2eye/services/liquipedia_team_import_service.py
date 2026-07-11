@@ -1,9 +1,10 @@
+import re
 from dataclasses import dataclass, field
+from datetime import date
 from html.parser import HTMLParser
 from urllib.parse import quote, unquote
 
 import httpx
-
 
 LIQUIPEDIA_COUNTERSTRIKE_API_URL = "https://liquipedia.net/counterstrike/api.php"
 LIQUIPEDIA_COUNTERSTRIKE_BASE_URL = "https://liquipedia.net/counterstrike"
@@ -17,6 +18,8 @@ class LiquipediaRosterPlayer:
     country: str | None
     status: str
     role: str | None
+    joined_at: date | None
+    left_at: date | None
     liquipedia_url: str | None
     source_url: str
     source_confidence: float
@@ -50,7 +53,8 @@ class _Row:
 
 @dataclass
 class _Table:
-    heading: str | None
+    section_heading: str | None
+    subsection_heading: str | None
     rows: list[_Row] = field(default_factory=list)
 
 
@@ -59,7 +63,8 @@ class _LiquipediaHTMLTableParser(HTMLParser):
         super().__init__()
         self.tables: list[_Table] = []
 
-        self._current_heading: str | None = None
+        self._section_heading: str | None = None
+        self._subsection_heading: str | None = None
         self._heading_tag: str | None = None
         self._heading_parts: list[str] = []
 
@@ -83,7 +88,10 @@ class _LiquipediaHTMLTableParser(HTMLParser):
             self._table_depth += 1
 
             if self._table_depth == 1:
-                self._current_table = _Table(heading=self._current_heading)
+                self._current_table = _Table(
+                    section_heading=self._section_heading,
+                    subsection_heading=self._subsection_heading,
+                )
             return
 
         if self._table_depth <= 0:
@@ -105,7 +113,14 @@ class _LiquipediaHTMLTableParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag == self._heading_tag:
             heading = _clean_text(" ".join(self._heading_parts))
-            self._current_heading = heading or self._current_heading
+
+            if heading:
+                if tag == "h2":
+                    self._section_heading = heading
+                    self._subsection_heading = None
+                elif tag in {"h3", "h4"}:
+                    self._subsection_heading = heading
+
             self._heading_tag = None
             self._heading_parts = []
             return
@@ -184,30 +199,24 @@ def _page_url(page_name: str) -> str:
     return f"{LIQUIPEDIA_COUNTERSTRIKE_BASE_URL}/{quote(page_name, safe='_/')}"
 
 
-def _status_from_heading(heading: str | None) -> str | None:
-    normalized = (heading or "").casefold()
+def _status_from_table_context(table: _Table) -> str | None:
+    section = (table.section_heading or "").casefold()
+    subsection = (table.subsection_heading or "").casefold()
 
-    if any(marker in normalized for marker in ["former", "past players", "results", "achievements"]):
+    # Игроков берём только из Player Roster -> Active.
+    # Это не даст взять people/staff из Organization -> Active.
+    if "player roster" in section:
+        if "active" in subsection:
+            return "active"
+
         return None
 
-    if any(marker in normalized for marker in ["management", "organization", "staff"]):
-        if "coach" not in normalized:
-            return None
+    # Из Organization -> Active разрешаем только coach-строки.
+    if "organization" in section:
+        if "active" in subsection:
+            return "coach"
 
-    if "coach" in normalized:
-        return "coach"
-
-    if "stand" in normalized:
-        return "stand-in"
-
-    if "inactive" in normalized:
-        return "inactive"
-
-    if "bench" in normalized or "substitute" in normalized:
-        return "bench"
-
-    if "active" in normalized or "players" in normalized or "squad" in normalized or "roster" in normalized:
-        return "active"
+        return None
 
     return None
 
@@ -234,16 +243,90 @@ def _role_from_text(value: str) -> str | None:
 
     return None
 
+
+_DATE_RE = re.compile(
+    r"(?P<year>20\d{2}|19\d{2})[-/.](?P<month>\d{1,2}|\?\?)[-/.](?P<day>\d{1,2}|\?\?)"
+)
+
+
+def _parse_liquipedia_date(value: str | None) -> date | None:
+    if not value:
+        return None
+
+    match = _DATE_RE.search(value)
+
+    if match is None:
+        return None
+
+    month = match.group("month")
+    day = match.group("day")
+
+    if "?" in month or "?" in day:
+        return None
+
+    try:
+        return date(
+            int(match.group("year")),
+            int(month),
+            int(day),
+        )
+    except ValueError:
+        return None
+
+
+def _extract_dates_from_row(row_text: str) -> tuple[date | None, date | None]:
+    parsed_dates: list[date] = []
+
+    for match in _DATE_RE.finditer(row_text):
+        parsed_date = _parse_liquipedia_date(match.group(0))
+
+        if parsed_date is not None:
+            parsed_dates.append(parsed_date)
+
+    joined_at = parsed_dates[0] if parsed_dates else None
+    left_at = parsed_dates[1] if len(parsed_dates) >= 2 else None
+
+    return joined_at, left_at
+
+
 def _is_coach_row(row_text: str) -> bool:
     normalized = row_text.casefold()
 
-    return any(
-        marker in normalized
-        for marker in [
-            "coach",
-            "head coach",
-            "assistant coach",
-        ]
+    blocked_markers = [
+        "assistant coach",
+        "performance coach",
+        "performance department",
+        "analyst",
+        "manager",
+        "coordinator",
+        "director",
+        "owner",
+        "ceo",
+        "founder",
+        "head of",
+        "content",
+        "media",
+        "editor",
+        "designer",
+        "photographer",
+        "videographer",
+        "operations",
+        "scout",
+        "advisor",
+        "ambassador",
+        "partnership",
+        "marketing",
+        "community",
+    ]
+
+    if any(marker in normalized for marker in blocked_markers):
+        return False
+
+    return (
+            "head coach" in normalized
+            or " coach" in normalized
+            or "coach " in normalized
+            or normalized.endswith("coach")
     )
 
 
@@ -268,6 +351,8 @@ def _is_non_playing_staff_row(row_text: str) -> bool:
         "analyst",
         "data analyst",
         "performance analyst",
+        "performance department",
+        "coordinator",
         "content",
         "creator",
         "streamer",
@@ -293,9 +378,6 @@ def _is_non_playing_staff_row(row_text: str) -> bool:
 def _is_allowed_roster_status(status: str) -> bool:
     return status in {
         "active",
-        "bench",
-        "inactive",
-        "stand-in",
         "coach",
     }
 
@@ -313,6 +395,8 @@ def _is_counterstrike_player_link(link: _Link) -> bool:
         "/Help:",
         "/Liquipedia:",
         "/Template:",
+        "/User:",
+        "/Talk:",
     ]
 
     if any(part in href for part in banned_parts):
@@ -324,6 +408,45 @@ def _is_counterstrike_player_link(link: _Link) -> bool:
         return False
 
     if len(text) > 40:
+        return False
+
+    banned_texts = {
+        "denmark",
+        "russia",
+        "ukraine",
+        "france",
+        "spain",
+        "poland",
+        "romania",
+        "jordan",
+        "montenegro",
+        "bosnia and herzegovina",
+        "north macedonia",
+        "serbia",
+        "sweden",
+        "finland",
+        "norway",
+        "germany",
+        "brazil",
+        "united states",
+        "canada",
+        "kazakhstan",
+        "estonia",
+        "latvia",
+        "lithuania",
+        "turkey",
+        "israel",
+        "china",
+        "mongolia",
+        "australia",
+        "united kingdom",
+        "netherlands",
+        "belgium",
+        "czech republic",
+        "slovakia",
+    }
+
+    if text.casefold() in banned_texts:
         return False
 
     return True
@@ -340,65 +463,22 @@ def _extract_player_from_row(
     if not row_text:
         return None
 
-    if any(marker in row_text.casefold() for marker in ["id", "name", "join", "role"]):
+    if not _is_allowed_roster_status(status):
         return None
 
-    links = [
-        link
-        for cell in row.cells
-        for link in cell.links
-        if _is_counterstrike_player_link(link)
-    ]
-
-    if not links:
+    if status == "coach" and not _is_coach_row(row_text):
         return None
 
-    player_link = links[0]
-    nickname = _clean_text(player_link.text)
-
-    if not nickname:
-        return None
-
-    href = player_link.href or ""
-    liquipedia_url = f"https://liquipedia.net{href}" if href.startswith("/") else href
-
-    role = _role_from_text(row_text)
-
-    if status == "coach" and role is None:
-        role = "coach"
-
-    return LiquipediaRosterPlayer(
-        nickname=nickname,
-        real_name=None,
-        country=None,
-        status=status,
-        role=role,
-        liquipedia_url=liquipedia_url,
-        source_url=source_url,
-        source_confidence=0.6,
-        notes="Импортировано из Liquipedia. Роль может быть пустой или требовать ручной проверки.",
-    )
-
-def _extract_player_from_row(
-        *,
-        row: _Row,
-        status: str,
-        source_url: str,
-) -> LiquipediaRosterPlayer | None:
-    row_text = _clean_text(" ".join(cell.text for cell in row.cells))
-
-    if not row_text:
+    if status == "active" and _is_non_playing_staff_row(row_text):
         return None
 
     normalized_row_text = row_text.casefold()
 
-    if any(marker in normalized_row_text for marker in ["id", "name", "join", "role"]) and len(row.cells) <= 2:
-        return None
-
-    if not _is_allowed_roster_status(status):
-        return None
-
-    if _is_non_playing_staff_row(row_text):
+    # Header rows.
+    if (
+            any(marker in normalized_row_text for marker in ["id", "name", "join", "role"])
+            and len(row.cells) <= 2
+    ):
         return None
 
     links = [
@@ -421,6 +501,7 @@ def _extract_player_from_row(
     liquipedia_url = f"https://liquipedia.net{href}" if href.startswith("/") else href
 
     role = _role_from_text(row_text)
+    joined_at, left_at = _extract_dates_from_row(row_text)
 
     if status == "coach" or _is_coach_row(row_text) or role == "coach":
         status = "coach"
@@ -432,10 +513,12 @@ def _extract_player_from_row(
         country=None,
         status=status,
         role=role,
+        joined_at=joined_at,
+        left_at=left_at,
         liquipedia_url=liquipedia_url,
         source_url=source_url,
-        source_confidence=0.65,
-        notes="Импортировано из Liquipedia. Оставлены только игроки и тренер; роли могут требовать ручной проверки.",
+        source_confidence=0.7,
+        notes="Импортировано из Liquipedia MediaWiki API. Берём только Player Roster -> Active и coach из Organization -> Active.",
     )
 
 
@@ -477,7 +560,7 @@ def parse_liquipedia_team_roster_html(
     warnings: list[str] = []
 
     for table in parser.tables:
-        status = _status_from_heading(table.heading)
+        status = _status_from_table_context(table)
 
         if status is None:
             continue
@@ -497,9 +580,12 @@ def parse_liquipedia_team_roster_html(
     active_count = sum(1 for player in players if player.status == "active")
 
     if active_count == 0:
-        warnings.append("Не удалось найти active-состав. Возможно, изменилась разметка страницы Liquipedia.")
+        warnings.append(
+            "Не удалось найти active-состав. Проверь секции Player Roster -> Active на странице Liquipedia.")
     elif active_count < 5:
         warnings.append(f"Найдено меньше 5 active-игроков: {active_count}.")
+    elif active_count > 6:
+        warnings.append(f"Найдено больше 6 active-игроков: {active_count}. Нужно проверить разметку Liquipedia.")
 
     if not any(player.role == "awper" for player in players if player.status == "active"):
         warnings.append("AWPer не найден автоматически. Возможно, роль нужно указать вручную.")
@@ -579,8 +665,8 @@ def liquipedia_draft_to_team_payload(
                 "country": player.country,
                 "status": player.status,
                 "role": player.role,
-                "joined_at": None,
-                "left_at": None,
+                "joined_at": player.joined_at,
+                "left_at": player.left_at,
                 "liquipedia_url": player.liquipedia_url,
                 "hltv_id": None,
                 "current_rating": None,

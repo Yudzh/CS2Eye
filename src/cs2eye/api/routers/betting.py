@@ -5,15 +5,13 @@ from starlette import status
 from cs2eye.api.schemas.betting import (
     BettingDraftSignalResponse,
     BettingPreMatchDraftResponse,
+    BettingTeamCompareResponse,
+    BettingTeamRoleComparisonResponse,
+    BettingTeamStrengthResponse,
 )
 from cs2eye.api.schemas.demos import (
     DemoTeamMapMatchupItem,
     DemoTeamMapMatchupTeamStats,
-)
-from cs2eye.api.schemas.teams import (
-    TeamCompareResponse,
-    TeamRoleComparisonResponse,
-    TeamStrengthResponse,
 )
 from cs2eye.db.session import get_db_session
 from cs2eye.services.betting_pre_match_draft_service import build_pre_match_draft
@@ -21,8 +19,8 @@ from cs2eye.services.betting_pre_match_draft_service import build_pre_match_draf
 router = APIRouter(prefix="/betting", tags=["betting"])
 
 
-def _build_strength_response(strength) -> TeamStrengthResponse:
-    return TeamStrengthResponse(
+def _build_strength_response(strength) -> BettingTeamStrengthResponse:
+    return BettingTeamStrengthResponse(
         team_id=strength.team_id,
         team_name=strength.team_name,
         active_players_count=strength.active_players_count,
@@ -35,14 +33,14 @@ def _build_strength_response(strength) -> TeamStrengthResponse:
     )
 
 
-def _build_team_compare_response(comparison) -> TeamCompareResponse:
-    return TeamCompareResponse(
+def _build_team_compare_response(comparison) -> BettingTeamCompareResponse:
+    return BettingTeamCompareResponse(
         team_a=_build_strength_response(comparison.team_a),
         team_b=_build_strength_response(comparison.team_b),
         strength_advantage_team_name=comparison.strength_advantage_team_name,
         strength_advantage_diff=comparison.strength_advantage_diff,
         role_comparisons=[
-            TeamRoleComparisonResponse(
+            BettingTeamRoleComparisonResponse(
                 role=item.role,
                 team_a_score=item.team_a_score,
                 team_b_score=item.team_b_score,

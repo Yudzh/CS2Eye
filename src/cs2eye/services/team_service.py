@@ -2,33 +2,54 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.models.team import Player, Team, TeamRosterMember
 
-
 VALID_STATUSES = {
     "active",
-    "bench",
-    "inactive",
-    "stand-in",
+    "coach",
+}
+
+VALID_ROLES = {
+    "igl",
+    "awper",
+    "entry_frag",
+    "lurk",
+    "anchor_support",
     "coach",
 }
 
 ROLE_ALIASES = {
+    "igl": "igl",
+    "captain": "igl",
+    "капитан": "igl",
+    "in-game leader": "igl",
+    "in game leader": "igl",
+
     "awp": "awper",
     "awper": "awper",
     "sniper": "awper",
-    "igl": "igl",
-    "captain": "igl",
-    "entry": "entry",
-    "entry fragger": "entry",
-    "rifler": "rifler",
-    "rifle": "rifler",
-    "lurker": "lurker",
-    "support": "support",
+
+    "entry": "entry_frag",
+    "entry frag": "entry_frag",
+    "entry fragger": "entry_frag",
+    "entry_frag": "entry_frag",
+
+    "lurk": "lurk",
+    "lurker": "lurk",
+
+    "anchor": "anchor_support",
+    "support": "anchor_support",
+    "anchor/support": "anchor_support",
+    "anchor support": "anchor_support",
+    "anchor_support": "anchor_support",
+    "rifler": "anchor_support",
+    "rifle": "anchor_support",
+
     "coach": "coach",
+    "тренер": "coach",
 }
 
 
@@ -146,6 +167,9 @@ def _normalize_status(value: str | None) -> str:
     if normalized == "substitute":
         normalized = "stand-in"
 
+    if normalized in {"left", "removed", "kicked", "past"}:
+        normalized = "former"
+
     if normalized not in VALID_STATUSES:
         raise ValueError(
             f"Invalid roster status: {value}. "
@@ -162,8 +186,15 @@ def _normalize_role(value: str | None) -> str | None:
         return None
 
     normalized = normalized.casefold()
+    role = ROLE_ALIASES.get(normalized, normalized)
 
-    return ROLE_ALIASES.get(normalized, normalized)
+    if role not in VALID_ROLES:
+        raise ValueError(
+            f"Invalid role: {value}. "
+            f"Allowed roles: {', '.join(sorted(VALID_ROLES))}"
+        )
+
+    return role
 
 
 async def _get_or_create_team(
@@ -347,6 +378,17 @@ def _calculate_team_strength(
         notes=notes,
     )
 
+def _append_note(existing_notes: str | None, new_note: str) -> str:
+    existing_notes = _normalize_text(existing_notes)
+
+    if existing_notes is None:
+        return new_note
+
+    if new_note in existing_notes:
+        return existing_notes
+
+    return f"{existing_notes} {new_note}"
+
 
 async def create_or_update_team_with_roster(
         *,
@@ -357,6 +399,7 @@ async def create_or_update_team_with_roster(
         liquipedia_url: str | None,
         hltv_id: int | None,
         players: list[dict],
+        delete_missing_current: bool = False,
 ) -> TeamDetailInfo:
     team_name = _required_text(name, "name")
 
@@ -370,6 +413,8 @@ async def create_or_update_team_with_roster(
     team.liquipedia_url = _normalize_text(liquipedia_url)
     team.hltv_id = hltv_id
 
+    incoming_player_ids: set[UUID] = set()
+
     for player_data in players:
         nickname = _required_text(
             player_data.get("nickname"),
@@ -380,6 +425,8 @@ async def create_or_update_team_with_roster(
             session=session,
             nickname=nickname,
         )
+
+        incoming_player_ids.add(player.id)
 
         if player_data.get("real_name") is not None:
             player.real_name = _normalize_text(player_data.get("real_name"))
@@ -412,14 +459,37 @@ async def create_or_update_team_with_roster(
             )
             session.add(roster_member)
 
-        roster_member.status = _normalize_status(player_data.get("status"))
-        roster_member.role = _normalize_role(player_data.get("role"))
+        incoming_status = _normalize_status(player_data.get("status"))
+        incoming_role = _normalize_role(player_data.get("role"))
+
+        roster_member.status = incoming_status
+
+        # Важно: Liquipedia часто не знает роли.
+        # Поэтому None из Liquipedia НЕ должен стирать роль, указанную руками.
+        if incoming_role is not None or roster_member.role is None:
+            roster_member.role = incoming_role
+
         roster_member.joined_at = player_data.get("joined_at")
         roster_member.left_at = player_data.get("left_at")
         roster_member.source_name = _normalize_text(player_data.get("source_name"))
         roster_member.source_url = _normalize_text(player_data.get("source_url"))
         roster_member.source_confidence = float(player_data.get("source_confidence", 0.7))
         roster_member.notes = _normalize_text(player_data.get("notes"))
+
+    if delete_missing_current:
+        current_result = await session.execute(
+            select(TeamRosterMember)
+            .where(
+                TeamRosterMember.team_id == team.id,
+                TeamRosterMember.left_at.is_(None),
+            )
+        )
+
+        for roster_member in current_result.scalars().all():
+            if roster_member.player_id in incoming_player_ids:
+                continue
+
+            await session.delete(roster_member)
 
     await session.commit()
 
@@ -447,9 +517,11 @@ async def get_team_detail(
     roster_result = await session.execute(
         select(TeamRosterMember, Player)
         .join(Player, TeamRosterMember.player_id == Player.id)
-        .where(TeamRosterMember.team_id == team.id)
+        .where(
+            TeamRosterMember.team_id == team.id,
+            TeamRosterMember.left_at.is_(None),
+        )
         .order_by(
-            TeamRosterMember.left_at.is_not(None),
             TeamRosterMember.status,
             Player.nickname,
         )
@@ -814,3 +886,137 @@ async def compare_teams_by_names(
             role_comparisons=role_comparisons,
         ),
     )
+
+
+
+async def update_team_roster_manually(
+        *,
+        session: AsyncSession,
+        team_name: str,
+        players: list[dict],
+) -> TeamDetailInfo:
+    normalized_team_name = _required_text(team_name, "team_name")
+
+    team_result = await session.execute(
+        select(Team)
+        .where(func.lower(Team.name) == normalized_team_name.casefold())
+    )
+
+    team = team_result.scalar_one_or_none()
+
+    if team is None:
+        raise ValueError(f"Team not found: {normalized_team_name}")
+
+    for player_data in players:
+        nickname = _required_text(
+            player_data.get("nickname"),
+            "players[].nickname",
+        )
+
+        should_delete = int(player_data.get("delete", 0)) == 1
+
+        player_result = await session.execute(
+            select(Player)
+            .where(func.lower(Player.nickname) == nickname.casefold())
+        )
+
+        existing_player = player_result.scalar_one_or_none()
+
+        if should_delete:
+            if existing_player is None:
+                continue
+
+            await session.execute(
+                delete(TeamRosterMember)
+                .where(
+                    TeamRosterMember.team_id == team.id,
+                    TeamRosterMember.player_id == existing_player.id,
+                )
+            )
+
+            continue
+
+        role = _normalize_role(player_data.get("role"))
+
+        if role is None:
+            raise ValueError(
+                f"Role is required for player '{nickname}' when delete=0. "
+                f"Allowed roles: {', '.join(sorted(VALID_ROLES))}"
+            )
+
+        player = await _get_or_create_player(
+            session=session,
+            nickname=nickname,
+        )
+
+        if player_data.get("real_name") is not None:
+            player.real_name = _normalize_text(player_data.get("real_name"))
+
+        if player_data.get("country") is not None:
+            player.country = _normalize_text(player_data.get("country"))
+
+        if player_data.get("liquipedia_url") is not None:
+            player.liquipedia_url = _normalize_text(player_data.get("liquipedia_url"))
+
+        if player_data.get("hltv_id") is not None:
+            player.hltv_id = player_data.get("hltv_id")
+
+        if player_data.get("current_rating") is not None:
+            player.current_rating = float(player_data["current_rating"])
+
+        if player_data.get("player_strength_score") is not None:
+            player.player_strength_score = float(player_data["player_strength_score"])
+
+        roster_member = await _get_current_roster_member(
+            session=session,
+            team_id=team.id,
+            player_id=player.id,
+        )
+
+        if roster_member is None:
+            roster_member = TeamRosterMember(
+                team_id=team.id,
+                player_id=player.id,
+            )
+            session.add(roster_member)
+
+        roster_member.status = "coach" if role == "coach" else "active"
+        roster_member.role = role
+        roster_member.joined_at = player_data.get("joined_at")
+        roster_member.left_at = player_data.get("left_at")
+        roster_member.source_name = "manual"
+        roster_member.source_url = _normalize_text(player_data.get("source_url"))
+        roster_member.source_confidence = 1.0
+        roster_member.notes = _normalize_text(player_data.get("notes"))
+
+    await session.commit()
+
+    return await get_team_detail(
+        session=session,
+        team_id=team.id,
+    )
+
+
+async def delete_team_by_name(
+        *,
+        session: AsyncSession,
+        team_name: str,
+) -> str:
+    normalized_team_name = _required_text(team_name, "team_name")
+
+    result = await session.execute(
+        select(Team)
+        .where(func.lower(Team.name) == normalized_team_name.casefold())
+    )
+
+    team = result.scalar_one_or_none()
+
+    if team is None:
+        raise ValueError(f"Team not found: {normalized_team_name}")
+
+    deleted_team_name = team.name
+
+    await session.delete(team)
+    await session.commit()
+
+    return deleted_team_name
