@@ -60,6 +60,27 @@ services:
         condition: service_completed_successfully
     command: [ "uvicorn", "cs2eye.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload" ]
 
+  webui:
+    build:
+      context: ./webui
+      dockerfile: Dockerfile.local
+
+    container_name: cs2eye-webui
+    restart: unless-stopped
+
+    environment:
+      VITE_API_PROXY_TARGET: http://api:8000
+
+    ports:
+      - "5173:5173"
+
+    volumes:
+      - ./webui:/app
+      - cs2eye_webui_node_modules:/app/node_modules
+
+    depends_on:
+      - api
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: cs2eye-pgadmin
@@ -79,3 +100,4 @@ volumes:
   cs2eye_pg_data:
   cs2eye_storage:
   cs2eye_pgadmin_data:
+  cs2eye_webui_node_modules:

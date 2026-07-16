@@ -1,8 +1,13 @@
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from html.parser import HTMLParser
 from urllib.parse import quote, unquote
+
+from cs2eye.core.team_roles import (
+    ACTIVE_TEAM_ROLE_CODES,
+    normalize_team_role,
+)
 
 import httpx
 
@@ -199,21 +204,60 @@ def _page_url(page_name: str) -> str:
     return f"{LIQUIPEDIA_COUNTERSTRIKE_BASE_URL}/{quote(page_name, safe='_/')}"
 
 
-def _status_from_table_context(table: _Table) -> str | None:
-    section = (table.section_heading or "").casefold()
-    subsection = (table.subsection_heading or "").casefold()
+def _heading_contains_word(
+        value: str | None,
+        word: str,
+) -> bool:
+    normalized = (
+        value or ""
+    ).casefold()
 
-    # Игроков берём только из Player Roster -> Active.
-    # Это не даст взять people/staff из Organization -> Active.
+    return (
+        re.search(
+            rf"\b{re.escape(word.casefold())}\b",
+            normalized,
+        )
+        is not None
+    )
+
+
+def _status_from_table_context(
+        table: _Table,
+) -> str | None:
+    section = (
+        table.section_heading or ""
+    ).casefold()
+
+    subsection = (
+        table.subsection_heading or ""
+    ).casefold()
+
     if "player roster" in section:
-        if "active" in subsection:
+        if _heading_contains_word(
+            subsection,
+            "inactive",
+        ):
+            return None
+
+        if _heading_contains_word(
+            subsection,
+            "active",
+        ):
             return "active"
 
         return None
 
-    # Из Organization -> Active разрешаем только coach-строки.
     if "organization" in section:
-        if "active" in subsection:
+        if _heading_contains_word(
+            subsection,
+            "inactive",
+        ):
+            return None
+
+        if _heading_contains_word(
+            subsection,
+            "active",
+        ):
             return "coach"
 
         return None
@@ -221,20 +265,43 @@ def _status_from_table_context(table: _Table) -> str | None:
     return None
 
 
-def _role_from_text(value: str) -> str | None:
+def _role_from_text(
+        value: str,
+) -> str | None:
     normalized = value.casefold()
 
     markers = [
+        ("head coach", "coach"),
+        ("coach", "coach"),
+
+        ("in-game leader", "igl"),
+        ("in game leader", "igl"),
+        ("igl", "igl"),
+
         ("awper", "awper"),
         ("awp", "awper"),
         ("sniper", "awper"),
-        ("igl", "igl"),
-        ("in-game leader", "igl"),
-        ("entry", "entry"),
-        ("lurker", "lurker"),
-        ("support", "support"),
+
+        ("entry fragger", "entry_frag"),
+        ("entry frag", "entry_frag"),
+        ("entry", "entry_frag"),
+
+        ("lurker", "lurk"),
+        ("lurk", "lurk"),
+
+        (
+            "anchor/support",
+            "anchor_support",
+        ),
+        (
+            "anchor support",
+            "anchor_support",
+        ),
+        ("anchor", "anchor_support"),
+        ("support", "anchor_support"),
+
         ("rifler", "rifler"),
-        ("coach", "coach"),
+        ("rifle", "rifler"),
     ]
 
     for marker, role in markers:
@@ -575,18 +642,61 @@ def parse_liquipedia_team_roster_html(
             if player is not None:
                 players.append(player)
 
-    players = _deduplicate_players(players)
+    players = _deduplicate_players(
+        players
+    )
 
-    active_count = sum(1 for player in players if player.status == "active")
+    active_players = [
+        player
+        for player in players
+        if (
+                player.status == "active"
+                and player.left_at is None
+        )
+    ]
+
+    coaches = [
+        player
+        for player in players
+        if (
+                player.status == "coach"
+                and player.left_at is None
+        )
+    ]
+
+    if len(coaches) > 1:
+        warnings.append(
+            "Найдено больше одного активного "
+            "тренера. Использован первый."
+        )
+
+    coaches = coaches[:1]
+
+    active_count = len(active_players)
+
+    if active_count > 5:
+        raise ValueError(
+            "Liquipedia returned more than "
+            "5 active players: "
+            f"{active_count}. "
+            "Active roster must contain "
+            "exactly 5 players."
+        )
+
+    players = [
+        *active_players,
+        *coaches,
+    ]
 
     if active_count == 0:
         warnings.append(
-            "Не удалось найти active-состав. Проверь секции Player Roster -> Active на странице Liquipedia.")
+            "Не удалось найти активный состав."
+        )
     elif active_count < 5:
-        warnings.append(f"Найдено меньше 5 active-игроков: {active_count}.")
-    elif active_count > 6:
-        warnings.append(f"Найдено больше 6 active-игроков: {active_count}. Нужно проверить разметку Liquipedia.")
-
+        warnings.append(
+            "Найден неполный активный состав: "
+            f"{active_count}/5 игроков."
+        )
     if not any(player.role == "awper" for player in players if player.status == "active"):
         warnings.append("AWPer не найден автоматически. Возможно, роль нужно указать вручную.")
 
@@ -679,3 +789,175 @@ def liquipedia_draft_to_team_payload(
             for player in draft.players
         ],
     }
+
+
+def apply_liquipedia_role_assignments(
+        *,
+        draft: LiquipediaTeamRosterDraft,
+        role_assignments: list[dict],
+) -> LiquipediaTeamRosterDraft:
+    active_players = [
+        player
+        for player in draft.players
+        if (
+                player.status == "active"
+                and player.left_at is None
+        )
+    ]
+
+    if len(active_players) != 5:
+        raise ValueError(
+            "Team roster must contain "
+            "exactly 5 active players. "
+            f"Found: {len(active_players)}."
+        )
+
+    coach_count = sum(
+        1
+        for player in draft.players
+        if (
+                player.status == "coach"
+                and player.left_at is None
+        )
+    )
+
+    if coach_count > 1:
+        raise ValueError(
+            "Team roster cannot contain "
+            "more than one active coach."
+        )
+    assignments_by_nickname: dict[
+        str,
+        str,
+    ] = {}
+
+    original_nicknames: dict[
+        str,
+        str,
+    ] = {}
+
+    for assignment in role_assignments:
+        nickname = str(
+            assignment.get("nickname") or ""
+        ).strip()
+
+        if not nickname:
+            raise ValueError(
+                "role_assignments[].nickname "
+                "is required"
+            )
+
+        nickname_key = nickname.casefold()
+
+        if nickname_key in assignments_by_nickname:
+            raise ValueError(
+                "Duplicate role assignment "
+                f"for player: {nickname}"
+            )
+
+        role = normalize_team_role(
+            assignment.get("role")
+        )
+
+        if role is None:
+            raise ValueError(
+                f"Role is required for player: "
+                f"{nickname}"
+            )
+
+        assignments_by_nickname[
+            nickname_key
+        ] = role
+
+        original_nicknames[
+            nickname_key
+        ] = nickname
+
+    draft_player_keys = {
+        player.nickname.casefold()
+        for player in draft.players
+    }
+
+    unknown_players = sorted(
+        original_nicknames[nickname_key]
+        for nickname_key
+        in assignments_by_nickname
+        if nickname_key not in draft_player_keys
+    )
+
+    if unknown_players:
+        raise ValueError(
+            "Role assignments contain players "
+            "missing from the current "
+            "Liquipedia roster: "
+            + ", ".join(unknown_players)
+        )
+
+    updated_players: list[
+        LiquipediaRosterPlayer
+    ] = []
+
+    missing_active_roles: list[str] = []
+
+    for player in draft.players:
+        if player.status == "coach":
+            updated_players.append(
+                replace(
+                    player,
+                    role="coach",
+                )
+            )
+
+            continue
+
+        assigned_role = (
+            assignments_by_nickname.get(
+                player.nickname.casefold()
+            )
+        )
+
+        role = normalize_team_role(
+            assigned_role
+            if assigned_role is not None
+            else player.role
+        )
+
+        if role == "coach":
+            raise ValueError(
+                f"Active player "
+                f"'{player.nickname}' "
+                f"cannot have coach role"
+            )
+
+        if role not in ACTIVE_TEAM_ROLE_CODES:
+            missing_active_roles.append(
+                player.nickname
+            )
+
+            updated_players.append(
+                replace(
+                    player,
+                    role=None,
+                )
+            )
+
+            continue
+
+        updated_players.append(
+            replace(
+                player,
+                role=role,
+            )
+        )
+
+    if missing_active_roles:
+        raise ValueError(
+            "Select a role for every "
+            "active player: "
+            + ", ".join(missing_active_roles)
+        )
+
+    return replace(
+        draft,
+        players=updated_players,
+    )

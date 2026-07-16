@@ -1,8 +1,28 @@
 from datetime import date
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+
+TeamRoleCode = Literal[
+    "igl",
+    "awper",
+    "rifler",
+    "entry_frag",
+    "lurk",
+    "anchor_support",
+    "coach",
+]
+
+
+class TeamRoleOptionResponse(BaseModel):
+    value: TeamRoleCode
+    label: str
+
+    allowed_statuses: list[
+        Literal["active", "coach"]
+    ]
 
 class TeamRosterMemberResponse(BaseModel):
     roster_member_id: UUID
@@ -92,13 +112,24 @@ class ManualRosterUpdateRequest(BaseModel):
     players: list[ManualRosterPlayerUpdate]
 
 
+class LiquipediaRoleAssignment(BaseModel):
+    nickname: str = Field(min_length=1)
+    role: TeamRoleCode
+
+
 class LiquipediaTeamRequest(BaseModel):
-    team_page: str
+    team_page: str = Field(min_length=1)
     team_name: str | None = None
 
-    # false = только посмотреть состав из Liquipedia
-    # true = сохранить/обновить состав в БД
+    # false — только предпросмотр
+    # true — сохранить/обновить команду
     override_roster: bool = False
+
+    # При preview список пустой.
+    # При сохранении UI передаёт выбранные роли.
+    role_assignments: list[
+        LiquipediaRoleAssignment
+    ] = Field(default_factory=list)
 
 
 class LiquipediaRosterPlayerPreview(BaseModel):
@@ -120,8 +151,16 @@ class LiquipediaRosterPlayerPreview(BaseModel):
 class LiquipediaTeamPreviewResponse(BaseModel):
     team_name: str
     liquipedia_url: str
-    players: list[LiquipediaRosterPlayerPreview]
+
+    players: list[
+        LiquipediaRosterPlayerPreview
+    ]
+
     warnings: list[str]
+
+    role_options: list[
+        TeamRoleOptionResponse
+    ]
 
     total_players: int
     active_players_count: int

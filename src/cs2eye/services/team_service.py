@@ -7,50 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.models.team import Player, Team, TeamRosterMember
 
+from cs2eye.core.team_roles import (
+    TEAM_ROLE_CODES,
+    normalize_team_role,
+)
+
 VALID_STATUSES = {
     "active",
     "coach",
 }
 
-VALID_ROLES = {
-    "igl",
-    "awper",
-    "entry_frag",
-    "lurk",
-    "anchor_support",
-    "coach",
-}
 
-ROLE_ALIASES = {
-    "igl": "igl",
-    "captain": "igl",
-    "капитан": "igl",
-    "in-game leader": "igl",
-    "in game leader": "igl",
-
-    "awp": "awper",
-    "awper": "awper",
-    "sniper": "awper",
-
-    "entry": "entry_frag",
-    "entry frag": "entry_frag",
-    "entry fragger": "entry_frag",
-    "entry_frag": "entry_frag",
-
-    "lurk": "lurk",
-    "lurker": "lurk",
-
-    "anchor": "anchor_support",
-    "support": "anchor_support",
-    "anchor/support": "anchor_support",
-    "anchor support": "anchor_support",
-    "anchor_support": "anchor_support",
-    "rifler": "anchor_support",
-    "rifle": "anchor_support",
-
-    "coach": "coach",
-    "тренер": "coach",
-}
+VALID_ROLES = set(TEAM_ROLE_CODES)
 
 
 @dataclass(frozen=True)
@@ -179,22 +147,10 @@ def _normalize_status(value: str | None) -> str:
     return normalized
 
 
-def _normalize_role(value: str | None) -> str | None:
-    normalized = _normalize_text(value)
-
-    if normalized is None:
-        return None
-
-    normalized = normalized.casefold()
-    role = ROLE_ALIASES.get(normalized, normalized)
-
-    if role not in VALID_ROLES:
-        raise ValueError(
-            f"Invalid role: {value}. "
-            f"Allowed roles: {', '.join(sorted(VALID_ROLES))}"
-        )
-
-    return role
+def _normalize_role(
+        value: str | None,
+) -> str | None:
+    return normalize_team_role(value)
 
 
 async def _get_or_create_team(
@@ -264,7 +220,7 @@ async def _get_current_roster_member(
     return result.scalar_one_or_none()
 
 
-def _calculate_team_strength(
+def calculate_team_strength(
         *,
         team: Team,
         roster: list[RosterMemberInfo],
@@ -499,6 +455,50 @@ async def create_or_update_team_with_roster(
     )
 
 
+def _build_roster_member_info(
+        *,
+        roster_member: TeamRosterMember,
+        player: Player,
+) -> RosterMemberInfo:
+    return RosterMemberInfo(
+        roster_member_id=roster_member.id,
+        player_id=player.id,
+        nickname=player.nickname,
+        real_name=player.real_name,
+        country=player.country,
+        status=roster_member.status,
+        role=roster_member.role,
+        joined_at=roster_member.joined_at,
+        left_at=roster_member.left_at,
+        current_rating=player.current_rating,
+        player_strength_score=player.player_strength_score,
+        source_name=roster_member.source_name,
+        source_url=roster_member.source_url,
+        source_confidence=roster_member.source_confidence,
+        notes=roster_member.notes,
+    )
+
+
+def _build_team_detail_info(
+        *,
+        team: Team,
+        roster: list[RosterMemberInfo],
+) -> TeamDetailInfo:
+    return TeamDetailInfo(
+        id=team.id,
+        name=team.name,
+        country=team.country,
+        region=team.region,
+        liquipedia_url=team.liquipedia_url,
+        hltv_id=team.hltv_id,
+        roster=roster,
+        strength=calculate_team_strength(
+            team=team,
+            roster=roster,
+        ),
+    )
+
+
 async def get_team_detail(
         *,
         session: AsyncSession,
@@ -528,40 +528,16 @@ async def get_team_detail(
     )
 
     roster = [
-        RosterMemberInfo(
-            roster_member_id=roster_member.id,
-            player_id=player.id,
-            nickname=player.nickname,
-            real_name=player.real_name,
-            country=player.country,
-            status=roster_member.status,
-            role=roster_member.role,
-            joined_at=roster_member.joined_at,
-            left_at=roster_member.left_at,
-            current_rating=player.current_rating,
-            player_strength_score=player.player_strength_score,
-            source_name=roster_member.source_name,
-            source_url=roster_member.source_url,
-            source_confidence=roster_member.source_confidence,
-            notes=roster_member.notes,
+        _build_roster_member_info(
+            roster_member=roster_member,
+            player=player,
         )
         for roster_member, player in roster_result.all()
     ]
 
-    strength = _calculate_team_strength(
+    return _build_team_detail_info(
         team=team,
         roster=roster,
-    )
-
-    return TeamDetailInfo(
-        id=team.id,
-        name=team.name,
-        country=team.country,
-        region=team.region,
-        liquipedia_url=team.liquipedia_url,
-        hltv_id=team.hltv_id,
-        roster=roster,
-        strength=strength,
     )
 
 
@@ -569,21 +545,52 @@ async def list_teams(
         *,
         session: AsyncSession,
 ) -> list[TeamDetailInfo]:
-    result = await session.execute(
+    teams_result = await session.execute(
         select(Team)
         .order_by(Team.name)
     )
 
-    teams = list(result.scalars().all())
+    teams = list(teams_result.scalars().all())
+
+    if not teams:
+        return []
+
+    team_ids = [team.id for team in teams]
+
+    roster_result = await session.execute(
+        select(TeamRosterMember, Player)
+        .join(Player, TeamRosterMember.player_id == Player.id)
+        .where(
+            TeamRosterMember.team_id.in_(team_ids),
+            TeamRosterMember.left_at.is_(None),
+        )
+        .order_by(
+            TeamRosterMember.team_id,
+            TeamRosterMember.status,
+            Player.nickname,
+        )
+    )
+
+    roster_by_team_id: dict[UUID, list[RosterMemberInfo]] = {
+        team_id: []
+        for team_id in team_ids
+    }
+
+    for roster_member, player in roster_result.all():
+        roster_by_team_id[roster_member.team_id].append(
+            _build_roster_member_info(
+                roster_member=roster_member,
+                player=player,
+            )
+        )
 
     return [
-        await get_team_detail(
-            session=session,
-            team_id=team.id,
+        _build_team_detail_info(
+            team=team,
+            roster=roster_by_team_id[team.id],
         )
         for team in teams
     ]
-
 
 def _current_active_roster(
         team: TeamDetailInfo,

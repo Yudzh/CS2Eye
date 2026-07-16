@@ -12,12 +12,13 @@ from cs2eye.api.schemas.teams import (
     TeamDetailResponse,
     TeamListResponse,
     TeamRosterMemberResponse,
-    TeamStrengthResponse,
+    TeamStrengthResponse, TeamRoleOptionResponse,
 )
+from cs2eye.core.team_roles import TEAM_ROLE_OPTIONS, normalize_team_role
 from cs2eye.db.session import get_db_session
 from cs2eye.services.liquipedia_team_import_service import (
     fetch_liquipedia_team_roster,
-    liquipedia_draft_to_team_payload,
+    liquipedia_draft_to_team_payload, apply_liquipedia_role_assignments,
 )
 from cs2eye.services.team_service import (
     create_or_update_team_with_roster,
@@ -76,28 +77,54 @@ def _build_team_detail_response(team) -> TeamDetailResponse:
     )
 
 
-def _build_liquipedia_preview_response(draft) -> LiquipediaTeamPreviewResponse:
+def _build_liquipedia_preview_response(
+        draft,
+) -> LiquipediaTeamPreviewResponse:
     return LiquipediaTeamPreviewResponse(
         team_name=draft.team_name,
         liquipedia_url=draft.liquipedia_url,
+
         players=[
             LiquipediaRosterPlayerPreview(
                 nickname=item.nickname,
                 real_name=item.real_name,
                 country=item.country,
                 status=item.status,
-                role=item.role,
+                role=normalize_team_role(
+                    item.role
+                ),
                 joined_at=item.joined_at,
                 left_at=item.left_at,
-                liquipedia_url=item.liquipedia_url,
+                liquipedia_url=(
+                    item.liquipedia_url
+                ),
                 source_url=item.source_url,
-                source_confidence=item.source_confidence,
+                source_confidence=(
+                    item.source_confidence
+                ),
                 notes=item.notes,
             )
             for item in draft.players
         ],
+
         warnings=draft.warnings,
+
+        role_options=[
+            TeamRoleOptionResponse(
+                value=role_code,
+                label=role_label,
+                allowed_statuses=(
+                    ["coach"]
+                    if role_code == "coach"
+                    else ["active"]
+                ),
+            )
+            for role_code, role_label
+            in TEAM_ROLE_OPTIONS
+        ],
+
         total_players=len(draft.players),
+
         active_players_count=sum(
             1
             for item in draft.players
@@ -187,7 +214,20 @@ async def liquipedia_team_endpoint(
             team_name=request.team_name,
         )
 
-        preview = _build_liquipedia_preview_response(draft)
+        if request.override_roster:
+            draft = apply_liquipedia_role_assignments(
+                draft=draft,
+
+                role_assignments=[
+                    assignment.model_dump()
+                    for assignment
+                    in request.role_assignments
+                ],
+            )
+
+        preview = _build_liquipedia_preview_response(
+            draft
+        )
 
         if not request.override_roster:
             return LiquipediaTeamResponse(
