@@ -7,6 +7,10 @@ import {
 } from "react";
 
 import {
+  TeamStrengthExplanation,
+} from "../components/TeamStrengthExplanation";
+
+import {
   useSearchParams,
 } from "react-router-dom";
 
@@ -380,6 +384,19 @@ export function CompareTeamsPage() {
                       )
                     }
                   </dd>
+                </div>
+
+
+                <div className="comparison-strength-details">
+                  <TeamStrengthExplanation
+                    compact
+                    strength={comparison.team_a}
+                  />
+
+                  <TeamStrengthExplanation
+                    compact
+                    strength={comparison.team_b}
+                  />
                 </div>
 
                 <div>

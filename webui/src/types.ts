@@ -5,6 +5,25 @@ export type RosterStateCode =
   | "stand_in"
   | "unknown";
 
+export type TeamStrengthFactorKind =
+  | "base"
+  | "bonus"
+  | "penalty"
+  | "info";
+
+
+export interface TeamStrengthFactor {
+  code: string;
+  label: string;
+
+  kind: TeamStrengthFactorKind;
+
+  value: number;
+  explanation: string;
+
+  players: string[];
+}
+
 
 export interface TeamRosterState {
   code: RosterStateCode;
@@ -71,6 +90,12 @@ export interface TeamStrength {
 
   missing_required_roles: string[];
   notes: string[];
+  total_adjustment: number;
+    score_before_limits: number;
+
+    calculation: string;
+
+    factors: TeamStrengthFactor[];
 }
 
 
@@ -309,4 +334,61 @@ export interface LiquipediaTeamRequest {
 
   role_assignments:
     LiquipediaRoleAssignment[];
+}
+
+
+export interface AdminTeam {
+  id: string;
+  name: string;
+
+  country: string | null;
+  region: string | null;
+
+  liquipedia_url: string | null;
+  hltv_id: number | null;
+
+  roster: TeamRosterMember[];
+  strength: TeamStrength;
+}
+
+
+export interface AdminTeamListResponse {
+  items: AdminTeam[];
+  total: number;
+}
+
+
+export interface ManualRosterPlayerUpdate {
+  nickname: string;
+  delete: 0 | 1;
+
+  role: TeamRoleCode | null;
+
+  real_name: string | null;
+  country: string | null;
+
+  joined_at: string | null;
+  left_at: string | null;
+
+  liquipedia_url: string | null;
+  hltv_id: number | null;
+
+  current_rating: number | null;
+
+  player_strength_score:
+    number | null;
+
+  notes: string | null;
+}
+
+
+export interface ManualRosterUpdateRequest {
+  players:
+    ManualRosterPlayerUpdate[];
+}
+
+
+export interface TeamDeleteResponse {
+  deleted: boolean;
+  team_name: string;
 }

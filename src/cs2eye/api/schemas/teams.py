@@ -48,6 +48,21 @@ class TeamRosterMemberResponse(BaseModel):
     notes: str | None
 
 
+class TeamStrengthFactorResponse(
+        BaseModel
+):
+    code: str
+    label: str
+
+    # base, bonus, penalty, info
+    kind: str
+
+    value: float
+    explanation: str
+
+    players: list[str]
+
+
 class TeamStrengthResponse(BaseModel):
     team_id: UUID
     team_name: str
@@ -57,10 +72,19 @@ class TeamStrengthResponse(BaseModel):
 
     roster_bonus: float
     roster_penalty: float
+    total_adjustment: float
 
+    score_before_limits: float
     team_strength_score: float
 
+    calculation: str
+
     missing_required_roles: list[str]
+
+    factors: list[
+        TeamStrengthFactorResponse
+    ]
+
     notes: list[str]
 
 

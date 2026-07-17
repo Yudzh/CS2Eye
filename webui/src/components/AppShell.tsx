@@ -68,7 +68,7 @@ export function AppShell({
                     : ""
                 }`
               }
-              to="/admin/teams/import"
+              to="/admin/teams"
             >
               Администрирование
             </NavLink>

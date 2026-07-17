@@ -47,6 +47,22 @@ class RosterMemberInfo:
 
 
 @dataclass(frozen=True)
+class TeamStrengthFactorInfo:
+    code: str
+    label: str
+
+    # base, bonus, penalty, info
+    kind: str
+
+    # Для bonus положительное число.
+    # Для penalty отрицательное.
+    # Для base — базовая сила игроков.
+    value: float
+
+    explanation: str
+    players: list[str]
+
+@dataclass(frozen=True)
 class TeamStrengthInfo:
     team_id: UUID
     team_name: str
@@ -56,11 +72,18 @@ class TeamStrengthInfo:
 
     roster_bonus: float
     roster_penalty: float
+    total_adjustment: float
 
+    score_before_limits: float
     team_strength_score: float
 
+    calculation: str
+
     missing_required_roles: list[str]
+    factors: list[TeamStrengthFactorInfo]
     notes: list[str]
+
+
 
 
 @dataclass(frozen=True)
@@ -220,6 +243,24 @@ async def _get_current_roster_member(
     return result.scalar_one_or_none()
 
 
+def _strength_factor(
+        *,
+        code: str,
+        label: str,
+        kind: str,
+        value: float,
+        explanation: str,
+        players: list[str] | None = None,
+) -> TeamStrengthFactorInfo:
+    return TeamStrengthFactorInfo(
+        code=code,
+        label=label,
+        kind=kind,
+        value=round(value, 2),
+        explanation=explanation,
+        players=players or [],
+    )
+
 def calculate_team_strength(
         *,
         team: Team,
@@ -234,48 +275,125 @@ def calculate_team_strength(
     active_players = [
         item
         for item in current_roster
-        if item.status in {"active", "stand-in"}
+        if item.status == "active"
     ]
 
+    factors: list[
+        TeamStrengthFactorInfo
+    ] = []
+
+    notes: list[str] = []
+    missing_required_roles: list[str] = []
+
     if not active_players:
+        factors.append(
+            _strength_factor(
+                code="no_active_players",
+                label="Нет активного состава",
+                kind="penalty",
+                value=-100.0,
+                explanation=(
+                    "В команде нет активных "
+                    "игроков для расчёта."
+                ),
+            )
+        )
+
         return TeamStrengthInfo(
             team_id=team.id,
             team_name=team.name,
+
             active_players_count=0,
             base_player_score=0.0,
+
             roster_bonus=0.0,
             roster_penalty=100.0,
+            total_adjustment=-100.0,
+
+            score_before_limits=-100.0,
             team_strength_score=0.0,
-            missing_required_roles=["awper", "igl"],
-            notes=["Нет active-игроков для расчёта силы состава."],
+
+            calculation=(
+                "0.00 - 100.00 = "
+                "-100.00 → 0.00"
+            ),
+
+            missing_required_roles=[
+                "awper",
+                "igl",
+            ],
+
+            factors=factors,
+
+            notes=[
+                "Нет активных игроков "
+                "для расчёта силы состава."
+            ],
         )
 
     base_player_score = round(
-        sum(item.player_strength_score for item in active_players) / len(active_players),
+        sum(
+            item.player_strength_score
+            for item in active_players
+        )
+        / len(active_players),
         2,
     )
 
-    roster_bonus = 0.0
-    roster_penalty = 0.0
-    notes: list[str] = []
-
-    active_players_count = len(active_players)
-
-    if active_players_count < 5:
-        penalty = (5 - active_players_count) * 8
-        roster_penalty += penalty
-        notes.append(f"Неполный состав: active/stand-in игроков {active_players_count}/5.")
-
-    stand_in_count = sum(
-        1
-        for item in active_players
-        if item.status == "stand-in"
+    factors.append(
+        _strength_factor(
+            code="base_player_score",
+            label="Средняя сила игроков",
+            kind="base",
+            value=base_player_score,
+            explanation=(
+                "Среднее значение силы "
+                f"{len(active_players)} "
+                "активных игроков."
+            ),
+            players=[
+                item.nickname
+                for item in active_players
+            ],
+        )
     )
 
-    if stand_in_count > 0:
-        penalty = stand_in_count * 7
-        roster_penalty += penalty
-        notes.append(f"Есть stand-in игроки: {stand_in_count}.")
+    active_players_count = len(
+        active_players
+    )
+
+    if active_players_count != 5:
+        difference = abs(
+            5 - active_players_count
+        )
+
+        penalty = min(
+            difference * 10.0,
+            30.0,
+        )
+
+        factors.append(
+            _strength_factor(
+                code="invalid_roster_size",
+                label=(
+                    "Некорректный размер "
+                    "состава"
+                ),
+                kind="penalty",
+                value=-penalty,
+                explanation=(
+                    "В основном составе должно "
+                    "быть ровно 5 игроков. "
+                    f"Сейчас: "
+                    f"{active_players_count}."
+                ),
+            )
+        )
+
+        notes.append(
+            "Основной состав содержит "
+            f"{active_players_count}/5 игроков."
+        )
 
     roles = {
         item.role
@@ -283,54 +401,375 @@ def calculate_team_strength(
         if item.role is not None
     }
 
-    missing_required_roles: list[str] = []
-
-    if "awper" not in roles:
-        missing_required_roles.append("awper")
-        roster_penalty += 5
-        notes.append("Не указан AWPer в активном составе.")
-
     if "igl" not in roles:
-        missing_required_roles.append("igl")
-        roster_penalty += 5
-        notes.append("Не указан IGL в активном составе.")
+        missing_required_roles.append(
+            "igl"
+        )
+
+        factors.append(
+            _strength_factor(
+                code="missing_igl",
+                label="Нет назначенного IGL",
+                kind="penalty",
+                value=-10.0,
+                explanation=(
+                    "В активном составе "
+                    "не назначен капитан / IGL."
+                ),
+            )
+        )
+
+        notes.append(
+            "Не указан IGL "
+            "в активном составе."
+        )
+
+    awpers = [
+        item
+        for item in active_players
+        if item.role == "awper"
+    ]
+
+    if not awpers:
+        missing_required_roles.append(
+            "awper"
+        )
+
+        factors.append(
+            _strength_factor(
+                code="missing_awper",
+                label="Нет назначенного AWPer",
+                kind="penalty",
+                value=-10.0,
+                explanation=(
+                    "В активном составе "
+                    "не назначен основной "
+                    "AWP-снайпер."
+                ),
+            )
+        )
+
+        notes.append(
+            "Не указан AWPer "
+            "в активном составе."
+        )
+    else:
+        main_awper = max(
+            awpers,
+            key=lambda item: (
+                item.player_strength_score
+            ),
+        )
+
+        awper_score = (
+            main_awper
+            .player_strength_score
+        )
+
+        awper_factor_value = 0.0
+        awper_label = (
+            "Нормальный уровень AWPer"
+        )
+        awper_kind = "info"
+
+        if awper_score < 40:
+            awper_factor_value = -15.0
+            awper_label = "Слабый AWPer"
+            awper_kind = "penalty"
+
+        elif awper_score < 50:
+            awper_factor_value = -10.0
+            awper_label = (
+                "AWPer ниже среднего"
+            )
+            awper_kind = "penalty"
+
+        elif awper_score < 60:
+            awper_factor_value = -5.0
+            awper_label = (
+                "Недостаточно сильный AWPer"
+            )
+            awper_kind = "penalty"
+
+        elif awper_score < 70:
+            awper_factor_value = 0.0
+            awper_label = (
+                "Стабильный AWPer"
+            )
+            awper_kind = "info"
+
+        elif awper_score < 80:
+            awper_factor_value = 5.0
+            awper_label = "Сильный AWPer"
+            awper_kind = "bonus"
+
+        else:
+            awper_factor_value = 8.0
+            awper_label = (
+                "Звёздный AWPer"
+            )
+            awper_kind = "bonus"
+
+        factors.append(
+            _strength_factor(
+                code="awper_strength",
+                label=awper_label,
+                kind=awper_kind,
+                value=awper_factor_value,
+                explanation=(
+                    f"{main_awper.nickname}: "
+                    "индивидуальная сила "
+                    f"{awper_score:.2f}."
+                ),
+                players=[
+                    main_awper.nickname
+                ],
+            )
+        )
 
     today = date.today()
+
+    known_join_dates = [
+        item
+        for item in active_players
+        if item.joined_at is not None
+    ]
+
     very_new_players = [
         item
         for item in active_players
-        if item.joined_at is not None and item.joined_at >= today - timedelta(days=14)
+        if (
+            item.joined_at is not None
+            and item.joined_at
+            >= today - timedelta(days=14)
+        )
     ]
 
     if very_new_players:
-        penalty = len(very_new_players) * 3
-        roster_penalty += penalty
-        notes.append(f"Есть новые игроки в составе за последние 14 дней: {len(very_new_players)}.")
+        new_players_penalty = min(
+            len(very_new_players) * 5.0,
+            15.0,
+        )
 
-    stable_players = [
-        item
-        for item in active_players
-        if item.joined_at is not None and item.joined_at <= today - timedelta(days=90)
-    ]
+        factors.append(
+            _strength_factor(
+                code="very_new_players",
+                label="Недавние изменения состава",
+                kind="penalty",
+                value=-new_players_penalty,
+                explanation=(
+                    "Игроки присоединились "
+                    "к команде не более "
+                    "14 дней назад."
+                ),
+                players=[
+                    item.nickname
+                    for item
+                    in very_new_players
+                ],
+            )
+        )
 
-    if active_players_count >= 5 and len(stable_players) >= 5:
-        roster_bonus += 5
-        notes.append("Состав стабилен минимум 90 дней.")
+        notes.append(
+            "Есть новые игроки "
+            "за последние 14 дней: "
+            f"{len(very_new_players)}."
+        )
 
-    team_strength_score = round(
-        max(0.0, min(100.0, base_player_score + roster_bonus - roster_penalty)),
+    elif (
+        active_players_count == 5
+        and len(known_join_dates) == 5
+    ):
+        oldest_required_date = (
+            today - timedelta(days=90)
+        )
+
+        all_stable_90_days = all(
+            item.joined_at is not None
+            and item.joined_at
+            <= oldest_required_date
+            for item in active_players
+        )
+
+        if all_stable_90_days:
+            factors.append(
+                _strength_factor(
+                    code="stable_roster_90_days",
+                    label="Стабильный состав",
+                    kind="bonus",
+                    value=10.0,
+                    explanation=(
+                        "Все пять игроков "
+                        "находятся в составе "
+                        "минимум 90 дней."
+                    ),
+                    players=[
+                        item.nickname
+                        for item
+                        in active_players
+                    ],
+                )
+            )
+
+            notes.append(
+                "Состав стабилен "
+                "минимум 90 дней."
+            )
+
+        else:
+            oldest_required_date = (
+                today - timedelta(days=30)
+            )
+
+            all_stable_30_days = all(
+                item.joined_at is not None
+                and item.joined_at
+                <= oldest_required_date
+                for item in active_players
+            )
+
+            if all_stable_30_days:
+                factors.append(
+                    _strength_factor(
+                        code=(
+                            "stable_roster_"
+                            "30_days"
+                        ),
+                        label=(
+                            "Относительно "
+                            "стабильный состав"
+                        ),
+                        kind="bonus",
+                        value=5.0,
+                        explanation=(
+                            "Все пять игроков "
+                            "находятся в составе "
+                            "минимум 30 дней."
+                        ),
+                        players=[
+                            item.nickname
+                            for item
+                            in active_players
+                        ],
+                    )
+                )
+
+    elif len(known_join_dates) < 5:
+        factors.append(
+            _strength_factor(
+                code="unknown_roster_stability",
+                label=(
+                    "Недостаточно данных "
+                    "о стабильности"
+                ),
+                kind="info",
+                value=0.0,
+                explanation=(
+                    "Не у всех активных игроков "
+                    "указана дата присоединения. "
+                    "Бонус стабильности "
+                    "не применяется."
+                ),
+                players=[
+                    item.nickname
+                    for item in active_players
+                    if item.joined_at is None
+                ],
+            )
+        )
+
+    roster_bonus = round(
+        sum(
+            factor.value
+            for factor in factors
+            if factor.value > 0
+        ),
         2,
     )
+
+    roster_penalty = round(
+        abs(
+            sum(
+                factor.value
+                for factor in factors
+                if factor.value < 0
+            )
+        ),
+        2,
+    )
+
+    total_adjustment = round(
+        roster_bonus - roster_penalty,
+        2,
+    )
+
+    score_before_limits = round(
+        base_player_score
+        + total_adjustment,
+        2,
+    )
+
+    team_strength_score = round(
+        max(
+            0.0,
+            min(
+                100.0,
+                score_before_limits,
+            ),
+        ),
+        2,
+    )
+
+    calculation = (
+        f"{base_player_score:.2f} "
+        f"+ {roster_bonus:.2f} "
+        f"- {roster_penalty:.2f} "
+        f"= {score_before_limits:.2f}"
+    )
+
+    if (
+        score_before_limits
+        != team_strength_score
+    ):
+        calculation += (
+            " → ограничено до "
+            f"{team_strength_score:.2f}"
+        )
 
     return TeamStrengthInfo(
         team_id=team.id,
         team_name=team.name,
-        active_players_count=active_players_count,
-        base_player_score=base_player_score,
-        roster_bonus=round(roster_bonus, 2),
-        roster_penalty=round(roster_penalty, 2),
-        team_strength_score=team_strength_score,
-        missing_required_roles=missing_required_roles,
+
+        active_players_count=(
+            active_players_count
+        ),
+
+        base_player_score=(
+            base_player_score
+        ),
+
+        roster_bonus=roster_bonus,
+        roster_penalty=roster_penalty,
+
+        total_adjustment=(
+            total_adjustment
+        ),
+
+        score_before_limits=(
+            score_before_limits
+        ),
+
+        team_strength_score=(
+            team_strength_score
+        ),
+
+        calculation=calculation,
+
+        missing_required_roles=(
+            missing_required_roles
+        ),
+
+        factors=factors,
         notes=notes,
     )
 
@@ -902,17 +1341,74 @@ async def update_team_roster_manually(
         team_name: str,
         players: list[dict],
 ) -> TeamDetailInfo:
-    normalized_team_name = _required_text(team_name, "team_name")
+    normalized_team_name = _required_text(
+        team_name,
+        "team_name",
+    )
 
     team_result = await session.execute(
         select(Team)
-        .where(func.lower(Team.name) == normalized_team_name.casefold())
+        .where(
+            func.lower(Team.name)
+            == normalized_team_name.casefold()
+        )
     )
 
     team = team_result.scalar_one_or_none()
 
     if team is None:
-        raise ValueError(f"Team not found: {normalized_team_name}")
+        raise ValueError(
+            f"Team not found: "
+            f"{normalized_team_name}"
+        )
+
+    current_result = await session.execute(
+        select(
+            TeamRosterMember,
+            Player,
+        )
+        .join(
+            Player,
+            TeamRosterMember.player_id
+            == Player.id,
+        )
+        .where(
+            TeamRosterMember.team_id
+            == team.id,
+            TeamRosterMember.left_at.is_(None),
+        )
+    )
+
+    current_members = list(
+        current_result.all()
+    )
+
+    future_roles: dict[
+        str,
+        str | None,
+    ] = {}
+
+    future_nicknames: dict[
+        str,
+        str,
+    ] = {}
+
+    for roster_member, player in current_members:
+        nickname_key = (
+            player.nickname.casefold()
+        )
+
+        future_roles[nickname_key] = (
+            _normalize_role(
+                roster_member.role
+            )
+        )
+
+        future_nicknames[nickname_key] = (
+            player.nickname
+        )
+
+    requested_nicknames: set[str] = set()
 
     for player_data in players:
         nickname = _required_text(
@@ -920,83 +1416,316 @@ async def update_team_roster_manually(
             "players[].nickname",
         )
 
-        should_delete = int(player_data.get("delete", 0)) == 1
+        nickname_key = nickname.casefold()
 
-        player_result = await session.execute(
-            select(Player)
-            .where(func.lower(Player.nickname) == nickname.casefold())
+        if nickname_key in requested_nicknames:
+            raise ValueError(
+                "Игрок указан в запросе "
+                f"несколько раз: {nickname}"
+            )
+
+        requested_nicknames.add(
+            nickname_key
         )
 
-        existing_player = player_result.scalar_one_or_none()
+        should_delete = (
+            int(
+                player_data.get(
+                    "delete",
+                    0,
+                )
+            )
+            == 1
+        )
 
         if should_delete:
-            if existing_player is None:
-                continue
+            future_roles.pop(
+                nickname_key,
+                None,
+            )
 
-            await session.execute(
-                delete(TeamRosterMember)
-                .where(
-                    TeamRosterMember.team_id == team.id,
-                    TeamRosterMember.player_id == existing_player.id,
-                )
+            future_nicknames.pop(
+                nickname_key,
+                None,
             )
 
             continue
 
-        role = _normalize_role(player_data.get("role"))
+        role = _normalize_role(
+            player_data.get("role")
+        )
 
         if role is None:
             raise ValueError(
-                f"Role is required for player '{nickname}' when delete=0. "
-                f"Allowed roles: {', '.join(sorted(VALID_ROLES))}"
+                "Не выбрана роль для игрока: "
+                f"{nickname}"
             )
 
-        player = await _get_or_create_player(
-            session=session,
-            nickname=nickname,
+        future_roles[nickname_key] = role
+        future_nicknames[nickname_key] = (
+            nickname
         )
 
-        if player_data.get("real_name") is not None:
-            player.real_name = _normalize_text(player_data.get("real_name"))
+    players_without_roles = [
+        future_nicknames[nickname_key]
+        for nickname_key, role
+        in future_roles.items()
+        if role is None
+    ]
 
-        if player_data.get("country") is not None:
-            player.country = _normalize_text(player_data.get("country"))
-
-        if player_data.get("liquipedia_url") is not None:
-            player.liquipedia_url = _normalize_text(player_data.get("liquipedia_url"))
-
-        if player_data.get("hltv_id") is not None:
-            player.hltv_id = player_data.get("hltv_id")
-
-        if player_data.get("current_rating") is not None:
-            player.current_rating = float(player_data["current_rating"])
-
-        if player_data.get("player_strength_score") is not None:
-            player.player_strength_score = float(player_data["player_strength_score"])
-
-        roster_member = await _get_current_roster_member(
-            session=session,
-            team_id=team.id,
-            player_id=player.id,
-        )
-
-        if roster_member is None:
-            roster_member = TeamRosterMember(
-                team_id=team.id,
-                player_id=player.id,
+    if players_without_roles:
+        raise ValueError(
+            "Не выбрана роль для: "
+            + ", ".join(
+                sorted(players_without_roles)
             )
-            session.add(roster_member)
+        )
 
-        roster_member.status = "coach" if role == "coach" else "active"
-        roster_member.role = role
-        roster_member.joined_at = player_data.get("joined_at")
-        roster_member.left_at = player_data.get("left_at")
-        roster_member.source_name = "manual"
-        roster_member.source_url = _normalize_text(player_data.get("source_url"))
-        roster_member.source_confidence = 1.0
-        roster_member.notes = _normalize_text(player_data.get("notes"))
+    active_players_count = sum(
+        1
+        for role in future_roles.values()
+        if role != "coach"
+    )
 
-    await session.commit()
+    coach_count = sum(
+        1
+        for role in future_roles.values()
+        if role == "coach"
+    )
+
+    if active_players_count != 5:
+        raise ValueError(
+            "В основном составе должно быть "
+            "ровно 5 игроков. "
+            f"Сейчас получается: "
+            f"{active_players_count}."
+        )
+
+    if coach_count > 1:
+        raise ValueError(
+            "У команды не может быть "
+            "больше одного тренера."
+        )
+
+    try:
+        for player_data in players:
+            nickname = _required_text(
+                player_data.get("nickname"),
+                "players[].nickname",
+            )
+
+            should_delete = (
+                int(
+                    player_data.get(
+                        "delete",
+                        0,
+                    )
+                )
+                == 1
+            )
+
+            player_result = (
+                await session.execute(
+                    select(Player)
+                    .where(
+                        func.lower(
+                            Player.nickname
+                        )
+                        == nickname.casefold()
+                    )
+                )
+            )
+
+            existing_player = (
+                player_result
+                .scalar_one_or_none()
+            )
+
+            if should_delete:
+                if existing_player is None:
+                    continue
+
+                await session.execute(
+                    delete(TeamRosterMember)
+                    .where(
+                        TeamRosterMember.team_id
+                        == team.id,
+
+                        TeamRosterMember.player_id
+                        == existing_player.id,
+                    )
+                )
+
+                continue
+
+            role = _normalize_role(
+                player_data.get("role")
+            )
+
+            if role is None:
+                raise ValueError(
+                    "Не выбрана роль для игрока: "
+                    f"{nickname}"
+                )
+
+            player = await _get_or_create_player(
+                session=session,
+                nickname=nickname,
+            )
+
+            if (
+                player_data.get("real_name")
+                is not None
+            ):
+                player.real_name = (
+                    _normalize_text(
+                        player_data.get(
+                            "real_name"
+                        )
+                    )
+                )
+
+            if (
+                player_data.get("country")
+                is not None
+            ):
+                player.country = (
+                    _normalize_text(
+                        player_data.get(
+                            "country"
+                        )
+                    )
+                )
+
+            if (
+                player_data.get(
+                    "liquipedia_url"
+                )
+                is not None
+            ):
+                player.liquipedia_url = (
+                    _normalize_text(
+                        player_data.get(
+                            "liquipedia_url"
+                        )
+                    )
+                )
+
+            if (
+                player_data.get("hltv_id")
+                is not None
+            ):
+                player.hltv_id = (
+                    player_data["hltv_id"]
+                )
+
+            if (
+                player_data.get(
+                    "current_rating"
+                )
+                is not None
+            ):
+                player.current_rating = float(
+                    player_data[
+                        "current_rating"
+                    ]
+                )
+
+            if (
+                player_data.get(
+                    "player_strength_score"
+                )
+                is not None
+            ):
+                player.player_strength_score = (
+                    float(
+                        player_data[
+                            "player_strength_score"
+                        ]
+                    )
+                )
+
+            roster_member = (
+                await _get_current_roster_member(
+                    session=session,
+                    team_id=team.id,
+                    player_id=player.id,
+                )
+            )
+
+            is_new_member = (
+                roster_member is None
+            )
+
+            if roster_member is None:
+                roster_member = (
+                    TeamRosterMember(
+                        team_id=team.id,
+                        player_id=player.id,
+                    )
+                )
+
+                session.add(roster_member)
+
+            roster_member.status = (
+                "coach"
+                if role == "coach"
+                else "active"
+            )
+
+            roster_member.role = role
+            roster_member.left_at = None
+
+            joined_at = player_data.get(
+                "joined_at"
+            )
+
+            if (
+                joined_at is not None
+                or is_new_member
+            ):
+                roster_member.joined_at = (
+                    joined_at
+                )
+
+            roster_member.source_name = (
+                "manual"
+            )
+
+            liquipedia_url = (
+                player_data.get(
+                    "liquipedia_url"
+                )
+            )
+
+            if liquipedia_url is not None:
+                roster_member.source_url = (
+                    _normalize_text(
+                        liquipedia_url
+                    )
+                )
+
+            roster_member.source_confidence = (
+                1.0
+            )
+
+            if (
+                player_data.get("notes")
+                is not None
+            ):
+                roster_member.notes = (
+                    _normalize_text(
+                        player_data.get(
+                            "notes"
+                        )
+                    )
+                )
+
+        await session.commit()
+
+    except Exception:
+        await session.rollback()
+        raise
 
     return await get_team_detail(
         session=session,

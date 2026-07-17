@@ -5,6 +5,10 @@ import {
 } from "react";
 
 import {
+  TeamStrengthExplanation,
+} from "../components/TeamStrengthExplanation";
+
+import {
   Link,
   useParams,
 } from "react-router-dom";
@@ -180,6 +184,10 @@ export function TeamDetailsPage() {
               team.strength.team_strength_score
             }
           />
+
+          <TeamStrengthExplanation
+              strength={team.strength}
+            />
 
           <p className="panel__note">
             {team.roster_state.note}

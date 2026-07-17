@@ -6,6 +6,7 @@ import {
 
 import {
   Link,
+  useSearchParams
 } from "react-router-dom";
 
 import {
@@ -40,15 +41,24 @@ interface PreviewSource {
 
 
 export function AdminTeamsImportPage() {
-  const [
-    teamPage,
-    setTeamPage,
-  ] = useState("");
+    const [searchParams] = useSearchParams();
+      const [
+      teamPage,
+      setTeamPage,
+    ] = useState(
+      () =>
+        searchParams.get("teamPage")
+        || "",
+    );
 
-  const [
-    teamName,
-    setTeamName,
-  ] = useState("");
+      const [
+      teamName,
+      setTeamName,
+    ] = useState(
+      () =>
+        searchParams.get("teamName")
+        || "",
+    );
 
   const [
     preview,

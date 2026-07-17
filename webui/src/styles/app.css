@@ -1161,8 +1161,411 @@ td small {
   color: var(--muted);
 }
 
+.admin-team-selector {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+
+  margin-bottom: 20px;
+}
+
+
+.admin-team-selector label {
+  min-width: 280px;
+}
+
+
+.admin-team-selector label > span {
+  display: block;
+
+  margin-bottom: 7px;
+
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+
+.admin-team-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+
+.button--danger {
+  border-color:
+    rgba(242, 118, 118, 0.35);
+
+  background:
+    rgba(242, 118, 118, 0.1);
+
+  color: var(--red);
+}
+
+
+.button--danger:hover {
+  background:
+    rgba(242, 118, 118, 0.18);
+}
+
+
+.admin-roster-summary {
+  display: grid;
+
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr));
+
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+
+.admin-roster-summary article {
+  padding: 17px;
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 14px;
+
+  background: var(--panel);
+}
+
+
+.admin-roster-summary span {
+  display: block;
+
+  color: var(--muted);
+  font-size: 13px;
+}
+
+
+.admin-roster-summary strong {
+  display: block;
+
+  margin-top: 7px;
+
+  font-size: 25px;
+}
+
+
+.text-danger {
+  color: var(--red);
+}
+
+
+.admin-roster-list {
+  display: grid;
+  gap: 14px;
+}
+
+
+.admin-player-card {
+  padding: 16px;
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 14px;
+
+  background: #0c121b;
+}
+
+
+.admin-player-card--deleted {
+  border-color:
+    rgba(242, 118, 118, 0.3);
+
+  background:
+    rgba(242, 118, 118, 0.05);
+
+  opacity: 0.75;
+}
+
+
+.admin-player-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+
+  margin-bottom: 15px;
+}
+
+
+.admin-player-card__header strong {
+  font-size: 18px;
+}
+
+
+.admin-player-grid {
+  display: grid;
+
+  grid-template-columns:
+    repeat(4, minmax(0, 1fr));
+
+  gap: 13px;
+}
+
+
+.admin-player-grid label > span {
+  display: block;
+
+  margin-bottom: 6px;
+
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+
+.admin-player-grid__notes {
+  grid-column: span 4;
+}
+
+.strength-explanation {
+  margin-top: 20px;
+  padding: 20px;
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 16px;
+
+  background: var(--panel);
+}
+
+
+.strength-explanation__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+
+  margin-bottom: 18px;
+}
+
+
+.strength-explanation__header h2 {
+  margin: 5px 0 0;
+}
+
+
+.strength-explanation__formula {
+  padding: 10px 13px;
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 10px;
+
+  background: #0c121b;
+
+  font-family: monospace;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+
+.strength-explanation__summary {
+  display: grid;
+
+  grid-template-columns:
+    repeat(4, minmax(0, 1fr));
+
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+
+.strength-explanation__summary article {
+  padding: 14px;
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 12px;
+
+  background: #0c121b;
+}
+
+
+.strength-explanation__summary span {
+  display: block;
+
+  color: var(--muted);
+  font-size: 12px;
+}
+
+
+.strength-explanation__summary strong {
+  display: block;
+
+  margin-top: 6px;
+  font-size: 22px;
+}
+
+
+.text-positive {
+  color: var(--green);
+}
+
+
+.strength-factor-list {
+  display: grid;
+  gap: 10px;
+}
+
+
+.strength-factor {
+  display: grid;
+
+  grid-template-columns:
+    70px minmax(0, 1fr);
+
+  gap: 14px;
+  padding: 14px;
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 12px;
+
+  background: #0c121b;
+}
+
+
+.strength-factor__value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 54px;
+
+  border-radius: 9px;
+
+  background:
+    rgba(255, 255, 255, 0.04);
+
+  font-size: 19px;
+  font-weight: 800;
+}
+
+
+.strength-factor--bonus {
+  border-color:
+    rgba(89, 212, 153, 0.25);
+}
+
+
+.strength-factor--bonus
+.strength-factor__value {
+  background:
+    rgba(89, 212, 153, 0.1);
+
+  color: var(--green);
+}
+
+
+.strength-factor--penalty {
+  border-color:
+    rgba(242, 118, 118, 0.25);
+}
+
+
+.strength-factor--penalty
+.strength-factor__value {
+  background:
+    rgba(242, 118, 118, 0.1);
+
+  color: var(--red);
+}
+
+
+.strength-factor--base
+.strength-factor__value {
+  color: var(--accent);
+}
+
+
+.strength-factor--info
+.strength-factor__value {
+  color: var(--muted);
+}
+
+
+.strength-factor__content strong {
+  font-size: 15px;
+}
+
+
+.strength-factor__content p {
+  margin: 5px 0;
+
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+
+.strength-factor__content small {
+  color: var(--muted);
+}
+
+
+.comparison-strength-details {
+  display: grid;
+
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+
+  gap: 16px;
+  margin-top: 20px;
+}
+
+
+.strength-explanation--compact {
+  margin-top: 0;
+}
+
+
+.strength-explanation--compact
+.strength-explanation__summary {
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+}
+
 
 @media (max-width: 1100px) {
+
+  .strength-explanation__header {
+    flex-direction: column;
+  }
+
+  .strength-explanation__formula {
+    width: 100%;
+    white-space: normal;
+  }
+
+  .strength-explanation__summary,
+  .comparison-strength-details {
+    grid-template-columns: 1fr;
+  }
+
+  .strength-factor {
+    grid-template-columns: 58px 1fr;
+  }
+
+      .admin-player-grid {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-player-grid__notes {
+    grid-column: span 2;
+  }
+
   .team-grid {
     grid-template-columns:
       repeat(2, minmax(0, 1fr));
@@ -1185,6 +1588,31 @@ td small {
 
 
 @media (max-width: 760px) {
+
+  .admin-team-selector,
+  .admin-team-actions,
+  .admin-player-card__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-team-selector label {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .admin-team-actions .button {
+    width: 100%;
+  }
+
+  .admin-roster-summary,
+  .admin-player-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-player-grid__notes {
+    grid-column: span 1;
+  }
 
   .page-actions,
   .save-import-panel,

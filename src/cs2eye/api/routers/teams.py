@@ -12,7 +12,7 @@ from cs2eye.api.schemas.teams import (
     TeamDetailResponse,
     TeamListResponse,
     TeamRosterMemberResponse,
-    TeamStrengthResponse, TeamRoleOptionResponse,
+    TeamStrengthResponse, TeamRoleOptionResponse, TeamStrengthFactorResponse,
 )
 from cs2eye.core.team_roles import TEAM_ROLE_OPTIONS, normalize_team_role
 from cs2eye.db.session import get_db_session
@@ -31,16 +31,66 @@ from cs2eye.services.team_service import (
 router = APIRouter(prefix="/teams", tags=["teams"])
 
 
-def _build_strength_response(strength) -> TeamStrengthResponse:
+def _build_strength_response(
+        strength,
+) -> TeamStrengthResponse:
     return TeamStrengthResponse(
         team_id=strength.team_id,
         team_name=strength.team_name,
-        active_players_count=strength.active_players_count,
-        base_player_score=strength.base_player_score,
-        roster_bonus=strength.roster_bonus,
-        roster_penalty=strength.roster_penalty,
-        team_strength_score=strength.team_strength_score,
-        missing_required_roles=strength.missing_required_roles,
+
+        active_players_count=(
+            strength.active_players_count
+        ),
+
+        base_player_score=(
+            strength.base_player_score
+        ),
+
+        roster_bonus=(
+            strength.roster_bonus
+        ),
+
+        roster_penalty=(
+            strength.roster_penalty
+        ),
+
+        total_adjustment=(
+            strength.total_adjustment
+        ),
+
+        score_before_limits=(
+            strength.score_before_limits
+        ),
+
+        team_strength_score=(
+            strength.team_strength_score
+        ),
+
+        calculation=(
+            strength.calculation
+        ),
+
+        missing_required_roles=(
+            strength.missing_required_roles
+        ),
+
+        factors=[
+            TeamStrengthFactorResponse(
+                code=factor.code,
+                label=factor.label,
+                kind=factor.kind,
+                value=factor.value,
+
+                explanation=(
+                    factor.explanation
+                ),
+
+                players=factor.players,
+            )
+            for factor
+            in strength.factors
+        ],
+
         notes=strength.notes,
     )
 
@@ -149,6 +199,26 @@ async def list_teams_endpoint(
         ],
         total=len(teams),
     )
+
+@router.get(
+    "/role-options",
+    response_model=list[TeamRoleOptionResponse],
+)
+async def list_team_role_options_endpoint(
+) -> list[TeamRoleOptionResponse]:
+    return [
+        TeamRoleOptionResponse(
+            value=role_code,
+            label=role_label,
+            allowed_statuses=(
+                ["coach"]
+                if role_code == "coach"
+                else ["active"]
+            ),
+        )
+        for role_code, role_label
+        in TEAM_ROLE_OPTIONS
+    ]
 
 
 @router.get(

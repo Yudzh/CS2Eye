@@ -18,7 +18,7 @@ from cs2eye.api.schemas.team_dashboard import (
 )
 from cs2eye.api.schemas.teams import (
     TeamRosterMemberResponse,
-    TeamStrengthResponse,
+    TeamStrengthResponse, TeamStrengthFactorResponse,
 )
 from cs2eye.db.session import get_db_session
 from cs2eye.services.team_dashboard_service import (
@@ -51,12 +51,57 @@ def _build_strength_response(
     return TeamStrengthResponse(
         team_id=strength.team_id,
         team_name=strength.team_name,
-        active_players_count=strength.active_players_count,
-        base_player_score=strength.base_player_score,
-        roster_bonus=strength.roster_bonus,
-        roster_penalty=strength.roster_penalty,
-        team_strength_score=strength.team_strength_score,
-        missing_required_roles=strength.missing_required_roles,
+
+        active_players_count=(
+            strength.active_players_count
+        ),
+
+        base_player_score=(
+            strength.base_player_score
+        ),
+
+        roster_bonus=(
+            strength.roster_bonus
+        ),
+
+        roster_penalty=(
+            strength.roster_penalty
+        ),
+
+        total_adjustment=(
+            strength.total_adjustment
+        ),
+
+        score_before_limits=(
+            strength.score_before_limits
+        ),
+
+        team_strength_score=(
+            strength.team_strength_score
+        ),
+
+        calculation=(
+            strength.calculation
+        ),
+
+        missing_required_roles=(
+            strength.missing_required_roles
+        ),
+
+        factors=[
+            TeamStrengthFactorResponse(
+                code=factor.code,
+                label=factor.label,
+                kind=factor.kind,
+                value=factor.value,
+                explanation=(
+                    factor.explanation
+                ),
+                players=factor.players,
+            )
+            for factor in strength.factors
+        ],
+
         notes=strength.notes,
     )
 

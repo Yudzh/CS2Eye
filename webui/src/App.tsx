@@ -5,6 +5,10 @@ import {
 } from "react-router-dom";
 
 import {
+  AdminTeamsPage,
+} from "./pages/AdminTeamsPage";
+
+import {
   AdminTeamsImportPage,
 } from "./pages/AdminTeamsImportPage";
 
@@ -33,6 +37,12 @@ export default function App() {
           element={<AdminTeamsImportPage />}
           path="/admin/teams/import"
         />
+
+        <Route
+          element={<AdminTeamsPage />}
+          path="/admin/teams"
+        />
+
         <Route
           element={
             <Navigate
