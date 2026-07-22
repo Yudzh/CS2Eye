@@ -60,6 +60,21 @@ export function AppShell({
             >
               Сравнение команд
             </NavLink>
+
+            <NavLink
+              className={({ isActive }) =>
+                `main-nav__link${
+                  isActive
+                    ? " main-nav__link--active"
+                    : ""
+                }`
+              }
+              to="/demos"
+            >
+              Демо
+            </NavLink>
+
+
             <NavLink
               className={({ isActive }) =>
                 `main-nav__link${

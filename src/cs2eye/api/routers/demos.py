@@ -14,7 +14,7 @@ from cs2eye.api.schemas.demos import DemoListResponse, DemoUploadResponse, DemoA
     DemoLocalPathImportResponse, DemoLocalPathImportRequest, DemoLocalPathImportItem, DemoBombAnalysisMap, \
     DemoTeamMapStatsResponse, DemoTeamMapStatsItem, DemoTeamMapRecentMatch, DemoRoundStatsResponse, DemoRoundStats, \
     DemoTeamMapMatchupTeamStats, DemoTeamMapMatchupResponse, DemoTeamMapMatchupItem, DemoParseRunListResponse, \
-    DemoParseRunListItem
+    DemoParseRunListItem, DemoPlayerMapStat as DemoPlayerMapStatSchema, DemoPlayerMapStatsResponse
 from cs2eye.db.session import get_db_session
 from cs2eye.services.demo_artifact_extractor import prepare_demo_artifact, DemoArtifactExtractionError
 from cs2eye.services.demo_artifact_storage import save_uploaded_demo_artifact, DemoArtifactStorageError
@@ -23,7 +23,7 @@ from cs2eye.services.demo_bomb_analysis_service import get_bomb_analysis
 from cs2eye.services.demo_filename_metadata import build_prepared_demo_file_metadata
 from cs2eye.services.demo_parse_run_service import create_demo_parse_run, mark_demo_parse_run_failed, \
     mark_demo_parse_run_success, get_demo_bomb_round_stats, clear_demo_parse_data, delete_existing_demo_parse_runs, \
-    get_demo_round_stats, list_demo_parse_runs
+    get_demo_round_stats, list_demo_parse_runs, get_demo_player_map_stats
 from cs2eye.services.demo_team_map_stats_service import get_team_map_stats, get_team_map_matchup
 
 router = APIRouter(prefix="/demos", tags=["demos"])
@@ -126,6 +126,7 @@ async def _analyze_prepared_demo_file(
         demo_file_path=str(stats.demo_file_path),
         rounds_count=stats.rounds,
         bomb_rounds=stats.bomb_rounds,
+        player_stats=stats.players,
         round_stats=stats.round_stats,
     )
 
@@ -137,6 +138,19 @@ async def _analyze_prepared_demo_file(
         team_a_name=parse_run.team_a_name,
         team_b_name=parse_run.team_b_name,
         rounds=stats.rounds,
+        players=[
+            DemoPlayerMapStatSchema(
+                player_id=None,
+                player_name=player.player_name,
+                team_name=player.team_name,
+                rounds_count=player.rounds,
+                total_damage=player.total_damage,
+                average_damage_per_round=(
+                    player.average_damage_per_round
+                ),
+            )
+            for player in stats.players
+        ],
         bomb_rounds=[
             DemoBombRoundStats(
                 round_number=bomb_round.round_number,
@@ -204,6 +218,7 @@ async def _analyze_demo_file_and_save_bomb_stats(
         demo_file_path=str(stats.demo_file_path),
         rounds_count=stats.rounds,
         bomb_rounds=stats.bomb_rounds,
+        player_stats=stats.players,
         round_stats=stats.round_stats,
     )
 
@@ -215,6 +230,19 @@ async def _analyze_demo_file_and_save_bomb_stats(
         team_a_name=parse_run.team_a_name,
         team_b_name=parse_run.team_b_name,
         rounds=stats.rounds,
+        players=[
+            DemoPlayerMapStatSchema(
+                player_id=None,
+                player_name=player.player_name,
+                team_name=player.team_name,
+                rounds_count=player.rounds,
+                total_damage=player.total_damage,
+                average_damage_per_round=(
+                    player.average_damage_per_round
+                ),
+            )
+            for player in stats.players
+        ],
         bomb_rounds=[
             DemoBombRoundStats(
                 round_number=bomb_round.round_number,
@@ -277,6 +305,39 @@ async def list_demo_parse_runs_endpoint(
             for parse_run in parse_runs
         ],
         total=len(parse_runs),
+    )
+
+
+
+@router.get(
+    "/parse-runs/{parse_run_id}/players",
+    response_model=DemoPlayerMapStatsResponse,
+)
+async def get_demo_players(
+        parse_run_id: UUID,
+        session: AsyncSession = Depends(get_db_session),
+) -> DemoPlayerMapStatsResponse:
+    player_stats = await get_demo_player_map_stats(
+        session=session,
+        parse_run_id=parse_run_id,
+    )
+
+    return DemoPlayerMapStatsResponse(
+        parse_run_id=parse_run_id,
+        items=[
+            DemoPlayerMapStatSchema(
+                player_id=player_stat.player_id,
+                player_name=player_stat.player_name,
+                team_name=player_stat.team_name,
+                rounds_count=player_stat.rounds_count,
+                total_damage=player_stat.total_damage,
+                average_damage_per_round=(
+                    player_stat.average_damage_per_round
+                ),
+            )
+            for player_stat in player_stats
+        ],
+        total=len(player_stats),
     )
 
 

@@ -1,4 +1,10 @@
 import {
+  ACTIVE_ROSTER_SIZE,
+  isActiveRosterStatus,
+  isCoachRosterStatus,
+} from "../lib/roster";
+
+import {
   useEffect,
   useMemo,
   useState,
@@ -234,23 +240,27 @@ export function AdminTeamsPage() {
 
 
   const activeCount = useMemo(
-    () =>
-      visibleRows.filter(
-        (row) =>
-          row.status === "active",
-      ).length,
-    [visibleRows],
-  );
+  () =>
+    visibleRows.filter(
+      (row) =>
+        isActiveRosterStatus(
+          row.status,
+        ),
+    ).length,
+  [visibleRows],
+);
 
 
-  const coachCount = useMemo(
-    () =>
-      visibleRows.filter(
-        (row) =>
-          row.status === "coach",
-      ).length,
-    [visibleRows],
-  );
+const coachCount = useMemo(
+  () =>
+    visibleRows.filter(
+      (row) =>
+        isCoachRosterStatus(
+          row.status,
+        ),
+    ).length,
+  [visibleRows],
+);
 
 
   const rolesComplete = useMemo(
@@ -266,7 +276,7 @@ export function AdminTeamsPage() {
 
   const canSave = Boolean(
     selectedTeam
-    && activeCount === 5
+    && activeCount === ACTIVE_ROSTER_SIZE
     && coachCount <= 1
     && rolesComplete
     && !saving,

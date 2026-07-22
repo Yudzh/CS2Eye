@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cs2eye.core.roster import VALID_ROSTER_STATUSES, get_current_active_players, ACTIVE_ROSTER_SIZE
 from cs2eye.models.team import Player, Team, TeamRosterMember
 
 from cs2eye.core.team_roles import (
@@ -12,10 +13,9 @@ from cs2eye.core.team_roles import (
     normalize_team_role,
 )
 
-VALID_STATUSES = {
-    "active",
-    "coach",
-}
+VALID_STATUSES = set(
+    VALID_ROSTER_STATUSES
+)
 
 
 VALID_ROLES = set(TEAM_ROLE_CODES)
@@ -266,17 +266,9 @@ def calculate_team_strength(
         team: Team,
         roster: list[RosterMemberInfo],
 ) -> TeamStrengthInfo:
-    current_roster = [
-        item
-        for item in roster
-        if item.left_at is None
-    ]
-
-    active_players = [
-        item
-        for item in current_roster
-        if item.status == "active"
-    ]
+    active_players = (
+        get_current_active_players(roster)
+    )
 
     factors: list[
         TeamStrengthFactorInfo
@@ -362,9 +354,13 @@ def calculate_team_strength(
         active_players
     )
 
-    if active_players_count != 5:
+    if (
+            active_players_count
+            != ACTIVE_ROSTER_SIZE
+    ):
         difference = abs(
-            5 - active_players_count
+            ACTIVE_ROSTER_SIZE
+            - active_players_count
         )
 
         penalty = min(
@@ -392,7 +388,8 @@ def calculate_team_strength(
 
         notes.append(
             "Основной состав содержит "
-            f"{active_players_count}/5 игроков."
+            f"{active_players_count}/"
+            f"{ACTIVE_ROSTER_SIZE} игроков."
         )
 
     roles = {
@@ -577,8 +574,10 @@ def calculate_team_strength(
         )
 
     elif (
-        active_players_count == 5
-        and len(known_join_dates) == 5
+            active_players_count
+            == ACTIVE_ROSTER_SIZE
+            and len(known_join_dates)
+            == ACTIVE_ROSTER_SIZE
     ):
         oldest_required_date = (
             today - timedelta(days=90)
@@ -654,7 +653,8 @@ def calculate_team_strength(
                     )
                 )
 
-    elif len(known_join_dates) < 5:
+
+    elif (len(known_join_dates)< ACTIVE_ROSTER_SIZE):
         factors.append(
             _strength_factor(
                 code="unknown_roster_stability",
@@ -682,7 +682,7 @@ def calculate_team_strength(
         sum(
             factor.value
             for factor in factors
-            if factor.value > 0
+            if factor.kind == "bonus"
         ),
         2,
     )
@@ -692,7 +692,7 @@ def calculate_team_strength(
             sum(
                 factor.value
                 for factor in factors
-                if factor.value < 0
+                if factor.kind == "penalty"
             )
         ),
         2,
@@ -1034,11 +1034,9 @@ async def list_teams(
 def _current_active_roster(
         team: TeamDetailInfo,
 ) -> list[RosterMemberInfo]:
-    return [
-        item
-        for item in team.roster
-        if item.left_at is None and item.status in {"active", "stand-in"}
-    ]
+    return get_current_active_players(
+        team.roster
+    )
 
 
 def _role_key(value: str | None) -> str:

@@ -4,6 +4,8 @@ from datetime import date
 from html.parser import HTMLParser
 from urllib.parse import quote, unquote
 
+from cs2eye.core.roster import VALID_ROSTER_STATUSES, get_current_coaches, get_current_active_players, \
+    ACTIVE_ROSTER_SIZE
 from cs2eye.core.team_roles import (
     ACTIVE_TEAM_ROLE_CODES,
     normalize_team_role,
@@ -442,11 +444,13 @@ def _is_non_playing_staff_row(row_text: str) -> bool:
     return any(marker in normalized for marker in staff_markers)
 
 
-def _is_allowed_roster_status(status: str) -> bool:
-    return status in {
-        "active",
-        "coach",
-    }
+def _is_allowed_roster_status(
+        status: str,
+) -> bool:
+    return (
+        status
+        in VALID_ROSTER_STATUSES
+    )
 
 
 def _is_counterstrike_player_link(link: _Link) -> bool:
@@ -646,23 +650,13 @@ def parse_liquipedia_team_roster_html(
         players
     )
 
-    active_players = [
-        player
-        for player in players
-        if (
-                player.status == "active"
-                and player.left_at is None
-        )
-    ]
+    active_players = (
+        get_current_active_players(players)
+    )
 
-    coaches = [
-        player
-        for player in players
-        if (
-                player.status == "coach"
-                and player.left_at is None
-        )
-    ]
+    coaches = get_current_coaches(
+        players
+    )
 
     if len(coaches) > 1:
         warnings.append(
@@ -674,13 +668,13 @@ def parse_liquipedia_team_roster_html(
 
     active_count = len(active_players)
 
-    if active_count > 5:
+    if active_count > ACTIVE_ROSTER_SIZE:
         raise ValueError(
             "Liquipedia returned more than "
             "5 active players: "
             f"{active_count}. "
             "Active roster must contain "
-            "exactly 5 players."
+            f"exactly {ACTIVE_ROSTER_SIZE} players."
         )
 
     players = [
@@ -692,15 +686,22 @@ def parse_liquipedia_team_roster_html(
         warnings.append(
             "Не удалось найти активный состав."
         )
-    elif active_count < 5:
+    elif active_count < ACTIVE_ROSTER_SIZE:
         warnings.append(
             "Найден неполный активный состав: "
-            f"{active_count}/5 игроков."
+            f"{active_count}/"
+            f"{ACTIVE_ROSTER_SIZE} игроков."
         )
-    if not any(player.role == "awper" for player in players if player.status == "active"):
+    if not any(
+            player.role == "awper"
+            for player in active_players
+    ):
         warnings.append("AWPer не найден автоматически. Возможно, роль нужно указать вручную.")
 
-    if not any(player.role == "igl" for player in players if player.status == "active"):
+    if not any(
+            player.role == "igl"
+            for player in active_players
+    ):
         warnings.append("IGL не найден автоматически. Возможно, роль нужно указать вручную.")
 
     return LiquipediaTeamRosterDraft(
@@ -796,28 +797,26 @@ def apply_liquipedia_role_assignments(
         draft: LiquipediaTeamRosterDraft,
         role_assignments: list[dict],
 ) -> LiquipediaTeamRosterDraft:
-    active_players = [
-        player
-        for player in draft.players
-        if (
-                player.status == "active"
-                and player.left_at is None
+    active_players = (
+        get_current_active_players(
+            draft.players
         )
-    ]
+    )
 
-    if len(active_players) != 5:
+    if (
+            len(active_players)
+            != ACTIVE_ROSTER_SIZE
+    ):
         raise ValueError(
             "Team roster must contain "
-            "exactly 5 active players. "
+            f"exactly {ACTIVE_ROSTER_SIZE} "
+            "active players. "
             f"Found: {len(active_players)}."
         )
 
-    coach_count = sum(
-        1
-        for player in draft.players
-        if (
-                player.status == "coach"
-                and player.left_at is None
+    coach_count = len(
+        get_current_coaches(
+            draft.players
         )
     )
 

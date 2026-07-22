@@ -14,6 +14,7 @@ from cs2eye.api.schemas.teams import (
     TeamRosterMemberResponse,
     TeamStrengthResponse, TeamRoleOptionResponse, TeamStrengthFactorResponse,
 )
+from cs2eye.core.roster import get_current_active_players
 from cs2eye.core.team_roles import TEAM_ROLE_OPTIONS, normalize_team_role
 from cs2eye.db.session import get_db_session
 from cs2eye.services.liquipedia_team_import_service import (
@@ -175,10 +176,10 @@ def _build_liquipedia_preview_response(
 
         total_players=len(draft.players),
 
-        active_players_count=sum(
-            1
-            for item in draft.players
-            if item.status == "active"
+        active_players_count=len(
+            get_current_active_players(
+                draft.players
+            )
         ),
     )
 

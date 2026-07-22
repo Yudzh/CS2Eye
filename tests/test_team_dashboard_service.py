@@ -15,12 +15,24 @@ def _strength(
     return TeamStrengthInfo(
         team_id=uuid4(),
         team_name="Test Team",
+
         active_players_count=active_players_count,
         base_player_score=70.0,
+
         roster_bonus=0.0,
         roster_penalty=0.0,
+        total_adjustment=0.0,
+
+        score_before_limits=70.0,
         team_strength_score=70.0,
+
+        calculation=(
+            "70.00 + 0.00 "
+            "- 0.00 = 70.00"
+        ),
+
         missing_required_roles=[],
+        factors=[],
         notes=notes or [],
     )
 

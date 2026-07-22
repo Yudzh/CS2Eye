@@ -5,6 +5,11 @@ import {
 } from "react";
 
 import {
+  ACTIVE_ROSTER_SIZE,
+  isCurrentActivePlayer,
+} from "../lib/roster";
+
+import {
   Link,
   useSearchParams
 } from "react-router-dom";
@@ -105,13 +110,12 @@ export function AdminTeamsImportPage() {
 
 
   const activePlayers = useMemo(
-    () =>
-      preview?.players.filter(
-        (player) =>
-          player.status === "active",
-      ) || [],
-    [preview],
-  );
+  () =>
+    preview?.players.filter(
+      isCurrentActivePlayer,
+    ) || [],
+  [preview],
+);
 
 
   const missingRolePlayers = useMemo(
@@ -132,7 +136,7 @@ export function AdminTeamsImportPage() {
   const canSave = Boolean(
     preview
     && previewSource
-    && preview.active_players_count === 5
+    && preview.active_players_count === ACTIVE_ROSTER_SIZE
     && missingRolePlayers.length === 0
     && !saveLoading,
   );
@@ -496,13 +500,19 @@ export function AdminTeamsImportPage() {
                 </strong>
               </article>
             </div>
-            {preview.active_players_count !== 5 ? (
-              <p className="save-import-panel__error">
-                Активный состав должен содержать
-                ровно 5 игроков. Сейчас найдено:{" "}
-                {preview.active_players_count}.
-              </p>
-            ) : null}
+            {
+              preview.active_players_count
+              !== ACTIVE_ROSTER_SIZE
+                ? (
+                  <p className="save-import-panel__error">
+                    Активный состав должен содержать
+                    ровно {ACTIVE_ROSTER_SIZE} игроков.
+                    Сейчас найдено:{" "}
+                    {preview.active_players_count}.
+                  </p>
+                )
+                : null
+            }
 
             {
               preview.warnings.length > 0

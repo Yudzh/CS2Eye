@@ -392,3 +392,51 @@ export interface TeamDeleteResponse {
   deleted: boolean;
   team_name: string;
 }
+
+
+export interface DemoParseRunListItem {
+  id: string;
+
+  demo_file_name: string | null;
+  demo_file_path: string;
+
+  tournament_name: string | null;
+  match_date: string | null;
+
+  map_name: string | null;
+  map_number: number | null;
+
+  team_a_name: string | null;
+  team_b_name: string | null;
+
+  status: string;
+  rounds_count: number | null;
+  error_message: string | null;
+
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+
+export interface DemoParseRunListResponse {
+  items: DemoParseRunListItem[];
+  total: number;
+}
+
+
+export interface DemoPlayerMapStat {
+  player_id: string | null;
+  player_name: string;
+  team_name: string | null;
+
+  rounds_count: number;
+  total_damage: number;
+  average_damage_per_round: number;
+}
+
+
+export interface DemoPlayerMapStatsResponse {
+  parse_run_id: string;
+  items: DemoPlayerMapStat[];
+  total: number;
+}

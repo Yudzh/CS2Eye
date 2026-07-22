@@ -4,8 +4,17 @@ from uuid import UUID
 from sqlalchemy import select, or_, and_, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cs2eye.models.demo import DemoParseRun, DemoBombRoundStat, DemoRoundStat
-from cs2eye.services.demo_basic_stats_analyzer import BombRoundStats, RoundStats
+from cs2eye.models.demo import (
+    DemoBombRoundStat,
+    DemoParseRun,
+    DemoPlayerMapStat,
+    DemoRoundStat,
+)
+from cs2eye.services.demo_basic_stats_analyzer import (
+    BombRoundStats,
+    PlayerDamageStats,
+    RoundStats,
+)
 
 
 async def create_demo_parse_run(
@@ -150,6 +159,7 @@ async def mark_demo_parse_run_success(
         demo_file_path: str,
         rounds_count: int,
         bomb_rounds: list[BombRoundStats],
+        player_stats: list[PlayerDamageStats],
         round_stats: list[RoundStats] | None = None,
 ) -> DemoParseRun:
     parse_run.demo_file_path = demo_file_path
@@ -175,6 +185,23 @@ async def mark_demo_parse_run_success(
     ]
 
     session.add_all(bomb_round_rows)
+
+    player_rows = [
+        DemoPlayerMapStat(
+            parse_run_id=parse_run.id,
+            player_id=None,
+            player_name=player_stat.player_name,
+            team_name=player_stat.team_name,
+            rounds_count=player_stat.rounds,
+            total_damage=player_stat.total_damage,
+            average_damage_per_round=(
+                player_stat.average_damage_per_round
+            ),
+        )
+        for player_stat in player_stats
+    ]
+
+    session.add_all(player_rows)
 
     round_rows = []
 
@@ -210,6 +237,24 @@ async def mark_demo_parse_run_success(
 
     return parse_run
 
+
+async def get_demo_player_map_stats(
+        session: AsyncSession,
+        parse_run_id: UUID,
+) -> list[DemoPlayerMapStat]:
+    result = await session.execute(
+        select(DemoPlayerMapStat)
+        .where(
+            DemoPlayerMapStat.parse_run_id == parse_run_id
+        )
+        .order_by(
+            DemoPlayerMapStat.team_name.asc().nullslast(),
+            DemoPlayerMapStat.average_damage_per_round.desc(),
+            DemoPlayerMapStat.player_name.asc(),
+        )
+    )
+
+    return list(result.scalars().all())
 
 async def get_demo_bomb_round_stats(
         session: AsyncSession,

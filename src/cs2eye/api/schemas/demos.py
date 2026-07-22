@@ -1,7 +1,9 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+
+from cs2eye.models import DemoPlayerMapStat
 
 
 class DemoListItem(BaseModel):
@@ -66,6 +68,25 @@ class DemoPreparedPathAnalyzeRequest(BaseModel):
     tournament_name: str
     match_date: date
 
+class DemoPlayerMapStat(BaseModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    player_id: UUID | None
+    player_name: str
+    team_name: str | None
+
+    rounds_count: int
+    total_damage: int
+    average_damage_per_round: float
+
+class DemoPlayerMapStatsResponse(BaseModel):
+    parse_run_id: UUID
+    items: list[DemoPlayerMapStat]
+    total: int
+
+
 class DemoBombRoundStats(BaseModel):
     round_number: int
     planter_name: str | None
@@ -112,13 +133,18 @@ class DemoParseRunListResponse(BaseModel):
 class DemoBasicStatsAnalyzeResponse(BaseModel):
     parse_run_id: UUID
     demo_file_path: str
+
     map_name: str | None
+    map_number: int | None = None
+
     team_a_name: str | None
     team_b_name: str | None
+
     rounds: int
     status: str
+
+    players: list[DemoPlayerMapStat]
     bomb_rounds: list[DemoBombRoundStats]
-    map_number: int | None = None
 
 class DemoBombAnalysisMap(BaseModel):
     map_name: str | None

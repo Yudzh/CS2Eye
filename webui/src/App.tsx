@@ -9,6 +9,10 @@ import {
 } from "./pages/AdminTeamsPage";
 
 import {
+  DemoParseRunsPage,
+} from "./pages/DemoParseRunsPage";
+
+import {
   AdminTeamsImportPage,
 } from "./pages/AdminTeamsImportPage";
 
@@ -51,6 +55,11 @@ export default function App() {
             />
           }
           path="/"
+        />
+
+        <Route
+          element={<DemoParseRunsPage />}
+          path="/demos"
         />
 
         <Route
