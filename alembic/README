@@ -1,1 +1,1 @@
-Generic single-database configuration with an async dbapi.
+Single-database Alembic configuration for CS2Eye.

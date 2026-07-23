@@ -6,15 +6,9 @@ ENV PYTHONPATH=/app/src
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        libarchive-tools \
-        unar \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN pip install --no-cache-dir "poetry>=2.0,<3.0"
 
-COPY pyproject.toml poetry.lock ./
+COPY pyproject.toml poetry.lock README.md ./
 
 RUN poetry config virtualenvs.create false \
     && poetry install --only main --no-root --no-interaction --no-ansi
