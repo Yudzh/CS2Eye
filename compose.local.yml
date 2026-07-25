@@ -1,7 +1,6 @@
 services:
   db:
     image: postgres:16
-    container_name: cs2eye-db
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-cs2eye}
@@ -10,7 +9,7 @@ services:
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - cs2eye_pg_data:/var/lib/postgresql/data
+      - cs2eye_clean_pg_data:/var/lib/postgresql/data
     healthcheck:
       test:
         [
@@ -25,13 +24,20 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: cs2eye-migrate
     restart: "no"
     environment: &api-environment
       APP_NAME: ${APP_NAME:-CS2Eye API}
       APP_ENV: ${APP_ENV:-local}
       DEBUG: ${DEBUG:-true}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-admin}@db:5432/${POSTGRES_DB:-cs2eye}
+      BO3_API_BASE_URL: ${BO3_API_BASE_URL:-https://api.bo3.gg/api/v2}
+      BO3_SITE_BASE_URL: ${BO3_SITE_BASE_URL:-https://bo3.gg}
+      BO3_REQUEST_TIMEOUT_SECONDS: ${BO3_REQUEST_TIMEOUT_SECONDS:-20}
+      BO3_USER_AGENT: ${BO3_USER_AGENT:-CS2Eye/0.1 (+local analytics project)}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      ALL_PROXY: ${ALL_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-db,api,webui,localhost,127.0.0.1}
     depends_on:
       db:
         condition: service_healthy
@@ -45,7 +51,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: cs2eye-api
     restart: unless-stopped
     environment: *api-environment
     ports:
@@ -86,7 +91,6 @@ services:
     build:
       context: ./webui
       dockerfile: Dockerfile.local
-    container_name: cs2eye-webui
     restart: unless-stopped
     environment:
       VITE_API_PROXY_TARGET: http://api:8000
@@ -101,7 +105,6 @@ services:
 
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: cs2eye-pgadmin
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@cs2eye.dev}
@@ -115,7 +118,7 @@ services:
         condition: service_healthy
 
 volumes:
-  cs2eye_pg_data:
+  cs2eye_clean_pg_data:
   cs2eye_storage:
   cs2eye_pgadmin_data:
   cs2eye_webui_node_modules:

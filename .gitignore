@@ -1,12 +1,14 @@
+.env
+.idea/
 .venv/
 __pycache__/
-*.pyc
-
-.env
-.idea
-
+*.py[cod]
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
-uploads/
+webui/node_modules/
+webui/dist/
+
 storage/
+uploads/

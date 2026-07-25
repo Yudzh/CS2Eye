@@ -12,6 +12,14 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://"
         "admin:admin@localhost:5433/cs2eye"
     )
+    bo3_api_base_url: str = (
+        "https://api.bo3.gg/api/v2"
+    )
+    bo3_site_base_url: str = "https://bo3.gg"
+    bo3_request_timeout_seconds: float = 20.0
+    bo3_user_agent: str = (
+        "CS2Eye/0.1 (+local analytics project)"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
