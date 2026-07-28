@@ -1,10 +1,11 @@
 import asyncio
+import ssl
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from cs2eye.core.config import settings
 
@@ -69,6 +70,14 @@ class Bo3RankingMeta(BaseModel):
     updated_at: str | None = None
 
 
+class Bo3PlayerTransfer(BaseModel):
+    player_id: int | None = None
+    team_to_id: int | None = None
+    team_from_id: int | None = None
+    action_date: date | None = None
+    action_type: int | None = None
+
+
 class Bo3RankingResponse(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -89,12 +98,18 @@ class Bo3TeamParticipant(BaseModel):
     status: int | None = None
     team_id: int | None = None
     is_substitute: bool = False
+    player_transfers: list[Bo3PlayerTransfer] = Field(
+        default_factory=list,
+    )
 
 
 class Bo3TeamResponse(BaseModel):
     id: int
     slug: str
     players: list[Bo3TeamParticipant]
+    from_transfers: list[Bo3PlayerTransfer] = Field(
+        default_factory=list,
+    )
     raw_payload: dict[str, Any]
 
 
@@ -142,36 +157,42 @@ class Bo3Client:
     def source_url(self) -> str:
         return RANKING_PAGE_URL
 
+    async def _get_with_retries(
+        self,
+        url: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        for attempt in range(REQUEST_ATTEMPTS):
+            try:
+                return await self._http_client.get(url, **kwargs)
+            except (httpx.RequestError, ssl.SSLError):
+                if attempt == REQUEST_ATTEMPTS - 1:
+                    raise
+                await asyncio.sleep(RETRY_DELAYS_SECONDS[attempt])
+        raise RuntimeError("BO3.gg request retry loop ended unexpectedly.")
+
     async def fetch_team(
         self,
         team_id: int,
         slug: str,
     ) -> Bo3TeamResponse:
-        client = self._http_client
         url = (
             f"{settings.bo3_site_base_url}"
             f"{TEAM_ENDPOINT.format(slug=slug)}"
         )
         try:
-            for attempt in range(REQUEST_ATTEMPTS):
-                try:
-                    response = await client.get(
-                        url,
-                        headers={"Referer": f"https://bo3.gg/teams/{slug}"},
-                    )
-                    response.raise_for_status()
-                    payload = response.json()
-                    break
-                except httpx.RequestError as exc:
-                    if attempt == REQUEST_ATTEMPTS - 1:
-                        raise
-                    await asyncio.sleep(RETRY_DELAYS_SECONDS[attempt])
+            response = await self._get_with_retries(
+                url,
+                headers={"Referer": f"https://bo3.gg/teams/{slug}"},
+            )
+            response.raise_for_status()
+            payload = response.json()
         except httpx.HTTPStatusError as exc:
             raise Bo3RankingError(
                 f"BO3.gg team request failed for {slug}: "
                 f"HTTP {exc.response.status_code}."
             ) from exc
-        except httpx.RequestError as exc:
+        except (httpx.RequestError, ssl.SSLError) as exc:
             raise Bo3RankingError(
                 f"BO3.gg team request failed for {slug}: "
                 f"{type(exc).__name__}: {exc} "
@@ -190,6 +211,7 @@ class Bo3Client:
                 id=payload["id"],
                 slug=payload["slug"],
                 players=payload["players"],
+                from_transfers=payload.get("from_transfers", []),
                 raw_payload=payload,
             )
         except (KeyError, ValidationError) as exc:
@@ -215,10 +237,9 @@ class Bo3Client:
         player_id: int,
         slug: str,
     ) -> Bo3PlayerResponse:
-        client = self._http_client
         url = f"{settings.bo3_site_base_url}{PLAYER_ENDPOINT.format(slug=slug)}"
         try:
-            response = await client.get(
+            response = await self._get_with_retries(
                 url,
                 headers={"Referer": f"https://bo3.gg/players/{slug}"},
             )
@@ -228,7 +249,7 @@ class Bo3Client:
             raise Bo3RankingError(
                 f"BO3.gg player request failed for {slug}: HTTP {exc.response.status_code}."
             ) from exc
-        except httpx.RequestError as exc:
+        except (httpx.RequestError, ssl.SSLError) as exc:
             raise Bo3RankingError(
                 f"BO3.gg player request failed for {slug}: {type(exc).__name__}: {exc}"
             ) from exc
@@ -247,10 +268,8 @@ class Bo3Client:
     async def fetch_top_teams(
             self,
     ) -> Bo3RankingResponse:
-        client = self._http_client
-
         try:
-            response = await client.get(
+            response = await self._get_with_retries(
                 f"{settings.bo3_api_base_url}{RANKING_ENDPOINT}",
                 params={
                     "scope": "cs2",
@@ -279,10 +298,11 @@ class Bo3Client:
                 f"response={exc.response.text[:300]!r}"
             ) from exc
 
-        except httpx.RequestError as exc:
+        except (httpx.RequestError, ssl.SSLError) as exc:
             raise Bo3RankingError(
                 "BO3.gg ranking request failed: "
-                f"{type(exc).__name__}: {exc}"
+                f"{type(exc).__name__}: {exc} "
+                f"after {REQUEST_ATTEMPTS} attempts."
             ) from exc
 
         except ValueError as exc:

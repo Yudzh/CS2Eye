@@ -16,6 +16,95 @@ export interface Team {
   roster: TeamParticipant[];
 }
 
+export interface TeamStrengthFactor {
+  code: string;
+  label: string;
+  kind: "base" | "bonus" | "penalty" | "info";
+  value: number;
+  explanation: string;
+  players: string[];
+}
+
+export interface TeamStrength {
+  active_players_count: number;
+  base_player_score: number;
+  roster_bonus: number;
+  roster_penalty: number;
+  total_adjustment: number;
+  score_before_limits: number;
+  team_strength_score: number;
+  calculation: string;
+  missing_required_roles: string[];
+  factors: TeamStrengthFactor[];
+  notes: string[];
+}
+
+export interface TeamDetail extends Team {
+  strength: TeamStrength;
+}
+
+export interface TeamComparisonPlayer {
+  id: number;
+  nickname: string;
+  image_url: string | null;
+  role: TeamParticipant["role"];
+  bo3_rating: string | number | null;
+  player_strength: number | null;
+  effective_player_strength: number;
+  strength_is_fallback: boolean;
+}
+
+export interface TeamComparisonSide {
+  id: number;
+  bo3_id: number;
+  bo3_slug: string;
+  name: string;
+  logo_url: string | null;
+  country_code: string | null;
+  country_name: string | null;
+  region: string | null;
+  current_rank: number | null;
+  current_points: string | number | null;
+  rank_change: number | null;
+  ranking_date: string | null;
+  roster_synced_at: string | null;
+  active_players_count: number;
+  roster: TeamComparisonPlayer[];
+  coaches: TeamComparisonPlayer[];
+  strength: TeamStrength;
+  relative_strength_percent: number | null;
+}
+
+export interface TeamRoleComparison {
+  role: string;
+  team_a_score: number | null;
+  team_b_score: number | null;
+  team_a_players: TeamComparisonPlayer[];
+  team_b_players: TeamComparisonPlayer[];
+  advantage_team_id: number | null;
+  advantage_team_name: string | null;
+  advantage_diff: number | null;
+  note: string;
+}
+
+export interface TeamComparison {
+  team_a: TeamComparisonSide;
+  team_b: TeamComparisonSide;
+  strength_advantage_team_id: number | null;
+  strength_advantage_team_name: string | null;
+  strength_advantage_diff: number;
+  ranking: {
+    rank_advantage_team_id: number | null;
+    rank_advantage_team_name: string | null;
+    rank_difference: number | null;
+    points_advantage_team_id: number | null;
+    points_advantage_team_name: string | null;
+    points_difference: string | number | null;
+  };
+  role_comparisons: TeamRoleComparison[];
+  summary_notes: string[];
+}
+
 
 export interface TeamParticipant {
   id: number;
@@ -26,6 +115,11 @@ export interface TeamParticipant {
   country_code: string | null;
   country_name: string | null;
   participant_type: "player" | "substitute" | "coach";
+  role: "igl" | "awper" | "entry_frag" | "lurk" | "anchor_support" | "rifler" | null;
+  is_active: boolean;
+  joined_at: string | null;
+  left_at: string | null;
+  player_strength: number | null;
 }
 
 export interface PlayerTeam {

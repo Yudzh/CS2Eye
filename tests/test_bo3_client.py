@@ -1,3 +1,5 @@
+import ssl
+
 import httpx
 import pytest
 
@@ -170,4 +172,33 @@ async def test_team_request_retries_connect_timeout() -> None:
         team = await Bo3Client(http_client).fetch_team(736, "the-mongolz")
 
     assert team.id == 736
+    assert attempts == 3
+
+
+async def test_ranking_request_retries_low_level_ssl_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    payload = make_ranking_payload()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ssl.SSLError("record layer failure")
+        return httpx.Response(200, json=payload, request=request)
+
+    async def no_delay(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "cs2eye.integrations.bo3.client.asyncio.sleep",
+        no_delay,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        ranking = await Bo3Client(http_client).fetch_top_teams()
+
+    assert len(ranking.data) == 30
     assert attempts == 3

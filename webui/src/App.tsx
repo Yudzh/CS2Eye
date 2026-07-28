@@ -7,6 +7,8 @@ import {
 import {
   getLatestRun,
   getTeams,
+  getTeam,
+  updatePlayerRole,
   probeTopTeams,
   refreshTopTeams,
   getPlayer,
@@ -16,9 +18,11 @@ import type {
   ProbeResult,
   RankingRun,
   Team,
+  TeamDetail,
   TeamParticipant,
   Player,
 } from "./types";
+import { TeamComparePage } from "./pages/TeamComparePage";
 
 
 type LoadState =
@@ -66,6 +70,84 @@ function RosterGroup({
         ))}
       </div>
     </div>
+  );
+}
+
+function TeamCard({ team }: { team: Team }) {
+  const players = team.roster.filter(
+    (participant) => participant.participant_type === "player",
+  );
+  const substitutes = team.roster.filter(
+    (participant) => participant.participant_type === "substitute",
+  );
+  const coaches = team.roster.filter(
+    (participant) => participant.participant_type === "coach",
+  );
+
+  return (
+    <article className="team-card">
+      <header className="team-card__header">
+        <span className="team-card__rank">
+          <small>место</small>
+          <strong>#{team.current_rank ?? "—"}</strong>
+        </span>
+        <span
+          className={
+            team.rank_change && team.rank_change !== 0
+              ? team.rank_change > 0
+                ? "change change--up"
+                : "change change--down"
+              : "change"
+          }
+        >
+          {rankChangeLabel(team.rank_change)}
+        </span>
+      </header>
+
+      <div className="team-card__identity">
+        {team.logo_url ? (
+          <img alt="" src={team.logo_url} />
+        ) : (
+          <span className="team-card__logo-placeholder">
+            {team.name.slice(0, 2)}
+          </span>
+        )}
+        <div>
+          <h3><a href={`/teams/${team.id}`}>{team.name}</a></h3>
+          <span>
+            {team.country_name || team.country_code || team.region || "Регион не указан"}
+          </span>
+        </div>
+      </div>
+
+      <div className="team-card__stats">
+        <span>
+          <small>Очки Valve</small>
+          <strong>{formatPoints(team.current_points)}</strong>
+        </span>
+        <span>
+          <small>Игроки</small>
+          <strong>{players.length || "—"}</strong>
+        </span>
+      </div>
+
+      <div className="team-card__roster">
+        {team.roster.length ? (
+          <>
+            <RosterGroup label="Основной состав" members={players} />
+            <RosterGroup label="Запасные" members={substitutes} />
+            <RosterGroup label="Тренеры" members={coaches} />
+          </>
+        ) : (
+          <span className="roster__empty">состав не синхронизирован</span>
+        )}
+      </div>
+
+      <footer className="team-card__footer">
+        <span>{team.bo3_slug}</span>
+        <span>Синхронизация: {formatDate(team.roster_synced_at)}</span>
+      </footer>
+    </article>
   );
 }
 
@@ -130,6 +212,121 @@ function PlayerPage({ id }: { id: number }) {
 }
 
 
+const roleLabels: Record<string, string> = {
+  igl: "IGL",
+  awper: "AWPer",
+  entry_frag: "Entry frag",
+  lurk: "Lurk",
+  anchor_support: "Anchor / Support",
+  rifler: "Rifler",
+};
+
+function TeamPage({ id }: { id: number }) {
+  const [team, setTeam] = useState<TeamDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [roleError, setRoleError] = useState<string | null>(null);
+  const [savingPlayerId, setSavingPlayerId] = useState<number | null>(null);
+
+  useEffect(() => {
+    getTeam(id).then(setTeam).catch((value: unknown) => {
+      setError(value instanceof Error ? value.message : "Не удалось загрузить команду.");
+    });
+  }, [id]);
+
+  if (error) return <main className="page"><a className="back-link" href="/">← К командам</a><div className="empty-state empty-state--error">{error}</div></main>;
+  if (!team) return <main className="page"><div className="empty-state">Загружаю команду…</div></main>;
+
+  const activePlayers = team.roster.filter(
+    (member) => member.participant_type === "player" && member.is_active && !member.left_at,
+  );
+  const coaches = team.roster.filter(
+    (member) => member.participant_type === "coach" && member.is_active && !member.left_at,
+  );
+  const strength = team.strength;
+
+  async function changeRole(
+    playerId: number,
+    role: TeamParticipant["role"],
+  ) {
+    setSavingPlayerId(playerId);
+    setRoleError(null);
+    try {
+      setTeam(await updatePlayerRole(id, playerId, role));
+    } catch (value: unknown) {
+      setRoleError(
+        value instanceof Error ? value.message : "Не удалось сохранить роль.",
+      );
+    } finally {
+      setSavingPlayerId(null);
+    }
+  }
+
+  return (
+    <main className="page team-page">
+      <nav className="page-links"><a className="back-link" href="/">← К командам</a><a className="back-link" href={`/compare?team_a=${team.id}`}>Сравнение команд →</a></nav>
+      <section className="team-hero">
+        {team.logo_url ? <img src={team.logo_url} alt="" /> : <div className="team-hero__logo">{team.name.slice(0, 2)}</div>}
+        <div>
+          <p className="eyebrow">Карточка команды · #{team.current_rank ?? "—"}</p>
+          <h1>{team.name}</h1>
+          <p className="lead">{team.country_name || team.country_code || team.region || "Регион не указан"}</p>
+        </div>
+        <div className="team-strength-score"><small>Сила команды</small><strong>{strength.team_strength_score.toFixed(2)}</strong><span>/100</span></div>
+      </section>
+
+      <section className="team-metrics">
+        <article className="metric-card"><span>Активных игроков</span><strong>{strength.active_players_count}<small>/5</small></strong></article>
+        <article className="metric-card"><span>Средняя сила игроков</span><strong>{strength.base_player_score.toFixed(2)}</strong></article>
+        <article className="metric-card"><span>Бонус / штраф</span><strong className="metric-adjustment">+{strength.roster_bonus.toFixed(2)} / −{strength.roster_penalty.toFixed(2)}</strong></article>
+      </section>
+
+      <section className="team-detail-grid">
+        <article className="strength-panel team-roster-panel">
+          <div className="section-heading"><div><p className="eyebrow">Ростер</p><h2>Игроки</h2></div><span>{activePlayers.length} активных</span></div>
+          <div className="team-player-list">
+            {activePlayers.map((player) => (
+              <div className="team-player-card" key={player.id}>
+                {player.image_url ? <img src={player.image_url} alt="" /> : <span>{player.nickname.slice(0, 2)}</span>}
+                <div><a href={`/players/${player.id}`}><strong>{player.nickname}</strong></a><small>{player.role ? roleLabels[player.role] : "Роль не назначена"}</small></div>
+                <label className="role-picker">
+                  <span>Роль</span>
+                  <select
+                    value={player.role ?? ""}
+                    disabled={savingPlayerId === player.id}
+                    onChange={(event) => void changeRole(
+                      player.id,
+                      (event.target.value || null) as TeamParticipant["role"],
+                    )}
+                  >
+                    <option value="">Не назначена</option>
+                    {Object.entries(roleLabels).map(([value, label]) => (
+                      <option value={value} key={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                <b>{player.player_strength ?? 50}<small>/100</small></b>
+              </div>
+            ))}
+          </div>
+          {roleError && <div className="empty-state empty-state--error">{roleError}</div>}
+          <div className="coach-list"><small>Тренер</small>{coaches.length ? coaches.map((coach) => <a href={`/players/${coach.id}`} key={coach.id}>{coach.nickname}</a>) : <span>не указан</span>}</div>
+        </article>
+
+        <article className="strength-panel team-factors-panel">
+          <div className="section-heading"><div><p className="eyebrow">Расчёт силы</p><h2>{strength.calculation}</h2></div></div>
+          {strength.factors.map((factor) => (
+            <div className="team-factor" key={factor.code}>
+              <span className={`team-factor__value team-factor__value--${factor.kind}`}>{factor.value > 0 && factor.kind !== "base" ? "+" : ""}{factor.value.toFixed(2)}</span>
+              <div><strong>{factor.label}</strong><p>{factor.explanation}</p>{factor.players.length > 0 && <small>{factor.players.join(", ")}</small>}</div>
+            </div>
+          ))}
+          {strength.notes.length > 0 && <ul className="strength-notes">{strength.notes.map((note) => <li key={note}>{note}</li>)}</ul>}
+        </article>
+      </section>
+    </main>
+  );
+}
+
 function formatPoints(
   value: Team["current_points"],
 ): string {
@@ -172,8 +369,11 @@ function rankChangeLabel(
 
 
 export default function App() {
+  if (/^\/compare\/?$/.test(window.location.pathname)) return <TeamComparePage />;
   const playerMatch = window.location.pathname.match(/^\/players\/(\d+)\/?$/);
   if (playerMatch) return <PlayerPage id={Number(playerMatch[1])} />;
+  const teamMatch = window.location.pathname.match(/^\/teams\/(\d+)\/?$/);
+  if (teamMatch) return <TeamPage id={Number(teamMatch[1])} />;
   const [teams, setTeams] = useState<Team[]>([]);
   const [latestRun, setLatestRun] =
     useState<RankingRun | null>(null);
@@ -277,6 +477,8 @@ export default function App() {
           источник: BO3.gg
         </span>
       </header>
+
+      <nav className="home-navigation"><a className="button" href="/compare">Сравнение команд</a></nav>
 
       <section className="hero">
         <div>
@@ -441,99 +643,9 @@ export default function App() {
           )}
 
         {teams.length > 0 && (
-          <div className="team-list">
-            <div className="team-row team-row--header">
-              <span>Место</span>
-              <span>Команда</span>
-              <span>Актуальный состав</span>
-              <span>Очки</span>
-              <span>Изменение</span>
-            </div>
-
+          <div className="team-grid">
             {teams.map((team) => (
-              <article
-                className="team-row"
-                key={team.bo3_id}
-              >
-                <strong className="rank">
-                  {team.current_rank}
-                </strong>
-                <div className="team-identity">
-                  {team.logo_url ? (
-                    <img
-                      alt=""
-                      src={team.logo_url}
-                    />
-                  ) : (
-                    <span className="team-logo">
-                      {team.name.slice(0, 2)}
-                    </span>
-                  )}
-                  <div>
-                    <strong>{team.name}</strong>
-                    <span>
-                      {team.country_code || "—"}
-                      {" · "}
-                      {team.bo3_slug}
-                    </span>
-                  </div>
-                </div>
-                <div className="roster">
-                  {team.roster.length ? (
-                    <>
-                      <RosterGroup
-                        label="Основной состав"
-                        members={team.roster.filter(
-                          (participant) =>
-                            participant.participant_type === "player",
-                        )}
-                      />
-                      <RosterGroup
-                        label="Запасные"
-                        members={team.roster.filter(
-                          (participant) =>
-                            participant.participant_type === "substitute",
-                        )}
-                      />
-                      <RosterGroup
-                        label="Тренеры"
-                        members={team.roster.filter(
-                          (participant) =>
-                            participant.participant_type === "coach",
-                        )}
-                      />
-                    </>
-                  ) : (
-                    <span className="roster__empty">
-                      состав не синхронизирован
-                    </span>
-                  )}
-                  <small className="roster__synced">
-                    Синхронизация: {formatDate(
-                      team.roster_synced_at,
-                    )}
-                  </small>
-                </div>
-                <strong className="points">
-                  {formatPoints(
-                    team.current_points,
-                  )}
-                </strong>
-                <span
-                  className={
-                    team.rank_change
-                      && team.rank_change !== 0
-                      ? team.rank_change > 0
-                        ? "change change--up"
-                        : "change change--down"
-                      : "change"
-                  }
-                >
-                  {rankChangeLabel(
-                    team.rank_change,
-                  )}
-                </span>
-              </article>
+              <TeamCard team={team} key={team.bo3_id} />
             ))}
           </div>
         )}

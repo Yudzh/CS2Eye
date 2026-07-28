@@ -172,8 +172,9 @@ class TeamParticipantMembership(Base):
         server_default="true",
         index=True,
     )
-    joined_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+    role: Mapped[str | None] = mapped_column(String(24))
+    joined_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
     )
     left_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

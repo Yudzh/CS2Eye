@@ -2,6 +2,9 @@ import type {
   ProbeResult,
   RankingRun,
   Team,
+  TeamDetail,
+  TeamParticipant,
+  TeamComparison,
   Player,
 } from "./types";
 
@@ -40,6 +43,36 @@ export function refreshPlayer(id: number): Promise<Player> {
 
 export function getTeams(): Promise<Team[]> {
   return request<Team[]>("/api/v1/teams");
+}
+
+export function getTeam(id: number): Promise<TeamDetail> {
+  return request<TeamDetail>(`/api/v1/teams/${id}`);
+}
+
+export function compareTeams(
+  teamAId: number,
+  teamBId: number,
+): Promise<TeamComparison> {
+  const query = new URLSearchParams({
+    team_a_id: String(teamAId),
+    team_b_id: String(teamBId),
+  });
+  return request<TeamComparison>(`/api/v1/teams/compare?${query}`);
+}
+
+export function updatePlayerRole(
+  teamId: number,
+  playerId: number,
+  role: TeamParticipant["role"],
+): Promise<TeamDetail> {
+  return request<TeamDetail>(
+    `/api/v1/teams/${teamId}/players/${playerId}/role`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    },
+  );
 }
 
 

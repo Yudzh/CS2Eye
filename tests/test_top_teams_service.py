@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import func, select
@@ -9,11 +10,15 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from cs2eye.db.base import Base
+from cs2eye.api.routers.teams import update_player_role
+from cs2eye.api.schemas.teams import TeamParticipantRoleUpdate
 from cs2eye.integrations.bo3.client import (
     Bo3RankingError,
     Bo3RankingResponse,
     Bo3PlayerResponse,
+    Bo3PlayerTransfer,
     Bo3TeamResponse,
+    Bo3TeamParticipant,
 )
 from cs2eye.models.team import (
     Player,
@@ -131,6 +136,52 @@ def make_response(
         meta=payload["meta"],
         raw_payload=payload,
     )
+
+
+def test_membership_dates_come_from_bo3_transfers() -> None:
+    participant = Bo3TeamParticipant(
+        id=17524,
+        slug="karrigan",
+        nickname="karrigan",
+        player_transfers=[Bo3PlayerTransfer(
+            player_id=17524,
+            team_from_id=791,
+            team_to_id=2713,
+            action_date=date(2026, 4, 20),
+            action_type=1,
+        )],
+    )
+    joined_at = TopTeamsService._joined_at_from_bo3(2713, participant)
+    left_at = TopTeamsService._left_at_from_bo3(
+        2713,
+        17524,
+        [Bo3PlayerTransfer(
+            player_id=17524,
+            team_from_id=2713,
+            team_to_id=793,
+            action_date=date(2026, 7, 8),
+            action_type=1,
+        )],
+    )
+
+    assert joined_at == datetime(2026, 4, 20, tzinfo=UTC)
+    assert left_at == datetime(2026, 7, 8, tzinfo=UTC)
+
+
+def test_incomplete_bo3_transfers_are_ignored() -> None:
+    participant = Bo3TeamParticipant(
+        id=17524,
+        slug="karrigan",
+        nickname="karrigan",
+        player_transfers=[Bo3PlayerTransfer()],
+    )
+
+    assert TopTeamsService._joined_at_from_bo3(2713, participant) is None
+    assert TopTeamsService._left_at_from_bo3(
+        2713,
+        17524,
+        [Bo3PlayerTransfer(player_id=None, action_date=None)],
+    ) is None
 
 
 async def test_team_details_fall_back_to_ranking_player() -> None:
@@ -310,3 +361,41 @@ async def test_refresh_saves_rosters_and_is_idempotent(
     ).scalar_one()
     assert latest_run.player_profiles_updated == 210
     assert latest_run.player_profiles_failed == 0
+
+
+async def test_player_role_can_be_updated_manually(
+    session: AsyncSession,
+) -> None:
+    team = Team(
+        bo3_id=2713,
+        bo3_slug="falcons-esports",
+        name="Team Falcons",
+        is_analytics_active=True,
+    )
+    player = Player(
+        bo3_id=17524,
+        bo3_slug="karrigan",
+        nickname="karrigan",
+        is_analytics_active=True,
+    )
+    session.add_all([team, player])
+    await session.flush()
+    membership = TeamParticipantMembership(
+        team_id=team.id,
+        player_id=player.id,
+        participant_type="player",
+        is_active=True,
+    )
+    session.add(membership)
+    await session.commit()
+
+    response = await update_player_role(
+        team.id,
+        player.id,
+        TeamParticipantRoleUpdate(role="igl"),
+        session,
+    )
+
+    assert membership.role == "igl"
+    assert response.roster[0].role == "igl"
+    assert "igl" not in response.strength.missing_required_roles

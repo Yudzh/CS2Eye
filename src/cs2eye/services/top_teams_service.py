@@ -8,11 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cs2eye.integrations.bo3.client import (
     Bo3Client,
     Bo3Country,
+    Bo3PlayerResponse,
+    Bo3PlayerTransfer,
     Bo3RankingError,
     Bo3RankingResponse,
     Bo3TeamParticipant,
     Bo3TeamResponse,
-    Bo3PlayerResponse,
 )
 from cs2eye.services.player_service import apply_player_profile
 from cs2eye.models.team import (
@@ -57,6 +58,57 @@ class TopTeamsService:
 
     async def probe(self) -> Bo3RankingResponse:
         return await self._source.fetch_top_teams()
+
+    @staticmethod
+    def _transfer_datetime(transfer: Bo3PlayerTransfer) -> datetime:
+        if transfer.action_date is None:
+            raise ValueError("BO3 transfer has no action date.")
+        return datetime(
+            transfer.action_date.year,
+            transfer.action_date.month,
+            transfer.action_date.day,
+            tzinfo=UTC,
+        )
+
+    @classmethod
+    def _joined_at_from_bo3(
+        cls,
+        team_id: int,
+        participant: Bo3TeamParticipant,
+    ) -> datetime | None:
+        transfers = [
+            transfer
+            for transfer in participant.player_transfers
+            if transfer.team_to_id == team_id
+            and transfer.team_from_id != team_id
+            and transfer.action_date is not None
+        ]
+        if not transfers:
+            return None
+        return cls._transfer_datetime(
+            max(transfers, key=lambda transfer: transfer.action_date),
+        )
+
+    @classmethod
+    def _left_at_from_bo3(
+        cls,
+        team_id: int,
+        player_id: int,
+        transfers: list[Bo3PlayerTransfer],
+    ) -> datetime | None:
+        departures = [
+            transfer
+            for transfer in transfers
+            if transfer.player_id == player_id
+            and transfer.team_from_id == team_id
+            and transfer.team_to_id != team_id
+            and transfer.action_date is not None
+        ]
+        if not departures:
+            return None
+        return cls._transfer_datetime(
+            max(departures, key=lambda transfer: transfer.action_date),
+        )
 
     async def refresh(self) -> RankingImportRun:
         run = RankingImportRun(
@@ -313,10 +365,18 @@ class TopTeamsService:
                 for detail in team_details.values()
                 for participant in detail.players
             }
+            departure_transfers = {
+                detail.id: detail.from_transfers
+                for detail in team_details.values()
+            }
             for key, membership in active_memberships.items():
                 if key not in incoming_memberships:
                     membership.is_active = False
-                    membership.left_at = synced_at
+                    membership.left_at = self._left_at_from_bo3(
+                        key[0],
+                        key[1],
+                        departure_transfers.get(key[0], []),
+                    )
 
             for player in players_by_bo3_id.values():
                 player.is_analytics_active = False
@@ -404,7 +464,9 @@ class TopTeamsService:
                             team_id=team.id,
                             player_id=player.id,
                             participant_type=participant_type,
-                            joined_at=synced_at,
+                            joined_at=self._joined_at_from_bo3(
+                                team.bo3_id, participant,
+                            ),
                         )
                         self._session.add(membership)
                         active_memberships[
@@ -412,6 +474,11 @@ class TopTeamsService:
                         ] = membership
                     else:
                         membership.participant_type = participant_type
+                        joined_at = self._joined_at_from_bo3(
+                            team.bo3_id, participant,
+                        )
+                        if joined_at is not None:
+                            membership.joined_at = joined_at
                 self._session.add(
                     TeamRankingSnapshot(
                         import_run_id=run.id,
@@ -496,6 +563,29 @@ async def list_active_rosters(
             (player, participant_type),
         )
     return rosters
+
+
+async def get_team_with_roster(
+    session: AsyncSession,
+    team_id: int,
+) -> tuple[Team | None, list[tuple[Player, TeamParticipantMembership]]]:
+    team = await session.get(Team, team_id)
+    if team is None:
+        return None, []
+    result = await session.execute(
+        select(Player, TeamParticipantMembership)
+        .join(
+            TeamParticipantMembership,
+            Player.id == TeamParticipantMembership.player_id,
+        )
+        .where(TeamParticipantMembership.team_id == team_id)
+        .order_by(
+            TeamParticipantMembership.is_active.desc(),
+            TeamParticipantMembership.participant_type.asc(),
+            Player.nickname.asc(),
+        )
+    )
+    return team, list(result.tuples())
 
 
 async def get_latest_import_run(
