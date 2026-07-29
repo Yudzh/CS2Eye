@@ -29,9 +29,18 @@ def make_http_client(
             == "30"
         )
         assert request.url.params["scope"] == "cs2"
+        page = int(request.url.params["page"])
+        page_payload = dict(payload)
+        page_payload["data"] = [
+            item for item in payload["data"]
+            if (page - 1) * 30 < item["rank"] <= page * 30
+        ]
+        page_payload["meta"] = dict(payload["meta"])
+        page_payload["meta"]["current_page"] = page
+        page_payload["meta"]["per_page"] = 30
         return httpx.Response(
             200,
-            json=payload,
+            json=page_payload,
             request=request,
         )
 
@@ -41,7 +50,7 @@ def make_http_client(
     )
 
 
-async def test_client_accepts_valid_top_30() -> None:
+async def test_client_accepts_valid_top_40() -> None:
     async with make_http_client(
         make_ranking_payload(),
     ) as http_client:
@@ -49,23 +58,23 @@ async def test_client_accepts_valid_top_30() -> None:
             http_client,
         ).fetch_top_teams()
 
-    assert len(ranking.data) == 30
+    assert len(ranking.data) == 40
     assert ranking.data[0].rank == 1
-    assert ranking.data[-1].rank == 30
+    assert ranking.data[-1].rank == 40
     assert len(
         ranking.data[0].roster_players,
     ) == 5
 
 
-async def test_client_rejects_less_than_30() -> None:
+async def test_client_rejects_less_than_40() -> None:
     async with make_http_client(
         make_ranking_payload(
-            teams_count=29,
+            teams_count=39,
         ),
     ) as http_client:
         with pytest.raises(
             Bo3RankingError,
-            match="received 29 teams",
+            match="received 39 teams",
         ):
             await Bo3Client(
                 http_client,
@@ -74,7 +83,7 @@ async def test_client_rejects_less_than_30() -> None:
 
 async def test_client_rejects_duplicate_team() -> None:
     payload = make_ranking_payload()
-    payload["data"][29]["team"] = (
+    payload["data"][39]["team"] = (
         payload["data"][0]["team"]
     )
 
@@ -186,7 +195,13 @@ async def test_ranking_request_retries_low_level_ssl_error(
         attempts += 1
         if attempts < 3:
             raise ssl.SSLError("record layer failure")
-        return httpx.Response(200, json=payload, request=request)
+        page = int(request.url.params["page"])
+        page_payload = dict(payload)
+        page_payload["data"] = [
+            item for item in payload["data"]
+            if (page - 1) * 30 < item["rank"] <= page * 30
+        ]
+        return httpx.Response(200, json=page_payload, request=request)
 
     async def no_delay(_: float) -> None:
         return None
@@ -200,5 +215,5 @@ async def test_ranking_request_retries_low_level_ssl_error(
     ) as http_client:
         ranking = await Bo3Client(http_client).fetch_top_teams()
 
-    assert len(ranking.data) == 30
-    assert attempts == 3
+    assert len(ranking.data) == 40
+    assert attempts == 4

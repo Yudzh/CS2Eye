@@ -24,7 +24,9 @@ export function TeamComparePage() {
 
   useEffect(() => {
     getTeams().then((payload) => {
-      const sorted = [...payload].sort((a, b) => (a.current_rank ?? 999) - (b.current_rank ?? 999));
+      const sorted = payload
+        .filter((team) => team.is_analytics_active)
+        .sort((a, b) => (a.current_rank ?? 999) - (b.current_rank ?? 999));
       setTeams(sorted);
       const query = new URLSearchParams(window.location.search);
       const queryA = Number(query.get("team_a"));

@@ -223,7 +223,7 @@ async def session() -> (
     await engine.dispose()
 
 
-async def test_refresh_deactivates_team_outside_top_30(
+async def test_refresh_keeps_only_top_30_active_and_tracks_top_40(
     session: AsyncSession,
 ) -> None:
     first_run = await TopTeamsService(
@@ -269,7 +269,16 @@ async def test_refresh_deactivates_team_outside_top_30(
     assert active_teams[-1].bo3_id == 31
     assert old_team.is_analytics_active is False
     assert old_team.current_rank is None
-    assert snapshots_count == 60
+    shadow_ids = list((await session.execute(
+        select(Team.bo3_id)
+        .where(
+            Team.is_analytics_active.is_(False),
+            Team.current_rank.is_not(None),
+        )
+        .order_by(Team.current_rank)
+    )).scalars())
+    assert shadow_ids == list(range(32, 42))
+    assert snapshots_count == 80
 
 
 async def test_failed_refresh_keeps_active_top_30(
@@ -349,17 +358,17 @@ async def test_refresh_saves_rosters_and_is_idempotent(
         ),
     )
 
-    assert players_count == 240
-    assert memberships_count == 240
-    assert active_memberships_count == 240
-    assert coaches_count == 30
-    assert substitutes_count == 60
+    assert players_count == 320
+    assert memberships_count == 320
+    assert active_memberships_count == 320
+    assert coaches_count == 40
+    assert substitutes_count == 80
     latest_run = (
         await session.execute(
             select(RankingImportRun).order_by(RankingImportRun.id.desc()).limit(1)
         )
     ).scalar_one()
-    assert latest_run.player_profiles_updated == 210
+    assert latest_run.player_profiles_updated == 280
     assert latest_run.player_profiles_failed == 0
 
 

@@ -5,7 +5,7 @@ from typing import Any
 def make_ranking_payload(
     *,
     first_team_id: int = 1,
-    teams_count: int = 30,
+    teams_count: int = 40,
     ranking_date: date = date(2026, 7, 24),
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []

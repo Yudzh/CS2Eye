@@ -92,17 +92,22 @@ function TeamCard({ team }: { team: Team }) {
           <small>место</small>
           <strong>#{team.current_rank ?? "—"}</strong>
         </span>
-        <span
-          className={
-            team.rank_change && team.rank_change !== 0
-              ? team.rank_change > 0
-                ? "change change--up"
-                : "change change--down"
-              : "change"
-          }
-        >
-          {rankChangeLabel(team.rank_change)}
-        </span>
+        <div className="team-card__state">
+          {!team.is_analytics_active && (
+            <span className="analytics-status">Не считаем</span>
+          )}
+          <span
+            className={
+              team.rank_change && team.rank_change !== 0
+                ? team.rank_change > 0
+                  ? "change change--up"
+                  : "change change--down"
+                : "change"
+            }
+          >
+            {rankChangeLabel(team.rank_change)}
+          </span>
+        </div>
       </header>
 
       <div className="team-card__identity">
@@ -442,7 +447,7 @@ export default function App() {
       setActionState({
         kind: "success",
         message:
-          "Top-30, составы и профили игроков обновлены. "
+          "Top-40 обновлён; места 31–40 сохранены как теневые. "
           + `Активировано: ${run.teams_activated}, `
           + `деактивировано: ${run.teams_deactivated}. `
           + `Профили: ${run.player_profiles_updated} успешно, `
@@ -528,7 +533,7 @@ export default function App() {
       <section className="summary-grid">
         <article className="summary-card">
           <span>Активные команды</span>
-          <strong>{teams.length}</strong>
+          <strong>{teams.filter((team) => team.is_analytics_active).length}</strong>
           <small>ожидается ровно 30</small>
         </article>
         <article className="summary-card">
@@ -565,7 +570,7 @@ export default function App() {
           role="status"
         >
           {actionState.kind === "probing"
-            && "Проверяю ответ и состав top‑30…"}
+            && "Проверяю ответ и состав top‑40…"}
           {actionState.kind === "refreshing"
             && "Обновляю рейтинг, составы и профили игроков…"}
           {(actionState.kind === "success"
@@ -595,7 +600,7 @@ export default function App() {
           <div>
             <span>Проверка источника</span>
             <strong>
-              {probe.teams_received}/30 команд
+              {probe.teams_received}/40 команд
             </strong>
           </div>
           <p>
@@ -617,7 +622,7 @@ export default function App() {
           </div>
           <span>
             {teams.length
-              ? `${teams.length} записей`
+              ? `${teams.length} записей · ${teams.filter((team) => !team.is_analytics_active).length} не считаем`
               : "данных пока нет"}
           </span>
         </div>

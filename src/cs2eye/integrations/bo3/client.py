@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from cs2eye.core.config import settings
 
-TOP_TEAMS_COUNT = 30
+RANKING_TEAMS_COUNT = 40
+ACTIVE_TEAMS_COUNT = 30
+RANKING_PAGE_SIZE = 30
 REQUEST_ATTEMPTS = 3
 RETRY_DELAYS_SECONDS = (0.5, 1.5)
 
@@ -23,7 +25,7 @@ RANKING_PAGE_URL = (
 
 
 class Bo3RankingError(RuntimeError):
-    """BO3.gg could not provide a trustworthy top-30."""
+    """BO3.gg could not provide a trustworthy top-40."""
 
 
 class Bo3Country(BaseModel):
@@ -269,27 +271,51 @@ class Bo3Client:
             self,
     ) -> Bo3RankingResponse:
         try:
-            response = await self._get_with_retries(
-                f"{settings.bo3_api_base_url}{RANKING_ENDPOINT}",
-                params={
-                    "scope": "cs2",
-                    "with": (
-                        "team,"
-                        "team_valve_rankings_players"
-                    ),
-                    "filter[discipline_id][eq]": 1,
-                    "pagination[per_page]": (
-                        TOP_TEAMS_COUNT
-                    ),
-                    "pagination[page]": 1,
-                },
-                headers={
-                    "Origin": "https://bo3.gg",
-                    "Referer": RANKING_PAGE_URL,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
+            page_payloads: list[dict[str, Any]] = []
+            for page in range(
+                1,
+                (RANKING_TEAMS_COUNT + RANKING_PAGE_SIZE - 1)
+                // RANKING_PAGE_SIZE + 1,
+            ):
+                response = await self._get_with_retries(
+                    f"{settings.bo3_api_base_url}{RANKING_ENDPOINT}",
+                    params={
+                        "scope": "cs2",
+                        "with": (
+                            "team,"
+                            "team_valve_rankings_players"
+                        ),
+                        "filter[discipline_id][eq]": 1,
+                        "pagination[per_page]": RANKING_PAGE_SIZE,
+                        "page": page,
+                    },
+                    headers={
+                        "Origin": "https://bo3.gg",
+                        "Referer": RANKING_PAGE_URL,
+                    },
+                )
+                response.raise_for_status()
+                page_payload = response.json()
+                if not isinstance(page_payload, dict):
+                    raise Bo3RankingError(
+                        "BO3.gg returned a non-object response."
+                    )
+                if page_payload.get("code"):
+                    raise Bo3RankingError(
+                        "BO3.gg rejected the ranking request: "
+                        f"{page_payload.get('message', page_payload['code'])}"
+                    )
+                page_payloads.append(page_payload)
+
+            payload = dict(page_payloads[0])
+            payload["data"] = [
+                item
+                for page_payload in page_payloads
+                for item in page_payload.get("data", [])
+                if isinstance(item, dict)
+                and item.get("rank") is not None
+                and item["rank"] <= RANKING_TEAMS_COUNT
+            ]
 
         except httpx.HTTPStatusError as exc:
             raise Bo3RankingError(
@@ -309,17 +335,6 @@ class Bo3Client:
             raise Bo3RankingError(
                 "BO3.gg returned invalid JSON."
             ) from exc
-
-        if not isinstance(payload, dict):
-            raise Bo3RankingError(
-                "BO3.gg returned a non-object response."
-            )
-
-        if payload.get("code"):
-            raise Bo3RankingError(
-                "BO3.gg rejected the ranking request: "
-                f"{payload.get('message', payload['code'])}"
-            )
 
         try:
             result = Bo3RankingResponse(
@@ -378,30 +393,30 @@ class Bo3Client:
         result: Bo3RankingResponse,
     ) -> None:
         items = result.data
-        if len(items) != TOP_TEAMS_COUNT:
+        if len(items) != RANKING_TEAMS_COUNT:
             raise Bo3RankingError(
-                "BO3.gg top-30 validation failed: "
+                "BO3.gg top-40 validation failed: "
                 f"received {len(items)} teams."
             )
 
         ranks = sorted(item.rank for item in items)
         expected_ranks = list(
-            range(1, TOP_TEAMS_COUNT + 1)
+            range(1, RANKING_TEAMS_COUNT + 1)
         )
         if ranks != expected_ranks:
             raise Bo3RankingError(
-                "BO3.gg top-30 validation failed: "
-                "ranks must be unique from 1 to 30."
+                "BO3.gg top-40 validation failed: "
+                "ranks must be unique from 1 to 40."
             )
 
         team_ids = {item.team.id for item in items}
         slugs = {item.team.slug for item in items}
         if (
-            len(team_ids) != TOP_TEAMS_COUNT
-            or len(slugs) != TOP_TEAMS_COUNT
+            len(team_ids) != RANKING_TEAMS_COUNT
+            or len(slugs) != RANKING_TEAMS_COUNT
         ):
             raise Bo3RankingError(
-                "BO3.gg top-30 validation failed: "
+                "BO3.gg top-40 validation failed: "
                 "duplicate team ID or slug."
             )
 
@@ -410,7 +425,7 @@ class Bo3Client:
             for item in items
         ):
             raise Bo3RankingError(
-                "BO3.gg top-30 validation failed: "
+                "BO3.gg top-40 validation failed: "
                 "ranking team IDs do not match."
             )
 
@@ -422,7 +437,7 @@ class Bo3Client:
             result.meta.ranking_date,
         }:
             raise Bo3RankingError(
-                "BO3.gg top-30 validation failed: "
+                "BO3.gg top-40 validation failed: "
                 "ranking dates do not match."
             )
 
@@ -431,6 +446,6 @@ class Bo3Client:
                 for item in items
         ):
             raise Bo3RankingError(
-                "BO3.gg top-30 validation failed: "
+                "BO3.gg top-40 validation failed: "
                 "every team must contain exactly 5 players."
             )

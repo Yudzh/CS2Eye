@@ -16,7 +16,7 @@ from cs2eye.api.schemas.teams import (
 )
 from cs2eye.db.session import get_db_session
 from cs2eye.services.top_teams_service import (
-    list_active_teams,
+    list_ranked_teams,
     list_active_rosters,
     get_team_with_roster,
 )
@@ -46,7 +46,7 @@ async def get_teams(
         get_db_session,
     ),
 ) -> list[TeamListItem]:
-    teams = await list_active_teams(session)
+    teams = await list_ranked_teams(session)
     rosters = await list_active_rosters(session)
     return [
         TeamListItem(

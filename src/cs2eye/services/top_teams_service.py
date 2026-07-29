@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.integrations.bo3.client import (
+    ACTIVE_TEAMS_COUNT,
     Bo3Client,
     Bo3Country,
     Bo3PlayerResponse,
@@ -423,9 +424,12 @@ class TopTeamsService:
                         name=item.team.name,
                     )
                     self._session.add(team)
+                was_active = team.is_analytics_active
+                should_be_active = item.rank <= ACTIVE_TEAMS_COUNT
+                if should_be_active and not was_active:
                     activated += 1
-                elif not team.is_analytics_active:
-                    activated += 1
+                elif was_active and not should_be_active:
+                    deactivated += 1
 
                 country = item.team.country
                 team.bo3_slug = item.team.slug
@@ -442,7 +446,7 @@ class TopTeamsService:
                 team.current_points = item.score
                 team.rank_change = item.rank_diff
                 team.ranking_date = item.ranking_date
-                team.is_analytics_active = True
+                team.is_analytics_active = should_be_active
                 team.roster_synced_at = synced_at
 
                 await self._session.flush()
@@ -531,6 +535,17 @@ async def list_active_teams(
         .where(
             Team.is_analytics_active.is_(True),
         )
+        .order_by(Team.current_rank.asc())
+    )
+    return list(result.scalars())
+
+
+async def list_ranked_teams(
+    session: AsyncSession,
+) -> list[Team]:
+    result = await session.execute(
+        select(Team)
+        .where(Team.current_rank.is_not(None))
         .order_by(Team.current_rank.asc())
     )
     return list(result.scalars())

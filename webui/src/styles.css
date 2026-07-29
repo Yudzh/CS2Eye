@@ -464,6 +464,24 @@ h2 {
   padding: 16px 18px 0;
 }
 
+.team-card__state {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.analytics-status {
+  padding: 5px 8px;
+  border: 1px solid rgba(230, 200, 120, 0.35);
+  border-radius: 999px;
+  color: var(--yellow);
+  background: rgba(230, 200, 120, 0.08);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .team-card__rank {
   display: flex;
   align-items: baseline;
