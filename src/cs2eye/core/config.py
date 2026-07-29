@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     bo3_user_agent: str = (
         "CS2Eye/0.1 (+local analytics project)"
     )
+    demo_storage_root: str = "/app/storage"
+    demo_max_file_size_bytes: int = 2_147_483_648
+    demo_archive_max_depth: int = 5
 
     model_config = SettingsConfigDict(
         env_file=".env",

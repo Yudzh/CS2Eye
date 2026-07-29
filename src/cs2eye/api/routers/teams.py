@@ -63,6 +63,19 @@ async def get_teams(
                     country_code=player.country_code,
                     country_name=player.country_name,
                     participant_type=participant_type,
+                    player_strength=player.player_strength,
+                    bo3_rating=player.bo3_rating,
+                    bo3_avg_rating=player.bo3_rating,
+                    internal_rating=player.internal_rating,
+                    internal_rating_maps_count=player.internal_rating_maps_count,
+                    internal_rating_rounds_count=player.internal_rating_rounds_count,
+                    internal_rating_version=player.internal_rating_version,
+                    internal_rating_top15=player.internal_rating_top15,
+                    internal_rating_top15_maps_count=player.internal_rating_top15_maps_count,
+                    internal_rating_top15_rounds_count=player.internal_rating_top15_rounds_count,
+                    internal_rating_top16_30=player.internal_rating_top16_30,
+                    internal_rating_top16_30_maps_count=player.internal_rating_top16_30_maps_count,
+                    internal_rating_top16_30_rounds_count=player.internal_rating_top16_30_rounds_count,
                 )
                 for player, participant_type
                 in rosters.get(team.id, [])
@@ -165,6 +178,18 @@ async def get_team(
             joined_at=membership.joined_at,
             left_at=membership.left_at,
             player_strength=player.player_strength,
+            bo3_rating=player.bo3_rating,
+            bo3_avg_rating=player.bo3_rating,
+            internal_rating=player.internal_rating,
+            internal_rating_maps_count=player.internal_rating_maps_count,
+            internal_rating_rounds_count=player.internal_rating_rounds_count,
+            internal_rating_version=player.internal_rating_version,
+            internal_rating_top15=player.internal_rating_top15,
+            internal_rating_top15_maps_count=player.internal_rating_top15_maps_count,
+            internal_rating_top15_rounds_count=player.internal_rating_top15_rounds_count,
+            internal_rating_top16_30=player.internal_rating_top16_30,
+            internal_rating_top16_30_maps_count=player.internal_rating_top16_30_maps_count,
+            internal_rating_top16_30_rounds_count=player.internal_rating_top16_30_rounds_count,
         )
         for player, membership in roster
     ]

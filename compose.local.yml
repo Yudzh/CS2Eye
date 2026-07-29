@@ -30,6 +30,9 @@ services:
       APP_ENV: ${APP_ENV:-local}
       DEBUG: ${DEBUG:-true}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-admin}@db:5432/${POSTGRES_DB:-cs2eye}
+      DEMO_STORAGE_ROOT: ${DEMO_STORAGE_ROOT:-/app/storage}
+      DEMO_MAX_FILE_SIZE_BYTES: ${DEMO_MAX_FILE_SIZE_BYTES:-2147483648}
+      DEMO_ARCHIVE_MAX_DEPTH: ${DEMO_ARCHIVE_MAX_DEPTH:-5}
       BO3_API_BASE_URL: ${BO3_API_BASE_URL:-https://api.bo3.gg/api/v2}
       BO3_SITE_BASE_URL: ${BO3_SITE_BASE_URL:-https://bo3.gg}
       BO3_REQUEST_TIMEOUT_SECONDS: ${BO3_REQUEST_TIMEOUT_SECONDS:-20}

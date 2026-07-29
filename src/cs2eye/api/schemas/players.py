@@ -26,7 +26,20 @@ class PlayerResponse(BaseModel):
     country_code: str | None
     country_name: str | None
     bo3_rating: Decimal | None
+    bo3_avg_rating: Decimal | None
     player_strength: int | None
+    steam_id: str | None
+    internal_rating: Decimal | None
+    internal_rating_maps_count: int
+    internal_rating_rounds_count: int
+    internal_rating_updated_at: datetime | None
+    internal_rating_version: str | None
+    internal_rating_top15: Decimal | None
+    internal_rating_top15_maps_count: int
+    internal_rating_top15_rounds_count: int
+    internal_rating_top16_30: Decimal | None
+    internal_rating_top16_30_maps_count: int
+    internal_rating_top16_30_rounds_count: int
     strength_breakdown: dict[str, Any] | None
     stats_synced_at: datetime | None
     source_updated_at: datetime | None

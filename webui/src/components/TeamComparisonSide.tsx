@@ -43,7 +43,7 @@ export function TeamComparisonSide({ side }: { side: ComparisonSide }) {
             {player.image_url ? <img src={player.image_url} alt="" /> : <span>{player.nickname.slice(0, 2)}</span>}
             <div><strong>{player.nickname}</strong><small>{player.role ? roleLabels[player.role] : "Роль не назначена"}</small></div>
             <b>{player.player_strength === null ? "—" : player.player_strength}<small>/100</small></b>
-            <em>BO3: {player.bo3_rating === null ? "—" : Number(player.bo3_rating).toFixed(2)}</em>
+            <em>Avg BO3.gg: {player.bo3_avg_rating === null ? "—" : Number(player.bo3_avg_rating).toFixed(2)}</em>
             {player.strength_is_fallback && <mark>В расчёте использовано базовое значение 50</mark>}
           </a>
         ))}

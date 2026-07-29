@@ -23,6 +23,7 @@ import type {
   Player,
 } from "./types";
 import { TeamComparePage } from "./pages/TeamComparePage";
+import { DemosPage } from "./pages/DemosPage";
 
 
 type LoadState =
@@ -196,14 +197,15 @@ function PlayerPage({ id }: { id: number }) {
       </section>
       {error && <div className="notice notice--error">{error}</div>}
       <section className="player-grid">
-        <article className="metric-card"><span>player_strength</span><strong>{player.player_strength ?? "—"}<small>/100</small></strong></article>
-        <article className="metric-card"><span>Рейтинг BO3 · 6 месяцев</span><strong>{player.bo3_rating === null ? "—" : Number(player.bo3_rating).toFixed(2)}</strong></article>
+        <article className="metric-card"><span>Avg BO3.gg</span><strong>{player.bo3_avg_rating === null ? "—" : Number(player.bo3_avg_rating).toFixed(2)}</strong></article>
+        <article className="metric-card internal-rating-card"><span>Внутренний рейтинг</span>{[["Общий", player.internal_rating, player.internal_rating_maps_count, player.internal_rating_rounds_count], ["Против Top 1–15", player.internal_rating_top15, player.internal_rating_top15_maps_count, player.internal_rating_top15_rounds_count], ["Против Top 16–30", player.internal_rating_top16_30, player.internal_rating_top16_30_maps_count, player.internal_rating_top16_30_rounds_count]].map(([label, rating, maps, rounds]) => <div className="internal-rating-row" key={String(label)}><span>{label}</span><strong>{rating === null ? "—" : Number(rating).toFixed(2)}</strong><small>{rating === null ? "Нет данных" : `${maps} карт · ${rounds} раундов`}</small></div>)}</article>
+        <article className="metric-card"><span>Сила игрока</span><strong>{player.player_strength ?? "—"}<small>/100</small></strong></article>
         <article className="metric-card"><span>Последнее обновление</span><strong className="metric-date">{formatDate(player.stats_synced_at)}</strong></article>
       </section>
       <section className="strength-panel">
         <div className="section-heading"><div><p className="eyebrow">Расшифровка</p><h2>Что повлияло на силу</h2></div></div>
         {player.strength_breakdown ? player.strength_breakdown.factors.map((factor) => (
-          <div className="factor" key={factor.metric}><span className={`factor__impact factor__impact--${factor.direction}`}>{factor.impact > 0 ? "+" : ""}{factor.impact}</span><div><strong>Рейтинг BO3.gg: {factor.value.toFixed(2)}</strong><p>{factor.explanation}</p></div></div>
+          <div className="factor" key={factor.metric}><span className={`factor__impact factor__impact--${factor.direction}`}>{factor.impact > 0 ? "+" : ""}{factor.impact}</span><div><strong>Avg BO3.gg: {factor.value.toFixed(2)}</strong><p>{factor.explanation}</p></div></div>
         )) : <div className="empty-state">BO3.gg пока не предоставил рейтинг. Нажмите «Обновить».</div>}
         {player.strength_breakdown && <small className="formula">{player.strength_breakdown.formula}</small>}
       </section>
@@ -304,7 +306,7 @@ function TeamPage({ id }: { id: number }) {
                     ))}
                   </select>
                 </label>
-                <b>{player.player_strength ?? 50}<small>/100</small></b>
+                <div className="player-ratings"><span><small>Avg BO3.gg</small>{player.bo3_avg_rating === null ? "—" : Number(player.bo3_avg_rating).toFixed(2)}</span><span className="compact-internal" title={`Общий: ${player.internal_rating_maps_count} карт, ${player.internal_rating_rounds_count} раундов; Top 15: ${player.internal_rating_top15_maps_count} карт, ${player.internal_rating_top15_rounds_count} раундов; Top 16–30: ${player.internal_rating_top16_30_maps_count} карт, ${player.internal_rating_top16_30_rounds_count} раундов`}><small>Внутренний</small>{player.internal_rating === null ? "—" : Number(player.internal_rating).toFixed(2)}<em>Top 15: {player.internal_rating_top15 === null ? "—" : Number(player.internal_rating_top15).toFixed(2)} · Top 16–30: {player.internal_rating_top16_30 === null ? "—" : Number(player.internal_rating_top16_30).toFixed(2)}</em></span><span><small>Сила</small>{player.player_strength ?? "—"}</span></div>
               </div>
             ))}
           </div>
@@ -369,6 +371,7 @@ function rankChangeLabel(
 
 
 export default function App() {
+  if (/^\/demos\/?$/.test(window.location.pathname)) return <DemosPage />;
   if (/^\/compare\/?$/.test(window.location.pathname)) return <TeamComparePage />;
   const playerMatch = window.location.pathname.match(/^\/players\/(\d+)\/?$/);
   if (playerMatch) return <PlayerPage id={Number(playerMatch[1])} />;
@@ -478,7 +481,7 @@ export default function App() {
         </span>
       </header>
 
-      <nav className="home-navigation"><a className="button" href="/compare">Сравнение команд</a></nav>
+      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a></nav>
 
       <section className="hero">
         <div>

@@ -6,6 +6,12 @@ import type {
   TeamParticipant,
   TeamComparison,
   Player,
+  DemoListResponse,
+  DemoUploadResponse,
+  DemoParseFileResult,
+  DemoParseResponse,
+  DemoPlayerStatsResponse,
+  DemoTournamentOption,
 } from "./types";
 
 
@@ -106,5 +112,66 @@ Promise<RankingRun> {
     {
       method: "POST",
     },
+  );
+}
+
+export function uploadDemoFiles(
+  tournamentName: string,
+  matchDate: string,
+  files: File[],
+): Promise<DemoUploadResponse> {
+  const body = new FormData();
+  body.append("tournament_name", tournamentName);
+  body.append("match_date", matchDate);
+  files.forEach((file) => body.append("files", file));
+  return request<DemoUploadResponse>("/api/v1/demos/upload", {
+    method: "POST",
+    body,
+  });
+}
+
+export function getDemoFiles(
+  tournamentName: string,
+  year: number,
+): Promise<DemoListResponse> {
+  const query = new URLSearchParams({
+    tournament_name: tournamentName,
+    year: String(year),
+  });
+  return request<DemoListResponse>(`/api/v1/demos?${query}`);
+}
+
+export function getDemoTournaments(): Promise<DemoTournamentOption[]> {
+  return request<DemoTournamentOption[]>("/api/v1/demos/tournaments");
+}
+
+export function parseDemoFiles(
+  tournamentName: string, year: number, replaceExisting = false,
+): Promise<DemoParseResponse> {
+  return request<DemoParseResponse>("/api/v1/demos/parse", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tournament_name: tournamentName,
+      year,
+      replace_existing: replaceExisting,
+    }),
+  });
+}
+
+export function parseDemoFile(
+  demoFileId: number, replaceExisting = false,
+): Promise<DemoParseFileResult> {
+  return request<DemoParseFileResult>(
+    `/api/v1/demos/${demoFileId}/parse?replace_existing=${replaceExisting}`,
+    { method: "POST" },
+  );
+}
+
+export function getDemoPlayerStats(
+  demoFileId: number,
+): Promise<DemoPlayerStatsResponse> {
+  return request<DemoPlayerStatsResponse>(
+    `/api/v1/demos/${demoFileId}/player-stats`,
   );
 }

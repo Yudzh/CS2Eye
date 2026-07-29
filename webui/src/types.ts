@@ -49,7 +49,12 @@ export interface TeamComparisonPlayer {
   image_url: string | null;
   role: TeamParticipant["role"];
   bo3_rating: string | number | null;
+  bo3_avg_rating: string | number | null;
   player_strength: number | null;
+  internal_rating: string | number | null;
+  internal_rating_version: string | null;
+  internal_rating_top15: string | number | null;
+  internal_rating_top16_30: string | number | null;
   effective_player_strength: number;
   strength_is_fallback: boolean;
 }
@@ -120,6 +125,18 @@ export interface TeamParticipant {
   joined_at: string | null;
   left_at: string | null;
   player_strength: number | null;
+  bo3_rating: string | number | null;
+  bo3_avg_rating: string | number | null;
+  internal_rating: string | number | null;
+  internal_rating_maps_count: number;
+  internal_rating_rounds_count: number;
+  internal_rating_version: string | null;
+  internal_rating_top15: string | number | null;
+  internal_rating_top15_maps_count: number;
+  internal_rating_top15_rounds_count: number;
+  internal_rating_top16_30: string | number | null;
+  internal_rating_top16_30_maps_count: number;
+  internal_rating_top16_30_rounds_count: number;
 }
 
 export interface PlayerTeam {
@@ -151,7 +168,20 @@ export interface Player {
   country_code: string | null;
   country_name: string | null;
   bo3_rating: string | number | null;
+  bo3_avg_rating: string | number | null;
   player_strength: number | null;
+  steam_id: string | null;
+  internal_rating: string | number | null;
+  internal_rating_maps_count: number;
+  internal_rating_rounds_count: number;
+  internal_rating_updated_at: string | null;
+  internal_rating_version: string | null;
+  internal_rating_top15: string | number | null;
+  internal_rating_top15_maps_count: number;
+  internal_rating_top15_rounds_count: number;
+  internal_rating_top16_30: string | number | null;
+  internal_rating_top16_30_maps_count: number;
+  internal_rating_top16_30_rounds_count: number;
   strength_breakdown: {
     baseline: number;
     formula: string;
@@ -205,4 +235,99 @@ export interface ProbeResult {
   ranking_date: string;
   teams_received: number;
   teams: ProbeTeam[];
+}
+
+export type DemoUploadStatus = "created" | "replaced" | "unchanged" | "failed";
+
+export interface DemoUploadFileResult {
+  id: number | null;
+  filename: string;
+  status: DemoUploadStatus;
+  storage_path: string | null;
+  file_size_bytes: number | null;
+  sha256: string | null;
+  error?: string | null;
+}
+
+export interface DemoUploadResponse {
+  tournament_name: string;
+  tournament_slug: string;
+  match_date: string;
+  total_files: number;
+  created_count: number;
+  replaced_count: number;
+  unchanged_count: number;
+  failed_count: number;
+  files: DemoUploadFileResult[];
+}
+
+export interface DemoListFile {
+  id: number;
+  filename: string;
+  storage_path: string;
+  file_size_bytes: number;
+  sha256: string;
+  uploaded_at: string;
+  updated_at: string;
+  parse_status: "pending" | "processing" | "success" | "failed";
+}
+
+export interface DemoParseFileResult {
+  demo_file_id: number;
+  filename: string;
+  status: "parsed" | "skipped" | "failed";
+  players_found: number;
+  players_linked: number;
+  players_unlinked: number;
+  error: string | null;
+  unlinked_players: Array<{
+    nickname: string;
+    steam_id: string | null;
+    team_name: string | null;
+    demo_filename: string;
+  }>;
+  diagnostics: string[];
+}
+
+export interface DemoPlayerStat {
+  player_id: number | null;
+  steam_id: string | null;
+  nickname: string;
+  demo_team_id: number | null;
+  demo_team_name: string | null;
+  opponent_team_id: number | null;
+  opponent_team_name: string | null;
+  opponent_rank: number | null;
+  opponent_rank_group: "top_15" | "top_16_30" | "outside_top_30" | "unknown";
+}
+
+export interface DemoPlayerStatsResponse {
+  demo_file_id: number;
+  filename: string;
+  parse_status: string;
+  players: DemoPlayerStat[];
+}
+
+export interface DemoParseResponse {
+  tournament_name: string;
+  year: number;
+  total_files: number;
+  parsed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  players_recalculated: number;
+  files: DemoParseFileResult[];
+}
+
+export interface DemoListResponse {
+  tournament_name: string;
+  tournament_slug: string;
+  year: number;
+  total_files: number;
+  dates: Array<{ match_date: string; files: DemoListFile[] }>;
+}
+
+export interface DemoTournamentOption {
+  name: string;
+  slug: string;
 }

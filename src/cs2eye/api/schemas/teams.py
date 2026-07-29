@@ -19,6 +19,18 @@ class TeamParticipantResponse(BaseModel):
     joined_at: datetime | None = None
     left_at: datetime | None = None
     player_strength: int | None = None
+    bo3_rating: Decimal | None = None
+    bo3_avg_rating: Decimal | None = None
+    internal_rating: Decimal | None = None
+    internal_rating_maps_count: int = 0
+    internal_rating_rounds_count: int = 0
+    internal_rating_version: str | None = None
+    internal_rating_top15: Decimal | None = None
+    internal_rating_top15_maps_count: int = 0
+    internal_rating_top15_rounds_count: int = 0
+    internal_rating_top16_30: Decimal | None = None
+    internal_rating_top16_30_maps_count: int = 0
+    internal_rating_top16_30_rounds_count: int = 0
 
 
 TeamRole = Literal[
@@ -90,6 +102,11 @@ class TeamComparisonPlayerResponse(BaseModel):
     image_url: str | None
     role: str | None
     bo3_rating: Decimal | None
+    bo3_avg_rating: Decimal | None
+    internal_rating: Decimal | None
+    internal_rating_version: str | None
+    internal_rating_top15: Decimal | None
+    internal_rating_top16_30: Decimal | None
     player_strength: int | None
     effective_player_strength: int
     strength_is_fallback: bool

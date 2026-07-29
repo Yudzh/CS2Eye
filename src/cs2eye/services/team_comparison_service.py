@@ -51,6 +51,11 @@ class ComparisonPlayer:
     image_url: str | None
     role: str | None
     bo3_rating: Decimal | None
+    bo3_avg_rating: Decimal | None
+    internal_rating: Decimal | None
+    internal_rating_version: str | None
+    internal_rating_top15: Decimal | None
+    internal_rating_top16_30: Decimal | None
     player_strength: int | None
     effective_player_strength: int
     strength_is_fallback: bool
@@ -195,6 +200,11 @@ class TeamComparisonService:
                 image_url=player.image_url,
                 role=membership.role,
                 bo3_rating=player.bo3_rating,
+                bo3_avg_rating=player.bo3_rating,
+                internal_rating=player.internal_rating,
+                internal_rating_version=player.internal_rating_version,
+                internal_rating_top15=player.internal_rating_top15,
+                internal_rating_top16_30=player.internal_rating_top16_30,
                 player_strength=player.player_strength,
                 effective_player_strength=(
                     player.player_strength

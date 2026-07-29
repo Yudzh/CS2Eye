@@ -118,6 +118,32 @@ class Player(Base):
     stats_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
     )
+    steam_id: Mapped[str | None] = mapped_column(String(32), unique=True)
+    internal_rating: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    internal_rating_maps_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    internal_rating_rounds_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    internal_rating_version: Mapped[str | None] = mapped_column(String(16))
+    internal_rating_top15: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    internal_rating_top15_maps_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    internal_rating_top15_rounds_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    internal_rating_top16_30: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    internal_rating_top16_30_maps_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    internal_rating_top16_30_rounds_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    internal_rating_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
     is_analytics_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
