@@ -2,7 +2,7 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.integrations.bo3.client import (
@@ -17,6 +17,7 @@ from cs2eye.integrations.bo3.client import (
     Bo3TeamResponse,
 )
 from cs2eye.services.player_service import apply_player_profile
+from cs2eye.services.team_roster_service import set_current_roster
 from cs2eye.models.team import (
     Player,
     RankingImportRun,
@@ -305,30 +306,28 @@ class TopTeamsService:
                     "Import run does not exist."
                 )
 
-            active_result = await self._session.execute(
+            ranked_result = await self._session.execute(
                 select(Team).where(
-                    Team.is_analytics_active.is_(True),
+                    Team.current_rank.is_not(None),
                 )
             )
-            previously_active = {
+            previously_ranked = {
                 team.bo3_id: team
-                for team in active_result.scalars()
+                for team in ranked_result.scalars()
             }
             incoming_ids = {
                 item.team.id
                 for item in ranking.data
             }
             deactivated = 0
-            for bo3_id, team in previously_active.items():
+            for bo3_id, team in previously_ranked.items():
                 if bo3_id not in incoming_ids:
+                    if team.is_analytics_active:
+                        deactivated += 1
                     team.is_analytics_active = False
                     team.current_rank = None
                     team.current_points = None
                     team.rank_change = None
-                    team.ranking_date = (
-                        ranking.meta.ranking_date
-                    )
-                    deactivated += 1
 
             activated = 0
             player_result = await self._session.execute(
@@ -483,11 +482,40 @@ class TopTeamsService:
                         )
                         if joined_at is not None:
                             membership.joined_at = joined_at
-                self._session.add(
-                    TeamRankingSnapshot(
+                main_players = [
+                    players_by_bo3_id[participant.id]
+                    for participant in detail.players
+                    if not participant.is_coach and not participant.is_substitute
+                ]
+                if len({player.id for player in main_players}) == 5:
+                    joined_dates = [
+                        membership.joined_at.date()
+                        for participant in detail.players
+                        if not participant.is_coach and not participant.is_substitute
+                        and (membership := active_memberships.get((team.bo3_id, participant.id)))
+                        and membership.joined_at is not None
+                    ]
+                    active_from = max(joined_dates) if len(joined_dates) == 5 else None
+                    await set_current_roster(
+                        self._session, team.id, main_players, source="team_import",
+                        active_from=active_from,
+                        active_from_source="source_date" if active_from else "unknown",
+                    )
+                snapshot = (
+                    await self._session.execute(
+                        select(TeamRankingSnapshot).where(
+                            TeamRankingSnapshot.team_id == team.id,
+                            TeamRankingSnapshot.ranking_date == item.ranking_date,
+                            TeamRankingSnapshot.source == "bo3",
+                        )
+                    )
+                ).scalar_one_or_none()
+                if snapshot is None:
+                    snapshot = TeamRankingSnapshot(
                         import_run_id=run.id,
                         team_id=team.id,
                         ranking_date=item.ranking_date,
+                        source="bo3",
                         rank=item.rank,
                         points=item.score,
                         rank_change=item.rank_diff,
@@ -499,7 +527,16 @@ class TopTeamsService:
                             in item.roster_players
                         ],
                     )
-                )
+                    self._session.add(snapshot)
+                else:
+                    snapshot.import_run_id = run.id
+                    snapshot.rank = item.rank
+                    snapshot.points = item.score
+                    snapshot.rank_change = item.rank_diff
+                    snapshot.roster_payload = [
+                        player.model_dump(mode="json")
+                        for player in item.roster_players
+                    ]
 
             run.status = "succeeded"
             run.finished_at = synced_at
@@ -543,9 +580,17 @@ async def list_active_teams(
 async def list_ranked_teams(
     session: AsyncSession,
 ) -> list[Team]:
+    latest_ranking_date = (
+        select(func.max(Team.ranking_date))
+        .where(Team.current_rank.is_not(None))
+        .scalar_subquery()
+    )
     result = await session.execute(
         select(Team)
-        .where(Team.current_rank.is_not(None))
+        .where(
+            Team.current_rank.is_not(None),
+            Team.ranking_date == latest_ranking_date,
+        )
         .order_by(Team.current_rank.asc())
     )
     return list(result.scalars())

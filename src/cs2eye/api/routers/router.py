@@ -5,6 +5,8 @@ from cs2eye.api.routers.health import router as health_router
 from cs2eye.api.routers.teams import router as teams_router
 from cs2eye.api.routers.players import router as players_router
 from cs2eye.api.routers.demos import router as demos_router
+from cs2eye.api.routers.meta import router as meta_router
+from cs2eye.api.routers.analysis import router as analysis_router
 
 
 api_router = APIRouter(
@@ -25,3 +27,5 @@ api_router.include_router(
 api_router.include_router(
     demos_router,
 )
+api_router.include_router(meta_router)
+api_router.include_router(analysis_router)

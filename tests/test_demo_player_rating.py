@@ -15,7 +15,7 @@ from cs2eye.services.demo_parser_service import (
     DamageEvent, DeathEvent, Demoparser2Adapter, ParsedDemoPlayerStat,
     PlayerRef, RoundSnapshot,
     aggregate_player_events,
-    is_valid_round_row,
+    completed_rounds_count, is_valid_round_row,
 )
 from cs2eye.services.player_internal_rating_service import (
     INTERNAL_RATING_VERSION, calculate_internal_rating, calculate_rating_sample,
@@ -104,6 +104,14 @@ def test_warmup_and_technical_rounds_are_invalid() -> None:
     assert not is_valid_round_row({"is_technical_timeout": True})
 
 
+def test_completed_rounds_count_deduplicates_repeated_round_end() -> None:
+    assert completed_rounds_count([
+        {"tick": 100, "total_rounds_played": 1},
+        {"tick": 101, "total_rounds_played": 1},
+        {"tick": 200, "total_rounds_played": 2},
+    ]) == 2
+
+
 @pytest.mark.parametrize(("rank", "group"), [
     (1, "top_15"), (15, "top_15"),
     (16, "top_16_30"), (30, "top_16_30"),
@@ -168,6 +176,45 @@ def test_demoparser_adapter_normalizes_events(monkeypatch, tmp_path) -> None:
     assert stats["B"].deaths == 1
 
 
+def test_demoparser_adapter_extracts_team_rounds_total(monkeypatch, tmp_path) -> None:
+    class Frame:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def to_dicts(self):
+            return self.rows
+
+    class Parser:
+        def __init__(self, _path):
+            pass
+
+        def parse_header(self):
+            return {"map_name": "de_mirage"}
+
+        def parse_event(self, name, **_kwargs):
+            if name == "round_end":
+                return Frame([{
+                    "tick": 100, "total_rounds_played": 22,
+                    "is_warmup_period": False, "is_technical_timeout": False,
+                }])
+            return Frame([])
+
+        def parse_ticks(self, props, *, ticks=None, **_kwargs):
+            if "team_rounds_total" in props:
+                return Frame([
+                    {"tick": 100, "team_num": 2, "team_clan_name": "Spirit", "team_rounds_total": 13, "team_score_overtime": 0},
+                    {"tick": 100, "team_num": 3, "team_clan_name": "NAVI", "team_rounds_total": 9, "team_score_overtime": 0},
+                ])
+            return Frame([])
+
+    monkeypatch.setattr("cs2eye.services.demo_parser_service.DemoParser", Parser)
+    parsed = Demoparser2Adapter().parse(tmp_path / "fixture.dem")
+    assert parsed.map_result.raw_map_name == "de_mirage"
+    assert (parsed.map_result.team_a_name, parsed.map_result.team_a_score) == ("Spirit", 13)
+    assert (parsed.map_result.team_b_name, parsed.map_result.team_b_score) == ("NAVI", 9)
+    assert parsed.map_result.parser_rounds_count is None
+
+
 @pytest.fixture
 async def db_session():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -181,13 +228,15 @@ async def db_session():
 async def test_player_linking_rules(db_session) -> None:
     exact = Player(bo3_id=1, bo3_slug="donk", nickname="donk", steam_id="7656")
     nickname = Player(bo3_id=2, bo3_slug="zywoo", nickname="ZywOo")
+    aliased = Player(bo3_id=5, bo3_slug="naf", nickname="NAF")
     duplicate_a = Player(bo3_id=3, bo3_slug="same-a", nickname="same")
     duplicate_b = Player(bo3_id=4, bo3_slug="same-b", nickname=" SAME ")
-    db_session.add_all([exact, nickname, duplicate_a, duplicate_b])
+    db_session.add_all([exact, nickname, aliased, duplicate_a, duplicate_b])
     await db_session.commit()
     assert await link_demo_player(db_session, "7656", "anything") is exact
     assert await link_demo_player(db_session, "999", "  zywoo ") is nickname
     assert nickname.steam_id == "999"
+    assert await link_demo_player(db_session, None, "NAF-FLY") is aliased
     assert await link_demo_player(db_session, None, "same") is None
     assert await link_demo_player(db_session, None, "unknown") is None
 
@@ -325,7 +374,7 @@ async def test_reparse_replaces_stats_without_duplicates(db_session, tmp_path) -
     stored_path.parent.mkdir(parents=True)
     stored_path.write_bytes(b"old")
     upload_result = await DemoStorageService(db_session, tmp_path, 100).upload(
-        "Cup", demo.match_date,
+        "Cup", "online", demo.match_date,
         [UploadFile(BytesIO(b"new"), filename="map.dem")],
     )
     assert upload_result.files[0].status == "replaced"

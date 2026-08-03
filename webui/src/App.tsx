@@ -13,6 +13,8 @@ import {
   refreshTopTeams,
   getPlayer,
   refreshPlayer,
+  getTeamMaps,
+  getTeamMapDetail,
 } from "./api";
 import type {
   ProbeResult,
@@ -21,6 +23,9 @@ import type {
   TeamDetail,
   TeamParticipant,
   Player,
+  TeamMapAggregate,
+  TeamMapScope,
+  TeamMapDetail,
 } from "./types";
 import { TeamComparePage } from "./pages/TeamComparePage";
 import { DemosPage } from "./pages/DemosPage";
@@ -203,7 +208,7 @@ function PlayerPage({ id }: { id: number }) {
       {error && <div className="notice notice--error">{error}</div>}
       <section className="player-grid">
         <article className="metric-card"><span>Avg BO3.gg</span><strong>{player.bo3_avg_rating === null ? "—" : Number(player.bo3_avg_rating).toFixed(2)}</strong></article>
-        <article className="metric-card internal-rating-card"><span>Внутренний рейтинг</span>{[["Общий", player.internal_rating, player.internal_rating_maps_count, player.internal_rating_rounds_count], ["Против Top 1–15", player.internal_rating_top15, player.internal_rating_top15_maps_count, player.internal_rating_top15_rounds_count], ["Против Top 16–30", player.internal_rating_top16_30, player.internal_rating_top16_30_maps_count, player.internal_rating_top16_30_rounds_count]].map(([label, rating, maps, rounds]) => <div className="internal-rating-row" key={String(label)}><span>{label}</span><strong>{rating === null ? "—" : Number(rating).toFixed(2)}</strong><small>{rating === null ? "Нет данных" : `${maps} карт · ${rounds} раундов`}</small></div>)}</article>
+        <article className="metric-card internal-rating-card" title="Группа соперника определяется по его месту на дату матча. Если исторических данных нет, используется текущее место."><span>Внутренний рейтинг</span>{[["Общий", player.internal_rating, player.internal_rating_maps_count, player.internal_rating_rounds_count], ["Против Top 1–15", player.internal_rating_top15, player.internal_rating_top15_maps_count, player.internal_rating_top15_rounds_count], ["Против Top 16–30", player.internal_rating_top16_30, player.internal_rating_top16_30_maps_count, player.internal_rating_top16_30_rounds_count]].map(([label, rating, maps, rounds]) => <div className="internal-rating-row" key={String(label)}><span>{label}</span><strong>{rating === null ? "—" : Number(rating).toFixed(2)}</strong><small>{rating === null ? "Нет данных" : `${maps} карт · ${rounds} раундов`}</small></div>)}</article>
         <article className="metric-card"><span>Сила игрока</span><strong>{player.player_strength ?? "—"}<small>/100</small></strong></article>
         <article className="metric-card"><span>Последнее обновление</span><strong className="metric-date">{formatDate(player.stats_synced_at)}</strong></article>
       </section>
@@ -233,12 +238,22 @@ function TeamPage({ id }: { id: number }) {
   const [error, setError] = useState<string | null>(null);
   const [roleError, setRoleError] = useState<string | null>(null);
   const [savingPlayerId, setSavingPlayerId] = useState<number | null>(null);
+  const [mapStats, setMapStats] = useState<TeamMapAggregate[]>([]);
+  const [mapFilter, setMapFilter] = useState("all");
+  const [mapSort, setMapSort] = useState("maps");
+  const [mapDetails, setMapDetails] = useState<Record<string, TeamMapDetail>>({});
+  const [aggregationLevel, setAggregationLevel] = useState<"organization" | "current_roster">("current_roster");
 
   useEffect(() => {
     getTeam(id).then(setTeam).catch((value: unknown) => {
       setError(value instanceof Error ? value.message : "Не удалось загрузить команду.");
     });
   }, [id]);
+
+  useEffect(() => {
+    setMapDetails({});
+    getTeamMaps(id, aggregationLevel).then((value) => setMapStats(value.maps)).catch(() => setMapStats([]));
+  }, [id, aggregationLevel]);
 
   if (error) return <main className="page"><a className="back-link" href="/">← К командам</a><div className="empty-state empty-state--error">{error}</div></main>;
   if (!team) return <main className="page"><div className="empty-state">Загружаю команду…</div></main>;
@@ -250,6 +265,18 @@ function TeamPage({ id }: { id: number }) {
     (member) => member.participant_type === "coach" && member.is_active && !member.left_at,
   );
   const strength = team.strength;
+  const visibleMaps = mapStats.filter((item) => {
+    if (mapFilter === "min3") return item.all.maps_played >= 3;
+    if (mapFilter === "min5") return item.all.maps_played >= 5;
+    if (mapFilter === "fresh") return item.all.freshness_label === "fresh";
+    return true;
+  }).sort((a, b) => {
+    if (mapSort === "winrate") return (b.all.map_win_rate ?? -1) - (a.all.map_win_rate ?? -1);
+    if (mapSort === "ct") return (b.all.ct.win_rate ?? -1) - (a.all.ct.win_rate ?? -1);
+    if (mapSort === "t") return (b.all.t.win_rate ?? -1) - (a.all.t.win_rate ?? -1);
+    if (mapSort === "date") return (b.all.last_match_date ?? "").localeCompare(a.all.last_match_date ?? "");
+    return b.all.maps_played - a.all.maps_played;
+  });
 
   async function changeRole(
     playerId: number,
@@ -266,6 +293,13 @@ function TeamPage({ id }: { id: number }) {
     } finally {
       setSavingPlayerId(null);
     }
+  }
+
+  function loadMapDetail(mapName: string) {
+    if (mapDetails[mapName]) return;
+    void getTeamMapDetail(id, mapName, aggregationLevel).then((value) => {
+      setMapDetails((current) => ({ ...current, [mapName]: value }));
+    });
   }
 
   return (
@@ -285,6 +319,30 @@ function TeamPage({ id }: { id: number }) {
         <article className="metric-card"><span>Активных игроков</span><strong>{strength.active_players_count}<small>/5</small></strong></article>
         <article className="metric-card"><span>Средняя сила игроков</span><strong>{strength.base_player_score.toFixed(2)}</strong></article>
         <article className="metric-card"><span>Бонус / штраф</span><strong className="metric-adjustment">+{strength.roster_bonus.toFixed(2)} / −{strength.roster_penalty.toFixed(2)}</strong></article>
+      </section>
+
+      <section className="strength-panel team-map-panel">
+        <div className="section-heading"><div><p className="eyebrow">Аналитика</p><h2>Статистика по картам</h2></div></div>
+        <div className="team-map-controls">
+          <div className="roster-toggle"><button className={aggregationLevel === "current_roster" ? "button button--primary" : "button"} onClick={() => setAggregationLevel("current_roster")}>Текущий состав</button><button className={aggregationLevel === "organization" ? "button button--primary" : "button"} onClick={() => setAggregationLevel("organization")}>История организации</button></div>
+          <select value={mapFilter} onChange={(event) => setMapFilter(event.target.value)}><option value="all">Все карты</option><option value="min3">Минимум 3 карты</option><option value="min5">Минимум 5 карт</option><option value="fresh">Только свежие</option></select>
+          <select value={mapSort} onChange={(event) => setMapSort(event.target.value)}><option value="maps">По числу карт</option><option value="winrate">По winrate</option><option value="date">По последней дате</option><option value="ct">По CT winrate</option><option value="t">По T winrate</option></select>
+        </div>
+        {visibleMaps.length === 0 ? <div className="empty-state">{aggregationLevel === "current_roster" ? "У текущего состава ещё нет сыгранных карт." : "По картам ещё нет полностью распарсенных демок."}</div> : <div className="team-map-grid">{visibleMaps.map((item) => {
+          const percent = (value: number | null) => value === null ? "—" : `${value.toFixed(1)}%`;
+          const record = (scope: TeamMapScope | null | undefined) => scope ? `${scope.maps_won}–${scope.maps_lost}` : "—";
+          const detail = mapDetails[item.map_name];
+          return <details className="team-map-card" key={item.map_name} onToggle={(event) => event.currentTarget.open && loadMapDetail(item.map_name)}>
+            <summary><strong>{item.map_name[0].toUpperCase() + item.map_name.slice(1)}</strong><span>{item.all.maps_won}–{item.all.maps_lost} · {percent(item.all.map_win_rate)}</span></summary>
+            <div className="team-map-rates"><span>CT <strong>{percent(item.all.ct.win_rate)}</strong></span><span>T <strong>{percent(item.all.t.win_rate)}</strong></span><span>Раунды <strong>{item.all.rounds_won}–{item.all.rounds_lost}</strong></span></div>
+            <div className="team-map-scopes"><span>Последние 5: <b>{record(item.recent.last_5)}</b></span><span>Последние 10: <b>{record(item.recent.last_10)}</b></span><span>Последние 20: <b>{record(item.recent.last_20)}</b></span><span>Top 15: <b>{record(item.versus.top_15)}</b></span><span>Top 16–30: <b>{record(item.versus.top_16_30)}</b></span><span>Тир 2–3: <b>{record(item.versus.tier_2_3)}</b></span></div>
+            <small>{item.all.maps_played} карт · Последняя: {item.all.last_match_date ? new Date(item.all.last_match_date).toLocaleDateString("ru-RU") : "дата неизвестна"} · Выборка: {item.all.sample_size_label} · Свежесть: {item.all.freshness_label}</small>
+            {item.all.maps_played <= 2 && <p className="map-warning">Недостаточная выборка — выводы ненадёжны.</p>}
+            {item.all.freshness_label === "very_stale" && <p className="map-warning">Последняя карта сыграна более 90 дней назад.</p>}
+            {detail && <div className="team-map-matches"><b>{aggregationLevel === "current_roster" ? "Последние игры текущего состава" : "Последние карты организации"}</b>{detail.recent_matches.map((match) => <div key={match.demo_file_id}><span>{match.match_date ? new Date(match.match_date).toLocaleDateString("ru-RU") : "Дата неизвестна"}</span><span>{match.opponent_team_name ?? "Неизвестный соперник"}{match.opponent_rank ? ` (#${match.opponent_rank})` : ""}</span><strong className={match.result === "win" ? "match-win" : "match-loss"}>{match.score_for}:{match.score_against}</strong></div>)}</div>}
+          </details>;
+        })}</div>}
+        <p className="formula">Оценка выборки зависит от количества распарсенных карт и не является оценкой силы команды. Свежесть рассчитывается по дате последней карты.</p>
       </section>
 
       <section className="team-detail-grid">

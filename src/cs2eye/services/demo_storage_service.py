@@ -20,8 +20,12 @@ from cs2eye.api.schemas.demos import (
     DemoUploadFileResult, DemoUploadResponse,
 )
 from cs2eye.models.demo_file import DemoFile
-from cs2eye.models.demo import DemoParseRun, DemoPlayerStat
+from cs2eye.models.demo import (
+    DemoMapResult, DemoParseRun, DemoPlayerStat, DemoRound, DemoTeamOpponentContext,
+    DemoTeamSideStat,
+)
 from cs2eye.services.player_internal_rating_service import recalculate_player_internal_rating
+from cs2eye.services.team_map_aggregate_service import recalculate_team_map
 
 
 CHUNK_SIZE = 1024 * 1024
@@ -63,8 +67,48 @@ class DemoStorageService:
         self.max_file_size_bytes = max_file_size_bytes
         self.archive_max_depth = archive_max_depth
 
+    async def assign_event_type(self, tournament_name: str, event_type: str) -> int:
+        """Move legacy demos for one tournament into its online/lan directory."""
+        slug = make_tournament_slug(tournament_name)
+        records = list((await self.session.execute(select(DemoFile).where(
+            DemoFile.tournament_slug == slug,
+        ))).scalars())
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for record in records:
+                relative = Path(record.storage_path)
+                parts = relative.parts
+                if len(parts) < 6 or parts[:3] != ("demos", "tournaments", slug):
+                    raise ValueError(f"Unexpected demo storage path: {record.storage_path}")
+                if parts[3] in {"online", "lan"}:
+                    if parts[3] != event_type:
+                        raise ValueError(
+                            f"Demo {record.id} is already assigned to {parts[3]}.",
+                        )
+                    continue
+                target_relative = Path(*parts[:3], event_type, *parts[3:])
+                source = self.storage_root / relative
+                target = self.storage_root / target_relative
+                if not source.is_file():
+                    raise FileNotFoundError(f"Demo file not found: {source}")
+                if target.exists():
+                    raise FileExistsError(f"Migration target already exists: {target}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.replace(target)
+                moved.append((source, target))
+                record.storage_path = target_relative.as_posix()
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            for source, target in reversed(moved):
+                source.parent.mkdir(parents=True, exist_ok=True)
+                target.replace(source)
+            raise
+        return len(moved)
+
     async def upload(
-        self, tournament_name: str, match_date: date, files: list[UploadFile],
+        self, tournament_name: str, event_type: str, match_date: date,
+        files: list[UploadFile],
     ) -> DemoUploadResponse:
         name = tournament_name
         slug = make_tournament_slug(name)
@@ -73,10 +117,10 @@ class DemoStorageService:
             filename = upload.filename or ""
             if Path(filename).suffix.lower() in ARCHIVE_SUFFIXES:
                 results.extend(
-                    await self._upload_archive(name, slug, match_date, upload, 1),
+                    await self._upload_archive(name, slug, event_type, match_date, upload, 1),
                 )
             else:
-                results.append(await self._upload_one(name, slug, match_date, upload))
+                results.append(await self._upload_one(name, slug, event_type, match_date, upload))
         counts = {status: sum(item.status == status for item in results) for status in (
             "created", "replaced", "unchanged", "failed",
         )}
@@ -88,7 +132,7 @@ class DemoStorageService:
         )
 
     async def _upload_archive(
-        self, tournament_name: str, slug: str, match_date: date,
+        self, tournament_name: str, slug: str, event_type: str, match_date: date,
         upload: UploadFile, depth: int,
     ) -> list[DemoUploadFileResult]:
         archive_name = upload.filename or "archive"
@@ -133,7 +177,7 @@ class DemoStorageService:
                     if suffix == ".dem":
                         member_file = archive.open(member)
                         results.append(await self._upload_one(
-                            tournament_name, slug, match_date,
+                            tournament_name, slug, event_type, match_date,
                             UploadFile(member_file, filename=basename),
                         ))
                         continue
@@ -152,7 +196,7 @@ class DemoStorageService:
                                 nested_file.write(chunk)
                         nested_file.seek(0)
                         results.extend(await self._upload_archive(
-                            tournament_name, slug, match_date,
+                            tournament_name, slug, event_type, match_date,
                             UploadFile(nested_file, filename=basename), depth + 1,
                         ))
                     except Exception:
@@ -173,7 +217,8 @@ class DemoStorageService:
         return results
 
     async def _upload_one(
-        self, tournament_name: str, slug: str, match_date: date, upload: UploadFile,
+        self, tournament_name: str, slug: str, event_type: str, match_date: date,
+        upload: UploadFile,
     ) -> DemoUploadFileResult:
         filename = upload.filename or ""
         temp_path: Path | None = None
@@ -183,7 +228,7 @@ class DemoStorageService:
         try:
             filename = validate_demo_filename(upload.filename)
             relative_path = Path(
-                "demos", "tournaments", slug, str(match_date.year),
+                "demos", "tournaments", slug, event_type, str(match_date.year),
                 match_date.isoformat(), filename,
             )
             final_path = self.storage_root / relative_path
@@ -231,7 +276,15 @@ class DemoStorageService:
             moved_to_final = True
             now = datetime.now(UTC)
             invalidated_player_ids: set[int] = set()
+            invalidated_team_maps: set[tuple[int, str]] = set()
             if existing:
+                old_result = (await self.session.execute(select(DemoMapResult).where(
+                    DemoMapResult.demo_file_id == existing.id,
+                ))).scalar_one_or_none()
+                if old_result and old_result.map_name:
+                    invalidated_team_maps = {(team_id, old_result.map_name)
+                                             for team_id in (old_result.team_a_id, old_result.team_b_id)
+                                             if team_id is not None}
                 invalidated_player_ids = set((
                     await self.session.execute(select(DemoPlayerStat.player_id).where(
                         DemoPlayerStat.demo_file_id == existing.id,
@@ -240,6 +293,18 @@ class DemoStorageService:
                 ).scalars().all())
                 await self.session.execute(delete(DemoPlayerStat).where(
                     DemoPlayerStat.demo_file_id == existing.id,
+                ))
+                await self.session.execute(delete(DemoMapResult).where(
+                    DemoMapResult.demo_file_id == existing.id,
+                ))
+                await self.session.execute(delete(DemoRound).where(
+                    DemoRound.demo_file_id == existing.id,
+                ))
+                await self.session.execute(delete(DemoTeamSideStat).where(
+                    DemoTeamSideStat.demo_file_id == existing.id,
+                ))
+                await self.session.execute(delete(DemoTeamOpponentContext).where(
+                    DemoTeamOpponentContext.demo_file_id == existing.id,
                 ))
                 parse_run = (
                     await self.session.execute(select(DemoParseRun).where(
@@ -268,6 +333,9 @@ class DemoStorageService:
                 await recalculate_player_internal_rating(
                     self.session, player_id, commit=False,
                 )
+            await self.session.flush()
+            for team_id, map_name in invalidated_team_maps:
+                await recalculate_team_map(self.session, team_id, map_name)
             await self.session.commit()
             await self.session.refresh(record)
             if backup_path is not None:
@@ -319,13 +387,29 @@ class DemoStorageService:
                 ).where(DemoParseRun.demo_file_id.in_([item.id for item in records])))
             ).all()
         } if records else {}
+        map_results = {
+            item.demo_file_id: item for item in (
+                await self.session.execute(select(DemoMapResult).where(
+                    DemoMapResult.demo_file_id.in_([record.id for record in records]),
+                ))
+            ).scalars().all()
+        } if records else {}
         for record in records:
+            result = map_results.get(record.id)
             groups[record.match_date].append(DemoListFile(
                 id=record.id, filename=record.original_filename,
                 storage_path=record.storage_path, file_size_bytes=record.file_size_bytes,
                 sha256=record.sha256, uploaded_at=record.uploaded_at,
                 updated_at=record.updated_at,
                 parse_status=parse_statuses.get(record.id, "pending"),
+                map_name=result.map_name if result else None,
+                team_a_name=result.team_a_name if result else None,
+                team_a_score=result.team_a_score if result else None,
+                team_b_name=result.team_b_name if result else None,
+                team_b_score=result.team_b_score if result else None,
+                winner_team_name=result.winner_team_name if result else None,
+                metadata_status=result.metadata_status if result else None,
+                round_data_status=result.round_data_status if result else None,
             ))
         dates = [DemoDateGroup(match_date=day, files=groups[day]) for day in sorted(groups, reverse=True)]
         display_name = records[0].tournament_name if records else name

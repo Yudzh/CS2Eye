@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
-import { compareTeams, getTeams } from "../api";
+import { compareCurrentRosters, compareTeams, getTeams } from "../api";
 import { RoleComparisonTable } from "../components/RoleComparisonTable";
 import { TeamComparisonSide } from "../components/TeamComparisonSide";
-import type { Team, TeamComparison } from "../types";
+import type { CurrentRosterComparison, Team, TeamComparison } from "../types";
 
 export function TeamComparePage() {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -12,12 +12,16 @@ export function TeamComparePage() {
   const [loadingTeams, setLoadingTeams] = useState(true);
   const [loadingComparison, setLoadingComparison] = useState(false);
   const [comparison, setComparison] = useState<TeamComparison | null>(null);
+  const [rosterComparison, setRosterComparison] = useState<CurrentRosterComparison | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function loadComparison(a: number, b: number) {
     setLoadingComparison(true);
     setError(null);
-    try { setComparison(await compareTeams(a, b)); }
+    try {
+      const [organization, rosters] = await Promise.all([compareTeams(a, b), compareCurrentRosters(a, b)]);
+      setComparison(organization); setRosterComparison(rosters);
+    }
     catch (value: unknown) { setComparison(null); setError(value instanceof Error ? value.message : "Не удалось сравнить команды."); }
     finally { setLoadingComparison(false); }
   }
@@ -69,6 +73,13 @@ export function TeamComparePage() {
           <TeamComparisonSide side={comparison.team_b} />
         </section>
         <RoleComparisonTable comparison={comparison} />
+        {rosterComparison && <section className="comparison-summary"><p className="eyebrow">Текущие составы</p><h2>Личные встречи текущих составов</h2>
+          {rosterComparison.status !== "available" ? <p>Невозможно построить статистику текущего состава: активный состав одной из команд определён не полностью.</p> : !rosterComparison.met ? <><p>Эти составы ещё не встречались.</p><small>История организаций показана отдельно и может быть нерелевантна для текущих составов.</small></> : <>
+            <p><strong>{rosterComparison.team_a.name}</strong> {rosterComparison.head_to_head?.team_a_maps_won}–{rosterComparison.head_to_head?.team_b_maps_won} <strong>{rosterComparison.team_b.name}</strong> · сыграно карт: {rosterComparison.head_to_head?.maps_played}</p>
+            <p>Раунды: {rosterComparison.head_to_head?.team_a_rounds_won}–{rosterComparison.head_to_head?.team_b_rounds_won}</p>
+            <ul>{rosterComparison.maps.map((map) => <li key={map.map_name}>{map.map_name}: {map.team_a_maps_won}–{map.team_b_maps_won}</li>)}</ul>
+          </>}
+        </section>}
         <section className="comparison-summary"><p className="eyebrow">Краткий вывод</p><h2>Что показывает сравнение</h2><ul>{comparison.summary_notes.map((note, index) => <li key={`${index}-${note}`}>{note}</li>)}</ul></section>
       </> : !loadingTeams && teams.length >= 2 && !error ? <div className="empty-state">Выберите две команды для сравнения.</div> : null}
     </main>

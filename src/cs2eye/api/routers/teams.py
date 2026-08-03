@@ -28,13 +28,33 @@ from cs2eye.services.team_comparison_service import (
     TeamComparisonService,
     TeamNotFoundError,
 )
-from cs2eye.models.team import TeamParticipantMembership
+from cs2eye.models.team import Player, Team, TeamParticipantMembership, TeamRoster, TeamRosterMember
 
 
 router = APIRouter(
     prefix="/teams",
     tags=["teams"],
 )
+
+
+@router.get("/{team_id}/rosters/current")
+async def get_current_roster(team_id: int, session: AsyncSession = Depends(get_db_session)) -> dict:
+    team = await session.get(Team, team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail="Команда не найдена.")
+    roster = await session.get(TeamRoster, team.current_roster_id) if team.current_roster_id else None
+    if roster is None or roster.resolution_status != "complete":
+        return {"team_id": team.id, "team_name": team.name, "status": "current_roster_unavailable", "roster": None}
+    rows = (await session.execute(
+        select(TeamRosterMember, Player).outerjoin(Player, Player.id == TeamRosterMember.player_id)
+        .where(TeamRosterMember.roster_id == roster.id).order_by(TeamRosterMember.id)
+    )).all()
+    return {"team_id": team.id, "team_name": team.name, "status": "available", "roster": {
+        "id": roster.id, "active_from": roster.active_from,
+        "active_from_source": roster.active_from_source, "resolution_status": roster.resolution_status,
+        "players": [{"id": member.player_id, "name": player.nickname if player else member.player_name_snapshot,
+                     "role": member.role_snapshot} for member, player in rows],
+    }}
 
 
 @router.get(

@@ -43,6 +43,52 @@ export interface TeamDetail extends Team {
   strength: TeamStrength;
 }
 
+export interface TeamMapScope {
+  maps_played: number; maps_won: number; maps_lost: number; map_win_rate: number | null;
+  rounds_played: number; rounds_won: number; rounds_lost: number; round_win_rate: number | null;
+  ct: { rounds_played: number; rounds_won: number; rounds_lost: number; win_rate: number | null };
+  t: { rounds_played: number; rounds_won: number; rounds_lost: number; win_rate: number | null };
+  sample_size_score: number; sample_size_label: string;
+  freshness_score: number; freshness_label: string;
+  first_match_date: string | null; last_match_date: string | null;
+}
+
+export interface TeamMapAggregate {
+  map_name: string; all: TeamMapScope;
+  recent: Record<"last_5" | "last_10" | "last_20", (TeamMapScope & { requested_window: number; actual_sample: number }) | null>;
+  versus: Record<"top_15" | "top_16_30" | "tier_2_3", TeamMapScope | null>;
+}
+
+export interface TeamMapsResponse {
+  team: { id: number; name: string; rank: number | null };
+  aggregation_level: "organization" | "current_roster";
+  roster_id: number | null;
+  status: string;
+  roster_sample: { maps_played: number; first_match_date: string | null; last_match_date: string | null } | null;
+  maps: TeamMapAggregate[];
+}
+
+export interface TeamMapDetail extends TeamMapAggregate {
+  aggregation_level: "organization" | "current_roster";
+  roster_id: number | null;
+  recent_matches: Array<{
+    demo_file_id: number; match_date: string | null; opponent_team_name: string | null;
+    opponent_rank: number | null; opponent_rank_group: string;
+    score_for: number; score_against: number; result: "win" | "loss";
+    ct_rounds_won: number; ct_rounds_played: number;
+    t_rounds_won: number; t_rounds_played: number;
+  }>;
+}
+
+export interface CurrentRosterComparison {
+  status: string; met?: boolean; reason?: string;
+  team_a: { id: number; name: string; current_roster_id: number | null; players: Array<{id: number; name: string; role: string | null}> };
+  team_b: { id: number; name: string; current_roster_id: number | null; players: Array<{id: number; name: string; role: string | null}> };
+  head_to_head: null | { maps_played: number; team_a_maps_won: number; team_b_maps_won: number; team_a_rounds_won: number; team_b_rounds_won: number; first_meeting_date: string | null; last_meeting_date: string | null };
+  maps: Array<{map_name: string; maps_played: number; team_a_maps_won: number; team_b_maps_won: number}>;
+  recent_maps: Array<{demo_file_id: number; match_date: string; tournament: string; map_name: string; team_a_score: number; team_b_score: number; winner_team_id: number; went_to_overtime: boolean}>;
+}
+
 export interface TeamComparisonPlayer {
   id: number;
   nickname: string;
@@ -270,7 +316,70 @@ export interface DemoListFile {
   uploaded_at: string;
   updated_at: string;
   parse_status: "pending" | "processing" | "success" | "failed";
+  map_name: string | null;
+  team_a_name: string | null;
+  team_a_score: number | null;
+  team_b_name: string | null;
+  team_b_score: number | null;
+  winner_team_name: string | null;
+  metadata_status: DemoMetadataStatus | null;
+  round_data_status: RoundDataStatus | null;
 }
+
+export type DemoMetadataStatus = "complete" | "partial" | "needs_review" | "invalid";
+export type RoundDataStatus = "not_parsed" | "complete" | "partial" | "needs_review" | "invalid";
+
+export interface DemoMapResult {
+  demo_file_id: number;
+  map_name: string | null;
+  team_a: { id: number | null; name: string | null; score: number | null };
+  team_b: { id: number | null; name: string | null; score: number | null };
+  winner: { id: number | null; name: string | null } | null;
+  rounds_count: number | null;
+  went_to_overtime: boolean | null;
+  result_source: "demo_parser" | "manual_override" | "mixed" | "unknown";
+  metadata_status: DemoMetadataStatus;
+  issues: string[];
+  round_data_status: RoundDataStatus;
+  rounds_parsed_count: number;
+  rounds_expected_count: number | null;
+  rounds_consistent: boolean;
+}
+
+export interface DemoRound {
+  round_number: number; phase: "regulation" | "overtime"; half: string;
+  team_a_side: "CT" | "T" | "unknown"; team_b_side: "CT" | "T" | "unknown";
+  winner_team_id: number | null; winner_team_name: string | null; winner_side: "CT" | "T" | "unknown";
+  end_reason: string; team_a_score_before: number | null; team_b_score_before: number | null;
+  team_a_score_after: number | null; team_b_score_after: number | null;
+  started_at_tick: number | null; ended_at_tick: number | null; duration_seconds: string | number | null;
+}
+
+export interface DemoRoundsResponse {
+  demo_file_id: number; round_data_status: RoundDataStatus; total: number;
+  page: number; page_size: number; items: DemoRound[];
+}
+
+export interface SideSummary { rounds_played: number; rounds_won: number; rounds_lost: number | null; win_rate: string | number | null }
+export interface DemoTeamSideStat {
+  team_id: number | null; team_name: string; ct: SideSummary; t: SideSummary;
+  first_half: SideSummary; second_half: SideSummary; overtime: SideSummary; total: SideSummary;
+}
+export interface DemoSideStatsResponse {
+  demo_file_id: number; map_name: string | null; round_data_status: RoundDataStatus; teams: DemoTeamSideStat[];
+}
+
+export interface DemoMapResultPatch {
+  map_name: string | null;
+  team_a_id: number | null;
+  team_a_name: string | null;
+  team_a_score: number | null;
+  team_b_id: number | null;
+  team_b_name: string | null;
+  team_b_score: number | null;
+}
+
+export interface DemoMapOption { code: string; title: string; demo_names: string[] }
 
 export interface DemoParseFileResult {
   demo_file_id: number;
@@ -299,6 +408,18 @@ export interface DemoPlayerStat {
   opponent_team_name: string | null;
   opponent_rank: number | null;
   opponent_rank_group: "top_15" | "top_16_30" | "outside_top_30" | "unknown";
+  opponent_rank_source: "historical_snapshot" | "current_fallback" | "unknown";
+  opponent_rank_snapshot_date: string | null;
+}
+
+export interface DemoRankReclassifyResponse {
+  demo_files_found: number;
+  player_stats_checked: number;
+  updated_count: number;
+  unchanged_count: number;
+  failed_count: number;
+  players_recalculated: number;
+  failures: Array<{ demo_file_id: number; error: string }>;
 }
 
 export interface DemoPlayerStatsResponse {

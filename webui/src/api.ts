@@ -12,6 +12,12 @@ import type {
   DemoParseResponse,
   DemoPlayerStatsResponse,
   DemoTournamentOption,
+  DemoRankReclassifyResponse,
+  DemoMapResult, DemoMapResultPatch, DemoMapOption,
+  DemoRoundsResponse, DemoSideStatsResponse,
+  TeamMapsResponse,
+  TeamMapDetail,
+  CurrentRosterComparison,
 } from "./types";
 
 
@@ -38,6 +44,35 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 
+export function getDemoMapResult(id: number): Promise<DemoMapResult> {
+  return request<DemoMapResult>(`/api/v1/demos/${id}/map-result`);
+}
+
+export function patchDemoMapResult(id: number, payload: DemoMapResultPatch): Promise<DemoMapResult> {
+  return request<DemoMapResult>(`/api/v1/demos/${id}/map-result`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+}
+
+export function getDemoMaps(): Promise<{ items: DemoMapOption[] }> {
+  return request<{ items: DemoMapOption[] }>("/api/v1/meta/maps");
+}
+
+export function getDemoRounds(id: number, filter = "all", page = 1): Promise<DemoRoundsResponse> {
+  const query = new URLSearchParams({ page: String(page), page_size: "50" });
+  if (filter === "regulation" || filter === "overtime") query.set("phase", filter);
+  if (filter === "CT" || filter === "T") query.set("winner_side", filter);
+  return request<DemoRoundsResponse>(`/api/v1/demos/${id}/rounds?${query}`);
+}
+
+export function getDemoSideStats(id: number): Promise<DemoSideStatsResponse> {
+  return request<DemoSideStatsResponse>(`/api/v1/demos/${id}/side-stats`);
+}
+
+export function recalculateDemoSideStats(id: number): Promise<DemoSideStatsResponse> {
+  return request<DemoSideStatsResponse>(`/api/v1/demos/${id}/recalculate-side-stats`, { method: "POST" });
+}
+
 export function getPlayer(id: number): Promise<Player> {
   return request<Player>(`/api/v1/players/${id}`);
 }
@@ -53,6 +88,18 @@ export function getTeams(): Promise<Team[]> {
 
 export function getTeam(id: number): Promise<TeamDetail> {
   return request<TeamDetail>(`/api/v1/teams/${id}`);
+}
+
+export function getTeamMaps(id: number, level: "organization" | "current_roster" = "organization"): Promise<TeamMapsResponse> {
+  return request<TeamMapsResponse>(`/api/v1/analysis/teams/${id}/maps?aggregation_level=${level}`);
+}
+
+export function getTeamMapDetail(id: number, mapName: string, level: "organization" | "current_roster" = "organization"): Promise<TeamMapDetail> {
+  return request<TeamMapDetail>(`/api/v1/analysis/teams/${id}/maps/${encodeURIComponent(mapName)}?aggregation_level=${level}`);
+}
+
+export function compareCurrentRosters(a: number, b: number): Promise<CurrentRosterComparison> {
+  return request<CurrentRosterComparison>(`/api/v1/analysis/compare/teams/${a}/${b}/current-rosters`);
 }
 
 export function compareTeams(
@@ -117,11 +164,13 @@ Promise<RankingRun> {
 
 export function uploadDemoFiles(
   tournamentName: string,
+  eventType: "online" | "lan",
   matchDate: string,
   files: File[],
 ): Promise<DemoUploadResponse> {
   const body = new FormData();
   body.append("tournament_name", tournamentName);
+  body.append("event_type", eventType);
   body.append("match_date", matchDate);
   files.forEach((file) => body.append("files", file));
   return request<DemoUploadResponse>("/api/v1/demos/upload", {
@@ -173,5 +222,33 @@ export function getDemoPlayerStats(
 ): Promise<DemoPlayerStatsResponse> {
   return request<DemoPlayerStatsResponse>(
     `/api/v1/demos/${demoFileId}/player-stats`,
+  );
+}
+
+export function reclassifyDemoOpponentRanks(
+  demoFileId: number,
+): Promise<DemoRankReclassifyResponse> {
+  return request<DemoRankReclassifyResponse>(
+    `/api/v1/demos/${demoFileId}/reclassify-opponent-ranks`,
+    { method: "POST" },
+  );
+}
+
+export function reclassifyOpponentRanks(
+  tournamentName: string,
+  year: number,
+  onlyUnknownOrFallback = true,
+): Promise<DemoRankReclassifyResponse> {
+  return request<DemoRankReclassifyResponse>(
+    "/api/v1/demos/reclassify-opponent-ranks",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tournament_name: tournamentName,
+        year,
+        only_unknown_or_fallback: onlyUnknownOrFallback,
+      }),
+    },
   );
 }

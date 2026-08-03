@@ -7,10 +7,10 @@
 Корень задаётся через `DEMO_STORAGE_ROOT` (по умолчанию `/app/storage`). Относительный путь в БД и путь на диске имеют вид:
 
 ```text
-demos/tournaments/<tournament_slug>/<year>/<YYYY-MM-DD>/<filename>
+demos/tournaments/<tournament_slug>/<online|lan>/<year>/<YYYY-MM-DD>/<filename>
 ```
 
-Например: `demos/tournaments/iem-cologne/2026/2026-07-28/map-1.dem`. Исходное имя турнира хранится отдельно, имя файла остаётся читаемым. Максимальный размер одного файла задаёт `DEMO_MAX_FILE_SIZE_BYTES` (по умолчанию 2 GiB).
+Например: `demos/tournaments/iem-cologne/lan/2026/2026-07-28/map-1.dem`. Исходное имя турнира хранится отдельно, имя файла остаётся читаемым. Максимальный размер одного файла задаёт `DEMO_MAX_FILE_SIZE_BYTES` (по умолчанию 2 GiB).
 
 ## API
 

@@ -62,7 +62,7 @@ async def upload(
 ) -> httpx.Response:
     return await client.post(
         "/api/v1/demos/upload",
-        data={"tournament_name": tournament, "match_date": day},
+        data={"tournament_name": tournament, "event_type": "online", "match_date": day},
         files=[("files", (name, content, "application/octet-stream")) for name, content in files],
     )
 
@@ -118,7 +118,7 @@ async def test_rar_archive_member_is_processed(
     rar_upload.write(b"rar")
     rar_upload.seek(0)
     results = await service._upload_archive(
-        "BLAST Bounty", "blast-bounty", date(2026, 7, 21),
+        "BLAST Bounty", "blast-bounty", "online", date(2026, 7, 21),
         UploadFile(rar_upload, filename="m80-vs-nip.rar"), 1,
     )
     assert [result.filename for result in results] == ["m80-vs-nip-map1.dem"]
@@ -130,6 +130,9 @@ async def test_one_demo_is_created(demo_client: httpx.AsyncClient, tmp_path: Pat
     body = response.json()
     assert body["created_count"] == 1
     assert body["files"][0]["status"] == "created"
+    assert body["files"][0]["storage_path"] == (
+        "demos/tournaments/iem-cologne/online/2026/2026-07-28/map.dem"
+    )
     stored = tmp_path / body["files"][0]["storage_path"]
     assert stored.read_bytes() == b"demo"
 

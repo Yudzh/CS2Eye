@@ -278,7 +278,7 @@ async def test_refresh_keeps_only_top_30_active_and_tracks_top_40(
         .order_by(Team.current_rank)
     )).scalars())
     assert shadow_ids == list(range(32, 42))
-    assert snapshots_count == 80
+    assert snapshots_count == 41
 
 
 async def test_failed_refresh_keeps_active_top_30(

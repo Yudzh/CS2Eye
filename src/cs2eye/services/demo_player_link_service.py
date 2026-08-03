@@ -4,8 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cs2eye.models.team import Player
 
 
+PLAYER_NICKNAME_ALIASES = {
+    "naf-fly": "naf",
+}
+
+
 def normalize_nickname(value: str) -> str:
-    return value.strip().casefold()
+    normalized = value.strip().casefold()
+    return PLAYER_NICKNAME_ALIASES.get(normalized, normalized)
 
 
 async def link_demo_player(

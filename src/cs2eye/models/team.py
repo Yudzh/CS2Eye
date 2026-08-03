@@ -5,11 +5,12 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
-    Integer,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
@@ -88,6 +89,10 @@ class Team(Base):
     )
     roster_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
+    )
+    current_roster_id: Mapped[int | None] = mapped_column(
+        ForeignKey("team_rosters.id", ondelete="SET NULL", use_alter=True),
+        index=True,
     )
 
 
@@ -207,6 +212,67 @@ class TeamParticipantMembership(Base):
     )
 
 
+class TeamRoster(Base):
+    __tablename__ = "team_rosters"
+    __table_args__ = (
+        UniqueConstraint("team_id", "fingerprint", name="uq_team_roster_fingerprint"),
+        Index("ix_team_rosters_team_current", "team_id", "is_current"),
+        Index("uq_team_rosters_one_current", "team_id", unique=True,
+              postgresql_where=text("is_current"), sqlite_where=text("is_current = 1")),
+        CheckConstraint(
+            "source IN ('team_import', 'manual', 'demo', 'migration')",
+            name="ck_team_rosters_source",
+        ),
+        CheckConstraint(
+            "resolution_status IN ('complete', 'partial', 'needs_review', 'invalid')",
+            name="ck_team_rosters_resolution_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team_id: Mapped[int] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_current: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+    )
+    active_from: Mapped[date | None] = mapped_column(Date)
+    active_to: Mapped[date | None] = mapped_column(Date)
+    active_from_source: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="unknown", server_default="unknown",
+    )
+    source: Mapped[str] = mapped_column(String(24), nullable=False)
+    resolution_status: Mapped[str] = mapped_column(String(24), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(),
+    )
+
+
+class TeamRosterMember(Base):
+    __tablename__ = "team_roster_members"
+    __table_args__ = (
+        UniqueConstraint("roster_id", "player_id", name="uq_team_roster_member_player"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    roster_id: Mapped[int] = mapped_column(
+        ForeignKey("team_rosters.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    player_id: Mapped[int | None] = mapped_column(
+        ForeignKey("players.id", ondelete="SET NULL"), index=True,
+    )
+    player_name_snapshot: Mapped[str] = mapped_column(String(160), nullable=False)
+    player_external_id: Mapped[str | None] = mapped_column(String(64))
+    role_snapshot: Mapped[str | None] = mapped_column(String(24))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+
 class RankingImportRun(Base):
     __tablename__ = "ranking_import_runs"
 
@@ -276,9 +342,15 @@ class TeamRankingSnapshot(Base):
     __tablename__ = "team_ranking_snapshots"
     __table_args__ = (
         UniqueConstraint(
-            "import_run_id",
             "team_id",
-            name="uq_ranking_snapshot_run_team",
+            "ranking_date",
+            "source",
+            name="uq_ranking_snapshot_team_date_source",
+        ),
+        Index(
+            "ix_team_ranking_snapshots_team_date",
+            "team_id",
+            "ranking_date",
         ),
     )
 
@@ -301,6 +373,9 @@ class TeamRankingSnapshot(Base):
         ),
         nullable=False,
         index=True,
+    )
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="bo3", server_default="bo3",
     )
     ranking_date: Mapped[date] = mapped_column(
         Date,
