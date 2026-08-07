@@ -8,6 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from cs2eye.db.session import get_db_session
+from cs2eye.api.schemas.analysis import (
+    LegacyCurrentRosterComparisonResponse, TeamH2HComparisonResponse,
+    TeamMapComparisonResponse, TeamMapDetailResponse, TeamMapsResponse,
+)
 from cs2eye.models.demo import (
     DemoMapResult, DemoParseRun, DemoTeamOpponentContext, DemoTeamSideStat, DemoTeamRoster,
     TeamMapAggregate,
@@ -16,6 +20,12 @@ from cs2eye.models.demo_file import DemoFile
 from cs2eye.models.team import Player, Team, TeamRosterMember
 from cs2eye.services.team_map_aggregate_service import (
     freshness_label, recalculate_team_map, sample_size_label,
+)
+from cs2eye.services.team_map_strength_service import (
+    MapStrengthResult, calculate_map_strength,
+)
+from cs2eye.services.team_h2h_service import (
+    H2HTeamNotFoundError, SameTeamH2HError, TeamH2HService,
 )
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
@@ -30,61 +40,64 @@ async def _roster_players(session: AsyncSession, roster_id: int) -> list[dict]:
              "role": member.role_snapshot} for member, player in rows]
 
 
-@router.get("/compare/teams/{team_a_id}/{team_b_id}/current-rosters")
+def _h2h_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, SameTeamH2HError):
+        return HTTPException(status_code=400, detail=str(exc))
+    return HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get(
+    "/compare/teams/{team_a_id}/{team_b_id}/h2h",
+    response_model=TeamH2HComparisonResponse,
+)
+async def compare_team_h2h(
+    team_a_id: int,
+    team_b_id: int,
+    recent_limit: int = Query(default=10, ge=1, le=20),
+    session: AsyncSession = Depends(get_db_session),
+) -> TeamH2HComparisonResponse:
+    try:
+        result = await TeamH2HService(session).compare(
+            team_a_id, team_b_id, recent_limit=recent_limit,
+        )
+    except (SameTeamH2HError, H2HTeamNotFoundError) as exc:
+        raise _h2h_error(exc) from exc
+    return TeamH2HComparisonResponse.model_validate(result)
+
+
+@router.get(
+    "/compare/teams/{team_a_id}/{team_b_id}/current-rosters",
+    response_model=LegacyCurrentRosterComparisonResponse,
+)
 async def compare_current_rosters(
     team_a_id: int, team_b_id: int, session: AsyncSession = Depends(get_db_session),
-) -> dict:
-    if team_a_id == team_b_id:
-        raise HTTPException(status_code=400, detail="Нужно выбрать две разные команды.")
-    team_a, team_b = await session.get(Team, team_a_id), await session.get(Team, team_b_id)
-    if team_a is None or team_b is None:
-        raise HTTPException(status_code=404, detail="Команда не найдена.")
-    if team_a.current_roster_id is None or team_b.current_roster_id is None:
-        return {"status": "current_roster_unavailable", "reason": "active_roster_incomplete",
-                "team_a": {"id": team_a.id, "name": team_a.name, "current_roster_id": team_a.current_roster_id, "players": []},
-                "team_b": {"id": team_b.id, "name": team_b.name, "current_roster_id": team_b.current_roster_id, "players": []},
-                "head_to_head": None, "maps": [], "recent_maps": []}
-    link_a, link_b = aliased(DemoTeamRoster), aliased(DemoTeamRoster)
-    rows = (await session.execute(
-        select(DemoFile, DemoMapResult)
-        .join(DemoMapResult, DemoMapResult.demo_file_id == DemoFile.id)
-        .join(link_a, (link_a.demo_file_id == DemoFile.id) & (link_a.team_id == team_a_id) &
-              (link_a.roster_id == team_a.current_roster_id) & (link_a.resolution_status == "complete"))
-        .join(link_b, (link_b.demo_file_id == DemoFile.id) & (link_b.team_id == team_b_id) &
-              (link_b.roster_id == team_b.current_roster_id) & (link_b.resolution_status == "complete"))
-        .where(DemoMapResult.round_data_status == "complete",
-               or_((DemoMapResult.team_a_id == team_a_id) & (DemoMapResult.team_b_id == team_b_id),
-                   (DemoMapResult.team_a_id == team_b_id) & (DemoMapResult.team_b_id == team_a_id)))
-        .order_by(DemoFile.match_date.desc(), DemoFile.id.desc())
-    )).all()
-    recent, by_map = [], {}
-    a_wins = b_wins = a_rounds = b_rounds = 0
-    dates = []
-    for demo, result in rows:
-        a_is_side_a = result.team_a_id == team_a_id
-        score_a = result.team_a_score if a_is_side_a else result.team_b_score
-        score_b = result.team_b_score if a_is_side_a else result.team_a_score
-        if score_a is None or score_b is None or score_a == score_b: continue
-        a_wins += int(score_a > score_b); b_wins += int(score_b > score_a)
-        a_rounds += score_a; b_rounds += score_b
-        if demo.match_date: dates.append(demo.match_date)
-        item = by_map.setdefault(result.map_name or "unknown", {"maps_played": 0, "team_a_maps_won": 0, "team_b_maps_won": 0})
-        item["maps_played"] += 1; item["team_a_maps_won"] += int(score_a > score_b); item["team_b_maps_won"] += int(score_b > score_a)
-        recent.append({"demo_file_id": demo.id, "match_date": demo.match_date, "tournament": demo.tournament_name,
-                       "map_name": result.map_name, "team_a_score": score_a, "team_b_score": score_b,
-                       "winner_team_id": team_a_id if score_a > score_b else team_b_id,
-                       "went_to_overtime": bool(result.went_to_overtime)})
-    return {"status": "available", "met": bool(recent),
-            "team_a": {"id": team_a.id, "name": team_a.name, "current_roster_id": team_a.current_roster_id,
-                       "players": await _roster_players(session, team_a.current_roster_id)},
-            "team_b": {"id": team_b.id, "name": team_b.name, "current_roster_id": team_b.current_roster_id,
-                       "players": await _roster_players(session, team_b.current_roster_id)},
-            "head_to_head": {"maps_played": len(recent), "team_a_maps_won": a_wins, "team_b_maps_won": b_wins,
-                             "team_a_rounds_won": a_rounds, "team_b_rounds_won": b_rounds,
-                             "first_meeting_date": min(dates) if dates else None,
-                             "last_meeting_date": max(dates) if dates else None},
-            "maps": [{"map_name": name, **values} for name, values in sorted(by_map.items())],
-            "recent_maps": recent[:20]}
+) -> LegacyCurrentRosterComparisonResponse:
+    try:
+        comparison = await TeamH2HService(session).compare(team_a_id, team_b_id, recent_limit=20)
+    except (SameTeamH2HError, H2HTeamNotFoundError) as exc:
+        raise _h2h_error(exc) from exc
+    current = comparison.current_rosters
+    players_a = await _roster_players(session, comparison.team_a.current_roster_id) if comparison.team_a.current_roster_id else []
+    players_b = await _roster_players(session, comparison.team_b.current_roster_id) if comparison.team_b.current_roster_id else []
+    unavailable = current.status == "current_roster_unavailable"
+    return LegacyCurrentRosterComparisonResponse.model_validate({
+        "status": "current_roster_unavailable" if unavailable else "available",
+        "reason": "active_roster_incomplete" if unavailable else None,
+        "met": current.maps_played > 0,
+        "team_a": {**comparison.team_a.__dict__, "players": players_a},
+        "team_b": {**comparison.team_b.__dict__, "players": players_b},
+        "head_to_head": None if unavailable else {
+            "maps_played": current.maps_played,
+            "team_a_maps_won": current.team_a.maps_won,
+            "team_b_maps_won": current.team_b.maps_won,
+            "team_a_rounds_won": current.team_a.rounds_won,
+            "team_b_rounds_won": current.team_b.rounds_won,
+            "first_meeting_date": current.first_meeting_date,
+            "last_meeting_date": current.last_meeting_date,
+        },
+        "maps": current.maps,
+        "recent_maps": current.recent_maps,
+    })
 
 
 class RecalculateRequest(BaseModel):
@@ -118,6 +131,25 @@ def _scope(item: TeamMapAggregate, today: date) -> dict:
     }
 
 
+def _strength_payload(result: MapStrengthResult) -> dict:
+    return {
+        "status": result.status,
+        "map_strength_score": round(result.map_strength_score, 2) if result.map_strength_score is not None else None,
+        "performance_score": round(result.performance_score, 2) if result.performance_score is not None else None,
+        "confidence_score": round(result.confidence_score, 2),
+        "confidence_level": result.confidence_level,
+        "factors": [{
+            "code": factor.code, "label": factor.label,
+            "score": round(factor.score, 2) if factor.score is not None else None,
+            "configured_weight": factor.configured_weight,
+            "effective_weight": round(factor.effective_weight, 6),
+            "impact": round(factor.impact, 2),
+            "explanation": factor.explanation,
+        } for factor in result.factors],
+        "warnings": result.warnings,
+    }
+
+
 def _map_payload(items: list[TeamMapAggregate], today: date) -> dict:
     indexed = {item.scope_key: item for item in items}
     all_item = indexed["all"]
@@ -133,7 +165,8 @@ def _map_payload(items: list[TeamMapAggregate], today: date) -> dict:
         item = indexed.get(f"rank:{group}")
         versus[group] = _scope(item, today) if item else None
     return {"map_name": all_item.map_name, "all": _scope(all_item, today),
-            "recent": recent, "versus": versus}
+            "recent": recent, "versus": versus,
+            "strength": _strength_payload(calculate_map_strength(indexed, today))}
 
 
 @router.post("/team-maps/recalculate")
@@ -189,14 +222,134 @@ async def _team_and_aggregates(session: AsyncSession, team_id: int,
     return team, items
 
 
-@router.get("/teams/{team_id}/maps")
+def _group_map_aggregates(
+    items: list[TeamMapAggregate],
+) -> dict[str, list[TeamMapAggregate]]:
+    grouped: dict[str, list[TeamMapAggregate]] = {}
+    for item in items:
+        grouped.setdefault(item.map_name, []).append(item)
+    return grouped
+
+
+def _comparison_side(items: list[TeamMapAggregate], today: date) -> dict | None:
+    indexed = {item.scope_key: item for item in items}
+    all_item = indexed.get("all")
+    if all_item is None:
+        return None
+    strength = calculate_map_strength(indexed, today)
+    return {
+        "maps_played": all_item.maps_played,
+        "maps_won": all_item.maps_won,
+        "maps_lost": all_item.maps_lost,
+        "map_win_rate": _number(all_item.map_win_rate),
+        "map_strength_score": round(strength.map_strength_score, 2) if strength.map_strength_score is not None else None,
+        "confidence_score": round(strength.confidence_score, 2),
+        "confidence_level": strength.confidence_level,
+        "status": strength.status,
+    }
+
+
+@router.get(
+    "/compare/teams/{team_a_id}/{team_b_id}/maps",
+    response_model=TeamMapComparisonResponse,
+)
+async def compare_team_maps(
+    team_a_id: int,
+    team_b_id: int,
+    aggregation_level: str = Query("current_roster"),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    if team_a_id == team_b_id:
+        raise HTTPException(status_code=400, detail="Нужно выбрать две разные команды.")
+    if aggregation_level not in ("organization", "current_roster"):
+        raise HTTPException(
+            status_code=422,
+            detail="aggregation_level must be organization or current_roster",
+        )
+    team_a, items_a = await _team_and_aggregates(session, team_a_id, aggregation_level)
+    team_b, items_b = await _team_and_aggregates(session, team_b_id, aggregation_level)
+    grouped_a, grouped_b = _group_map_aggregates(items_a), _group_map_aggregates(items_b)
+    today = date.today()
+    maps = []
+    summary = {
+        "team_a_advantage_maps": 0, "team_b_advantage_maps": 0,
+        "close_maps": 0, "not_comparable_maps": 0,
+    }
+    for map_name in sorted(set(grouped_a) | set(grouped_b)):
+        side_a = _comparison_side(grouped_a.get(map_name, []), today)
+        side_b = _comparison_side(grouped_b.get(map_name, []), today)
+        if side_a is None and side_b is None:
+            comparison_status = "both_no_data"
+        elif side_a is None:
+            comparison_status = "team_a_no_data"
+        elif side_b is None:
+            comparison_status = "team_b_no_data"
+        elif side_a["status"] != "available" and side_b["status"] != "available":
+            comparison_status = "both_not_enough_data"
+        elif side_a["status"] != "available":
+            comparison_status = "team_a_not_enough_data"
+        elif side_b["status"] != "available":
+            comparison_status = "team_b_not_enough_data"
+        else:
+            comparison_status = "comparable"
+
+        advantage_team_id = advantage_team_name = advantage_level = None
+        advantage_diff = None
+        if comparison_status == "comparable":
+            score_a = side_a["map_strength_score"]
+            score_b = side_b["map_strength_score"]
+            if score_a is not None and score_b is not None:
+                advantage_diff = round(abs(score_a - score_b), 2)
+                if advantage_diff < 5:
+                    advantage_level = "none"
+                    summary["close_maps"] += 1
+                else:
+                    advantage_level = (
+                        "small" if advantage_diff < 10 else
+                        "clear" if advantage_diff < 20 else "strong"
+                    )
+                    if score_a > score_b:
+                        advantage_team_id, advantage_team_name = team_a.id, team_a.name
+                        summary["team_a_advantage_maps"] += 1
+                    else:
+                        advantage_team_id, advantage_team_name = team_b.id, team_b.name
+                        summary["team_b_advantage_maps"] += 1
+        else:
+            summary["not_comparable_maps"] += 1
+        maps.append({
+            "map_name": map_name, "team_a": side_a, "team_b": side_b,
+            "comparison_status": comparison_status,
+            "advantage_team_id": advantage_team_id,
+            "advantage_team_name": advantage_team_name,
+            "advantage_diff": advantage_diff,
+            "advantage_level": advantage_level,
+        })
+    maps.sort(key=lambda item: (
+        item["comparison_status"] != "comparable",
+        -(item["advantage_diff"] or 0) if item["comparison_status"] == "comparable" else 0,
+        item["map_name"],
+    ))
+    roster_unavailable = (
+        aggregation_level == "current_roster"
+        and (team_a.current_roster_id is None or team_b.current_roster_id is None)
+    )
+    return {
+        "aggregation_level": aggregation_level,
+        "team_a": {"id": team_a.id, "name": team_a.name, "rank": team_a.current_rank,
+                   "roster_id": team_a.current_roster_id if aggregation_level == "current_roster" else None},
+        "team_b": {"id": team_b.id, "name": team_b.name, "rank": team_b.current_rank,
+                   "roster_id": team_b.current_roster_id if aggregation_level == "current_roster" else None},
+        "status": "current_roster_unavailable" if roster_unavailable else "available",
+        "maps": maps, "summary": summary,
+    }
+
+
+@router.get("/teams/{team_id}/maps", response_model=TeamMapsResponse)
 async def team_maps(team_id: int, include_inactive_maps: bool = False,
                     aggregation_level: str = Query("organization"),
                     session: AsyncSession = Depends(get_db_session)) -> dict:
     team, items = await _team_and_aggregates(session, team_id, aggregation_level)
-    grouped: dict[str, list[TeamMapAggregate]] = {}
-    for item in items:
-        grouped.setdefault(item.map_name, []).append(item)
+    grouped = _group_map_aggregates(items)
     maps = [_map_payload(group, date.today()) for group in grouped.values()
             if any(item.scope_key == "all" for item in group)]
     maps.sort(key=lambda item: item["all"]["maps_played"], reverse=True)
@@ -211,7 +364,7 @@ async def team_maps(team_id: int, include_inactive_maps: bool = False,
             "maps": maps}
 
 
-@router.get("/teams/{team_id}/maps/{map_name}")
+@router.get("/teams/{team_id}/maps/{map_name}", response_model=TeamMapDetailResponse)
 async def team_map_detail(team_id: int, map_name: str,
                           aggregation_level: str = Query("organization"),
                           session: AsyncSession = Depends(get_db_session)) -> dict:

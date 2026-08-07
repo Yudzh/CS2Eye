@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { getDemoFiles, getDemoMapResult, getDemoMaps, getDemoPlayerStats, getDemoRounds, getDemoSideStats, getDemoTournaments, getTeams, parseDemoFile, parseDemoFiles, patchDemoMapResult, recalculateDemoSideStats, reclassifyDemoOpponentRanks, reclassifyOpponentRanks, uploadDemoFiles } from "../api";
-import type { DemoListResponse, DemoMapOption, DemoMapResult, DemoMapResultPatch, DemoParseResponse, DemoPlayerStatsResponse, DemoRoundsResponse, DemoSideStatsResponse, DemoTournamentOption, DemoUploadResponse, DemoUploadStatus, Team } from "../types";
+import { getDemoFiles, getDemoMapResult, getDemoMaps, getDemoPlayerStats, getDemoRounds, getDemoSideStats, getDemoTournaments, getParseAllDemoJob, getTeams, parseDemoFile, patchDemoMapResult, recalculateDemoSideStats, reclassifyDemoOpponentRanks, reclassifyOpponentRanks, startFilteredDemoParseJob, startParseAllDemoJob, uploadDemoFiles } from "../api";
+import type { DemoListResponse, DemoMapOption, DemoMapResult, DemoMapResultPatch, DemoParseJob, DemoParseResponse, DemoPlayerStatsResponse, DemoRoundsResponse, DemoSideStatsResponse, DemoTournamentOption, DemoUploadResponse, DemoUploadStatus, Team } from "../types";
 
 
 const statusLabels: Record<DemoUploadStatus, string> = {
@@ -83,7 +83,7 @@ function formatDiagnostic(value: string): string {
 function detailedDiagnostics(items: string[]): string[] {
   const unique = Array.from(new Set(items));
   return unique.filter((item) => {
-    if (["incomplete_round_skipped", "duplicate_round_event", "restart_round_skipped"].some((code) => item === code || item.startsWith(`${code}:`))) return false;
+    if (["incomplete_round_skipped", "duplicate_round_event", "restart_round_skipped", "incomplete_split_demo"].some((code) => item === code || item.startsWith(`${code}:`))) return false;
     if (item.includes(":")) return true;
     if (item === "team_not_resolved" && unique.some((other) => other.startsWith("Demo team \""))) return false;
     return !unique.some((other) => other.startsWith(`${item}:`));
@@ -105,9 +105,10 @@ export function DemosPage() {
   const [loadingList, setLoadingList] = useState(false);
   const [listResult, setListResult] = useState<DemoListResponse | null>(null);
   const [listError, setListError] = useState<string | null>(null);
-  const [parsingMode, setParsingMode] = useState<"new" | "all" | null>(null);
+  const [parsingMode, setParsingMode] = useState<"new" | "selected" | "global" | null>(null);
   const [parsingFileId, setParsingFileId] = useState<number | null>(null);
   const [parseResult, setParseResult] = useState<DemoParseResponse | null>(null);
+  const [parseJob, setParseJob] = useState<DemoParseJob | null>(null);
   const [playerStats, setPlayerStats] = useState<DemoPlayerStatsResponse | null>(null);
   const [rankSourceFilter, setRankSourceFilter] = useState("all");
   const [reclassifying, setReclassifying] = useState(false);
@@ -148,10 +149,39 @@ export function DemosPage() {
   }
 
   async function parseAll(replaceExisting = false) {
-    setParsingMode(replaceExisting ? "all" : "new");
+    setParsingMode(replaceExisting ? "selected" : "new");
     setListError(null);
     try {
-      setParseResult(await parseDemoFiles(filterTournament, year, replaceExisting));
+      let job = await startFilteredDemoParseJob(filterTournament, year, replaceExisting);
+      setParseJob(job);
+      while (job.status === "queued" || job.status === "running") {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        job = await getParseAllDemoJob(job.job_id);
+        setParseJob(job);
+      }
+      if (job.status === "failed") throw new Error(job.error || "Парсинг завершился с ошибкой.");
+      if (job.result) setParseResult(job.result);
+      setListResult(await getDemoFiles(filterTournament, year));
+    } catch (error) {
+      setListError(message(error));
+    } finally {
+      setParsingMode(null);
+    }
+  }
+
+  async function parseEveryDemo() {
+    setParsingMode("global");
+    setListError(null);
+    try {
+      let job = await startParseAllDemoJob();
+      setParseJob(job);
+      while (job.status === "queued" || job.status === "running") {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        job = await getParseAllDemoJob(job.job_id);
+        setParseJob(job);
+      }
+      if (job.status === "failed") throw new Error(job.error || "Массовый парсинг завершился с ошибкой.");
+      if (job.result) setParseResult(job.result);
       setListResult(await getDemoFiles(filterTournament, year));
     } catch (error) {
       setListError(message(error));
@@ -275,7 +305,7 @@ export function DemosPage() {
 
   return (
     <main className="page demos-page">
-      <nav className="page-links"><a className="back-link" href="/">← К командам</a></nav>
+      <nav className="page-links"><a className="back-link" href="/">← К командам</a><a className="back-link" href="/matches">Матчи и предполагаемые серии →</a></nav>
       <section className="demo-heading">
         <p className="eyebrow">Файловое хранилище</p>
         <h1>Демки</h1>
@@ -309,11 +339,13 @@ export function DemosPage() {
             <div className="demo-parse-actions">
               <h3>{listResult.tournament_name} · {listResult.year}</h3>
               <button className="button button--primary" disabled={parsingMode !== null || listResult.total_files === 0} onClick={() => void parseAll()}>{parsingMode === "new" ? "Парсинг…" : "Распарсить рейтинг игроков"}</button>
-              <button className="button" disabled={parsingMode !== null || listResult.total_files === 0} onClick={() => void parseAll(true)}>{parsingMode === "all" ? "Повторный парсинг…" : "Перепарсить все демки"}</button>
+              <button className="button" disabled={parsingMode !== null || listResult.total_files === 0} onClick={() => void parseAll(true)}>{parsingMode === "selected" ? "Повторный парсинг…" : "Перепарсить эти демки"}</button>
+              <button className="button" disabled={parsingMode !== null} onClick={() => void parseEveryDemo()}>{parsingMode === "global" ? "Повторный парсинг всех демок…" : "Перепарсить ВСЕ демки"}</button>
               <button className="button" disabled={reclassifying || listResult.total_files === 0} onClick={() => void reclassifyAll()}>{reclassifying ? "Обновляю…" : "Обновить историческую классификацию"}</button>
             </div>
+            {parsingMode !== null && parseJob && <div className="demo-parse-progress"><div><strong>{parseJob.processed_files}/{parseJob.total_files || "?"} файлов</strong><span>Успешно: {parseJob.parsed_count} · Пропущено: {parseJob.skipped_count} · Ошибок: {parseJob.failed_count}</span></div><progress max={parseJob.total_files || 1} value={parseJob.processed_files} />{parseJob.current_filename && <small>{parseJob.current_filename}</small>}</div>}
             {reclassifyMessage && <div className="notice">{reclassifyMessage}</div>}
-            {parseResult && <><div className="parse-summary"><span>Обработано: {parseResult.parsed_count}</span><span>Пропущено: {parseResult.skipped_count}</span><span>Ошибок: {parseResult.failed_count}</span><span>Найдено игроков: {parseResult.files.reduce((sum, file) => sum + file.players_found, 0)}</span><span>Связано: {parseResult.files.reduce((sum, file) => sum + file.players_linked, 0)}</span><span>Не связано: {parseResult.files.reduce((sum, file) => sum + file.players_unlinked, 0)}</span></div>{parseResult.files.map((file) => { const visible = detailedDiagnostics(file.diagnostics); return visible.length > 0 ? <div className="notice notice--warning" key={`diagnostics-${file.demo_file_id}`}><strong>{file.filename}</strong>{visible.map((diagnostic) => <div key={diagnostic}>{formatDiagnostic(diagnostic)}</div>)}</div> : null; })}{parseResult.files.flatMap((file) => file.unlinked_players).length > 0 && <div className="unlinked-players"><strong>Нераспознанные игроки</strong>{parseResult.files.flatMap((file) => file.unlinked_players).map((player, index) => <span key={`${player.demo_filename}-${player.steam_id}-${index}`}>{player.nickname} · {player.steam_id || "Steam ID нет"} · {player.team_name || "команда не указана"} · {player.demo_filename}</span>)}</div>}</>}
+            {parseResult && <><div className="parse-summary"><span>Обработано: {parseResult.parsed_count}</span><span>Пропущено: {parseResult.skipped_count}</span><span>Ошибок: {parseResult.failed_count}</span><span>Найдено игроков: {parseResult.files.reduce((sum, file) => sum + file.players_found, 0)}</span><span>Связано: {parseResult.files.reduce((sum, file) => sum + file.players_linked, 0)}</span><span>Не связано: {parseResult.files.reduce((sum, file) => sum + file.players_unlinked, 0)}</span></div>{parseResult.files.filter((file) => file.status === "failed").map((file) => <div className="notice notice--error" key={`error-${file.demo_file_id}`}><strong>{file.filename}</strong><div>{file.error || "Неизвестная ошибка парсинга."}</div></div>)}{parseResult.files.map((file) => { const visible = detailedDiagnostics(file.diagnostics); return visible.length > 0 ? <div className="notice notice--warning" key={`diagnostics-${file.demo_file_id}`}><strong>{file.filename}</strong>{visible.map((diagnostic) => <div key={diagnostic}>{formatDiagnostic(diagnostic)}</div>)}</div> : null; })}{parseResult.files.flatMap((file) => file.unlinked_players).length > 0 && <div className="unlinked-players"><strong>Нераспознанные игроки</strong>{parseResult.files.flatMap((file) => file.unlinked_players).map((player, index) => <span key={`${player.demo_filename}-${player.steam_id}-${index}`}>{player.nickname} · {player.steam_id || "Steam ID нет"} · {player.team_name || "команда не указана"} · {player.demo_filename}</span>)}</div>}</>}
             {playerStats && <div className="opponent-classification">
               <strong>{playerStats.filename}</strong>
               <label>Источник рейтинга<select value={rankSourceFilter} onChange={(event) => setRankSourceFilter(event.target.value)}><option value="all">Все источники</option><option value="historical_snapshot">Исторический рейтинг</option><option value="current_fallback">Текущий fallback</option><option value="unknown">Не определено</option></select></label>

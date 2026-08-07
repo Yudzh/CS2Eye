@@ -24,6 +24,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
     restart: "no"
     environment: &api-environment
       APP_NAME: ${APP_NAME:-CS2Eye API}
@@ -55,6 +56,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
     restart: unless-stopped
     # Browsec Desktop applies its TUN policy to host-originated traffic, but
     # not reliably to connections forwarded from a Docker bridge. Running the
@@ -68,7 +70,7 @@ services:
       - ./src:/app/src
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini:ro
-      - cs2eye_storage:/app/storage
+      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD2/demos}:/app/storage
     depends_on:
       db:
         condition: service_healthy
@@ -100,6 +102,7 @@ services:
     build:
       context: ./webui
       dockerfile: Dockerfile.local
+      network: host
     restart: unless-stopped
     network_mode: host
     environment:
@@ -127,6 +130,5 @@ services:
 
 volumes:
   cs2eye_clean_pg_data:
-  cs2eye_storage:
   cs2eye_pgadmin_data:
   cs2eye_webui_node_modules:

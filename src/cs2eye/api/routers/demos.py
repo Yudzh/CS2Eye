@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.api.schemas.demos import (
-    DemoListResponse, DemoParseFileResult, DemoParseRequest, DemoParseResponse,
+    DemoListResponse, DemoParseFileResult, DemoParseJobResponse, DemoParseRequest, DemoParseResponse,
     DemoPlayerStatResponse, DemoPlayerStatsResponse, DemoUploadResponse,
     DemoTournamentOption,
     DemoRankReclassifyRequest, DemoRankReclassifyResponse,
@@ -20,6 +20,7 @@ from cs2eye.core.config import settings
 from cs2eye.db.session import get_db_session
 from cs2eye.services.demo_storage_service import DemoStorageService, make_tournament_slug
 from cs2eye.services.demo_parse_service import DemoParseService
+from cs2eye.services.demo_parse_job_service import demo_parse_job_manager
 from cs2eye.models.demo import (
     DemoMapResult, DemoParseRun, DemoPlayerStat, DemoRound, DemoTeamSideStat,
 )
@@ -37,6 +38,7 @@ from cs2eye.services.team_map_aggregate_service import (
     recalculate_demo_roster_aggregates,
 )
 from cs2eye.services.team_roster_service import rebuild_roster_links, resolve_demo_rosters
+from cs2eye.services.match_service import MatchService, MatchValidationError
 
 
 router = APIRouter(prefix="/demos", tags=["demos"])
@@ -164,6 +166,52 @@ async def parse_demos(
     return await DemoParseService(session, settings.demo_storage_root).parse_many(
         name, payload.year, payload.replace_existing,
     )
+
+
+@router.post("/parse-all", response_model=DemoParseResponse)
+async def parse_all_demos(
+    session: AsyncSession = Depends(get_db_session),
+) -> DemoParseResponse:
+    try:
+        return await DemoParseService(session, settings.demo_storage_root).parse_all()
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+def _parse_job_payload(job) -> DemoParseJobResponse:
+    return DemoParseJobResponse(
+        job_id=job.job_id, status=job.status,
+        processed_files=job.processed_files, total_files=job.total_files,
+        parsed_count=job.parsed_count, skipped_count=job.skipped_count,
+        failed_count=job.failed_count, current_filename=job.current_filename,
+        error=job.error, result=job.result,
+    )
+
+
+@router.post("/parse-all/jobs", response_model=DemoParseJobResponse)
+async def start_parse_all_job() -> DemoParseJobResponse:
+    return _parse_job_payload(demo_parse_job_manager.start())
+
+
+@router.get("/parse-all/jobs/{job_id}", response_model=DemoParseJobResponse)
+async def get_parse_all_job(job_id: str) -> DemoParseJobResponse:
+    job = demo_parse_job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Задача парсинга не найдена.")
+    return _parse_job_payload(job)
+
+
+@router.post("/parse/jobs", response_model=DemoParseJobResponse)
+async def start_filtered_parse_job(
+    payload: DemoParseRequest,
+) -> DemoParseJobResponse:
+    name = validate_tournament_name(payload.tournament_name)
+    if not 2000 <= payload.year <= 2100:
+        raise HTTPException(status_code=422, detail="Year must be between 2000 and 2100.")
+    return _parse_job_payload(demo_parse_job_manager.start(
+        tournament_name=name, year=payload.year,
+        replace_existing=payload.replace_existing,
+    ))
 
 
 @router.post(
@@ -329,6 +377,10 @@ async def patch_demo_map_result(
     for team_id, map_name in old_pairs | new_pairs:
         await recalculate_team_map(session, team_id, map_name)
     await recalculate_demo_roster_aggregates(session, demo_file_id)
+    try:
+        await MatchService(session).auto_group_demo(demo_file_id)
+    except MatchValidationError:
+        pass
     await session.commit()
     await session.refresh(current)
     return map_result_response(current, issues)

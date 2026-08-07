@@ -53,10 +53,34 @@ export interface TeamMapScope {
   first_match_date: string | null; last_match_date: string | null;
 }
 
+export type MapStrengthStatus = "available" | "not_enough_data";
+export type MapConfidenceLevel = "not_enough_data" | "low_confidence" | "medium_confidence" | "high_confidence";
+
+export interface MapStrengthFactor {
+  code: "overall_performance" | "recent_form" | "strong_opponents" | "side_strength" | "confidence_adjustment";
+  label: string;
+  score: number | null;
+  configured_weight: number;
+  effective_weight: number;
+  impact: number;
+  explanation: string;
+}
+
+export interface MapStrengthResult {
+  status: MapStrengthStatus;
+  map_strength_score: number | null;
+  performance_score: number | null;
+  confidence_score: number;
+  confidence_level: MapConfidenceLevel;
+  factors: MapStrengthFactor[];
+  warnings: string[];
+}
+
 export interface TeamMapAggregate {
   map_name: string; all: TeamMapScope;
   recent: Record<"last_5" | "last_10" | "last_20", (TeamMapScope & { requested_window: number; actual_sample: number }) | null>;
   versus: Record<"top_15" | "top_16_30" | "tier_2_3", TeamMapScope | null>;
+  strength: MapStrengthResult;
 }
 
 export interface TeamMapsResponse {
@@ -87,6 +111,117 @@ export interface CurrentRosterComparison {
   head_to_head: null | { maps_played: number; team_a_maps_won: number; team_b_maps_won: number; team_a_rounds_won: number; team_b_rounds_won: number; first_meeting_date: string | null; last_meeting_date: string | null };
   maps: Array<{map_name: string; maps_played: number; team_a_maps_won: number; team_b_maps_won: number}>;
   recent_maps: Array<{demo_file_id: number; match_date: string; tournament: string; map_name: string; team_a_score: number; team_b_score: number; winner_team_id: number; went_to_overtime: boolean}>;
+}
+
+export type TeamH2HSliceStatus = "available" | "no_meetings" | "current_roster_unavailable" | "current_rosters_never_met" | "partial_data";
+export type TeamH2HConfidenceLevel = "no_data" | "low" | "medium" | "high";
+export type TeamH2HSampleLabel = "no_data" | "very_small" | "small" | "medium" | "sufficient";
+
+export interface TeamH2HTeamMetrics {
+  maps_won: number; map_win_rate: number | null; weighted_map_win_rate: number | null;
+  rounds_won: number; round_win_rate: number | null; weighted_round_win_rate: number | null;
+  performance_score: number | null; h2h_rating: number | null;
+}
+
+export interface TeamH2HMapBreakdown {
+  map_name: string; maps_played: number; team_a_maps_won: number; team_b_maps_won: number;
+  team_a_map_win_rate: number; team_b_map_win_rate: number;
+  team_a_rounds_won: number; team_b_rounds_won: number;
+  team_a_round_win_rate: number; team_b_round_win_rate: number;
+  first_meeting_date: string; last_meeting_date: string; overtime_maps: number;
+}
+
+export interface TeamH2HRecentMap {
+  demo_file_id: number; match_date: string; tournament: string; map_name: string;
+  team_a_score: number; team_b_score: number; winner_team_id: number; went_to_overtime: boolean;
+  team_a_roster_id: number | null; team_b_roster_id: number | null; recency_weight: number;
+}
+
+export interface TeamH2HFactor { code: string; score: number; weight: number; explanation: string }
+
+export interface TeamH2HSlice {
+  status: TeamH2HSliceStatus; candidate_maps_count: number; included_maps_count: number; excluded_maps_count: number;
+  maps_played: number; effective_maps: number; sample_label: TeamH2HSampleLabel;
+  confidence_score: number; confidence_level: TeamH2HConfidenceLevel;
+  first_meeting_date: string | null; last_meeting_date: string | null;
+  team_a: TeamH2HTeamMetrics; team_b: TeamH2HTeamMetrics;
+  advantage_team_id: number | null; advantage_team_name: string | null; advantage_diff: number | null;
+  advantage_level: "none" | "small" | "clear" | "strong";
+  maps: TeamH2HMapBreakdown[]; recent_maps: TeamH2HRecentMap[]; factors: TeamH2HFactor[]; warnings: string[];
+  series_played: number; team_a_series_won: number; team_b_series_won: number;
+}
+
+export interface TeamH2HPlayerExperience {
+  player_id: number | null; nickname: string; maps_against_opponent: number; has_h2h_experience: boolean;
+}
+
+export interface TeamH2HLatestRosterOverlap {
+  status: "available" | "unavailable"; latest_h2h_roster_id: number | null; current_roster_id: number | null;
+  latest_roster_players_count: number; current_roster_players_count: number; retained_players_count: number;
+  changed_players_count: number; retained_players: TeamH2HPlayerExperience[];
+  new_current_players: TeamH2HPlayerExperience[]; former_players: TeamH2HPlayerExperience[];
+}
+
+export interface TeamH2HRosterContext {
+  experience: {
+    current_roster_id: number | null; current_players_count: number; players_with_h2h_experience_count: number;
+    players_without_h2h_experience_count: number; experience_coverage_percent: number | null;
+    average_maps_per_current_player: number | null; experience_data_status: "available" | "partial" | "unavailable";
+    players: TeamH2HPlayerExperience[];
+  };
+  latest_roster_overlap: TeamH2HLatestRosterOverlap;
+}
+
+export interface TeamH2HComparison {
+  status: string;
+  team_a: { id: number; name: string; current_roster_id: number | null };
+  team_b: { id: number; name: string; current_roster_id: number | null };
+  organizations: TeamH2HSlice; current_rosters: TeamH2HSlice;
+  roster_context: { team_a: TeamH2HRosterContext; team_b: TeamH2HRosterContext; history_applicability: "direct" | "high" | "medium" | "low" | "unknown" };
+  insights: Array<{ code: string; text: string }>;
+}
+
+export type MatchFormat = "bo1" | "bo3" | "bo5" | "unknown";
+export type MatchStage = "group" | "swiss" | "round_of_32" | "round_of_16" | "quarterfinal" | "semifinal" | "final" | "unknown";
+export type MatchEnvironment = "lan" | "online" | "unknown";
+export type MatchResolution = "resolved" | "needs_review" | "unresolved";
+export interface MatchSeries {
+  id: number; tournament: null | { id: number; name: string; year: number; tier: string | null; environment: MatchEnvironment; start_date: string | null; end_date: string | null };
+  match_date: string; format: MatchFormat; stage: MatchStage; environment: MatchEnvironment;
+  status: string; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean;
+  team_a: { id: number | null; name: string | null }; team_b: { id: number | null; name: string | null };
+  score: { team_a: number; team_b: number }; winner_team_id: number | null;
+  maps: Array<{ map_number: number; map_name: string | null; team_a_score: number | null; team_b_score: number | null; winner_team_id: number | null; demo_file_id: number }>;
+}
+export interface MatchListResponse { total: number; items: MatchSeries[] }
+export interface MatchStatLine { matches_played: number; matches_won: number; matches_lost: number; match_win_rate: number | null }
+export interface TeamMatchStats { team_id: number; aggregation_level: "organization" | "current_roster"; roster_id: number | null; all: MatchStatLine; by_format: Record<"bo1" | "bo3" | "bo5", MatchStatLine>; by_context: Record<"lan" | "online" | "playoff" | "elimination" | "final", MatchStatLine> }
+export interface MatchBackfillResult { candidate_groups: number; processed_groups: number; resolved_matches: number; needs_review_matches: number; unresolved_matches: number; failed_groups: number; errors: string[] }
+
+export interface TeamMapComparisonSide {
+  maps_played: number; maps_won: number; maps_lost: number; map_win_rate: number | null;
+  map_strength_score: number | null; confidence_score: number;
+  confidence_level: MapConfidenceLevel; status: MapStrengthStatus;
+}
+
+export interface TeamMapComparisonItem {
+  map_name: string;
+  team_a: TeamMapComparisonSide | null;
+  team_b: TeamMapComparisonSide | null;
+  comparison_status: "comparable" | "team_a_no_data" | "team_b_no_data" | "both_no_data" | "team_a_not_enough_data" | "team_b_not_enough_data" | "both_not_enough_data";
+  advantage_team_id: number | null;
+  advantage_team_name: string | null;
+  advantage_diff: number | null;
+  advantage_level: "none" | "small" | "clear" | "strong" | null;
+}
+
+export interface TeamMapComparisonResponse {
+  aggregation_level: "organization" | "current_roster";
+  team_a: { id: number; name: string; rank: number | null; roster_id: number | null };
+  team_b: { id: number; name: string; rank: number | null; roster_id: number | null };
+  status: string;
+  maps: TeamMapComparisonItem[];
+  summary: { team_a_advantage_maps: number; team_b_advantage_maps: number; close_maps: number; not_comparable_maps: number };
 }
 
 export interface TeamComparisonPlayer {
@@ -438,6 +573,19 @@ export interface DemoParseResponse {
   failed_count: number;
   players_recalculated: number;
   files: DemoParseFileResult[];
+}
+
+export interface DemoParseJob {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  processed_files: number;
+  total_files: number;
+  parsed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  current_filename: string | null;
+  error: string | null;
+  result: DemoParseResponse | null;
 }
 
 export interface DemoListResponse {

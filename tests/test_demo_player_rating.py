@@ -229,14 +229,20 @@ async def test_player_linking_rules(db_session) -> None:
     exact = Player(bo3_id=1, bo3_slug="donk", nickname="donk", steam_id="7656")
     nickname = Player(bo3_id=2, bo3_slug="zywoo", nickname="ZywOo")
     aliased = Player(bo3_id=5, bo3_slug="naf", nickname="NAF")
+    slaxz = Player(bo3_id=6, bo3_slug="slaxz", nickname="slaxz")
+    vsm = Player(bo3_id=7, bo3_slug="vsm", nickname="vsm")
     duplicate_a = Player(bo3_id=3, bo3_slug="same-a", nickname="same")
     duplicate_b = Player(bo3_id=4, bo3_slug="same-b", nickname=" SAME ")
-    db_session.add_all([exact, nickname, aliased, duplicate_a, duplicate_b])
+    db_session.add_all([exact, nickname, aliased, slaxz, vsm, duplicate_a, duplicate_b])
     await db_session.commit()
     assert await link_demo_player(db_session, "7656", "anything") is exact
     assert await link_demo_player(db_session, "999", "  zywoo ") is nickname
     assert nickname.steam_id == "999"
     assert await link_demo_player(db_session, None, "NAF-FLY") is aliased
+    assert await link_demo_player(db_session, "76561198064353169", "slaxz-") is slaxz
+    assert slaxz.steam_id == "76561198064353169"
+    assert await link_demo_player(db_session, "76561198011732823", "v$m") is vsm
+    assert vsm.steam_id == "76561198011732823"
     assert await link_demo_player(db_session, None, "same") is None
     assert await link_demo_player(db_session, None, "unknown") is None
 
@@ -381,3 +387,28 @@ async def test_reparse_replaces_stats_without_duplicates(db_session, tmp_path) -
     assert await db_session.scalar(select(func.count(DemoPlayerStat.id))) == 0
     run = (await db_session.execute(select(DemoParseRun))).scalar_one()
     assert run.status == "pending"
+
+
+async def test_parse_all_aborts_before_touching_runs_when_storage_is_missing(
+    db_session, tmp_path,
+) -> None:
+    demo = DemoFile(
+        tournament_name="Cup", tournament_slug="cup",
+        match_date=__import__("datetime").date(2026, 2, 1),
+        original_filename="missing.dem", storage_path="demos/missing.dem",
+        file_size_bytes=1, sha256="d" * 64,
+    )
+    db_session.add(demo)
+    await db_session.flush()
+    run = DemoParseRun(
+        demo_file_id=demo.id, status="success",
+        parser_name="test", parser_version="1",
+    )
+    db_session.add(run)
+    await db_session.commit()
+
+    with pytest.raises(FileNotFoundError, match="Массовый парсинг не запущен"):
+        await DemoParseService(db_session, tmp_path).parse_all()
+
+    await db_session.refresh(run)
+    assert run.status == "success"

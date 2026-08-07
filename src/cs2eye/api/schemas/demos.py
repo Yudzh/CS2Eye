@@ -93,6 +93,19 @@ class DemoParseResponse(BaseModel):
     files: list[DemoParseFileResult]
 
 
+class DemoParseJobResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    processed_files: int
+    total_files: int
+    parsed_count: int
+    skipped_count: int
+    failed_count: int
+    current_filename: str | None
+    error: str | None
+    result: DemoParseResponse | None
+
+
 class DemoPlayerStatResponse(BaseModel):
     player_id: int | None
     steam_id: str | None

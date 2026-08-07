@@ -11,11 +11,14 @@ from cs2eye.models.team import Team
 TEAM_NAME_ALIASES = {
     "team vitality": "vitality",
     "mongolz": "the mongolz",
-    "v m": "vsm",
     "100t": "100 thieves",
     "aurora gaming": "aurora",
     "pain gaming": "pain",
     "team spirit": "spirit",
+    "team falcons": "falcons",
+    "betboom team": "betboom",
+    "team liquid": "liquid",
+    "lynn vision gaming": "lynn vision",
     "dendele": "dendele cs",
     "sharks": "dendele cs",
 }

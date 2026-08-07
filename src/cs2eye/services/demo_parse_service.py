@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -23,16 +24,17 @@ from cs2eye.services.demo_map_result_service import ParsedMapResult, apply_to_mo
 from cs2eye.services.demo_parser_service import ParsedDemo
 from cs2eye.services.demo_round_service import (
     normalize_rounds, recalculate_demo_team_side_stats, replace_rounds,
-    round_data_status,
+    round_data_status, stitch_split_rounds,
 )
 from cs2eye.services.team_map_aggregate_service import recalculate_demo_affected_aggregates
 from cs2eye.services.team_roster_service import resolve_demo_rosters
+from cs2eye.services.match_service import MatchService, MatchValidationError
 
 logger = logging.getLogger(__name__)
 
 
 def _part_number(filename: str) -> tuple[str, int] | None:
-    match = re.match(r"^(.*)-p([12])\.dem$", filename, re.IGNORECASE)
+    match = re.match(r"^(.*)-p([1-9])\.dem$", filename, re.IGNORECASE)
     return (match.group(1), int(match.group(2))) if match else None
 
 
@@ -76,6 +78,7 @@ class DemoParseService:
 
     async def parse_many(
         self, tournament_name: str, year: int, replace_existing: bool,
+        progress_callback: Callable[[int, int, DemoParseFileResult | None], Awaitable[None]] | None = None,
     ) -> DemoParseResponse:
         slug = make_tournament_slug(tournament_name)
         demos = (
@@ -84,12 +87,63 @@ class DemoParseService:
                 extract("year", DemoFile.match_date) == year,
             ).order_by(DemoFile.match_date, DemoFile.original_filename))
         ).scalars().all()
+        return await self._parse_demos(
+            demos, replace_existing,
+            tournament_name=tournament_name, year=year,
+            progress_callback=progress_callback,
+        )
+
+    async def parse_all(
+        self,
+        replace_existing: bool = True,
+        progress_callback: Callable[[int, int, DemoParseFileResult | None], Awaitable[None]] | None = None,
+    ) -> DemoParseResponse:
+        demos = (
+            await self.session.execute(
+                select(DemoFile).order_by(
+                    DemoFile.match_date, DemoFile.original_filename,
+                )
+            )
+        ).scalars().all()
+        missing = [
+            demo for demo in demos
+            if not (self.storage_root / demo.storage_path).is_file()
+        ]
+        if missing:
+            examples = ", ".join(
+                f"#{demo.id} {demo.storage_path}" for demo in missing[:3]
+            )
+            raise FileNotFoundError(
+                f"Хранилище демок недоступно: не найдено файлов {len(missing)} "
+                f"из {len(demos)}. Примеры: {examples}. "
+                "Проверьте volume /app/storage и сохранённые storage_path. "
+                "Массовый парсинг не запущен, существующие результаты сохранены."
+            )
+        return await self._parse_demos(
+            demos, replace_existing,
+            tournament_name="Все турниры", year=0,
+            progress_callback=progress_callback,
+        )
+
+    async def _parse_demos(
+        self,
+        demos: list[DemoFile],
+        replace_existing: bool,
+        *,
+        tournament_name: str,
+        year: int,
+        progress_callback: Callable[[int, int, DemoParseFileResult | None], Awaitable[None]] | None = None,
+    ) -> DemoParseResponse:
         results: list[DemoParseFileResult] = []
         affected: set[int] = set()
+        if progress_callback is not None:
+            await progress_callback(0, len(demos), None)
         for demo in demos:
             result, player_ids = await self.parse_one(demo, replace_existing)
             results.append(result)
             affected.update(player_ids)
+            if progress_callback is not None:
+                await progress_callback(len(results), len(demos), result)
         recalculated = await recalculate_players_internal_rating(self.session, affected)
         return DemoParseResponse(
             tournament_name=tournament_name, year=year, total_files=len(demos),
@@ -141,25 +195,35 @@ class DemoParseService:
             parsed_demo = await asyncio.to_thread(
                 self.parser.parse, self.storage_root / demo.storage_path,
             )
-            merged_part_one: DemoFile | None = None
+            merged_previous_parts: list[DemoFile] = []
             part = _part_number(demo.original_filename)
-            if part and part[1] == 2:
-                p1_name = f"{part[0]}-p1.dem"
-                merged_part_one = (await self.session.execute(select(DemoFile).where(
+            is_final_part = True
+            if part:
+                siblings = list((await self.session.execute(select(DemoFile).where(
                     DemoFile.tournament_slug == demo.tournament_slug,
                     DemoFile.match_date == demo.match_date,
-                    DemoFile.original_filename == p1_name,
-                ))).scalar_one_or_none()
-                if merged_part_one is not None:
-                    first = await asyncio.to_thread(
-                        self.parser.parse, self.storage_root / merged_part_one.storage_path,
-                    )
+                ))).scalars().all())
+                split_parts = sorted(
+                    (candidate_part[1], candidate)
+                    for candidate in siblings
+                    if (candidate_part := _part_number(candidate.original_filename))
+                    and candidate_part[0] == part[0]
+                )
+                is_final_part = bool(split_parts) and part[1] == split_parts[-1][0]
+                if is_final_part and part[1] > 1:
+                    merged_previous_parts = [candidate for number, candidate in split_parts if number < part[1]]
+                    previous = [
+                        await asyncio.to_thread(self.parser.parse, self.storage_root / candidate.storage_path)
+                        for candidate in merged_previous_parts
+                    ]
                     parsed_demo = ParsedDemo(
                         map_result=parsed_demo.map_result,
-                        player_stats=merge_player_stats([
-                            first.player_stats, parsed_demo.player_stats,
-                        ]),
-                        rounds=[*first.rounds, *parsed_demo.rounds],
+                        player_stats=merge_player_stats([*[item.player_stats for item in previous], parsed_demo.player_stats]),
+                        rounds=stitch_split_rounds(
+                            [item.rounds for item in [*previous, parsed_demo]],
+                            parsed_demo.map_result.team_a_name,
+                            parsed_demo.map_result.team_b_name,
+                        ),
                     )
             # Keep third-party/test adapters using the pre-iteration list contract
             # operational; their map result is intentionally partial, never guessed.
@@ -177,6 +241,7 @@ class DemoParseService:
                 raise ValueError("No valid player statistics were found in the demo.")
             normalized_result = await normalize_parsed_map_result(
                 self.session, parsed_demo.map_result,
+                completed_map=not part or is_final_part,
             )
             logger.info(
                 "demo_map_metadata demo_file_id=%s raw_map=%r map=%r raw_teams=%r resolved_team_ids=%r raw_score=%r winner=%r rounds=%r overtime=%r issues=%r",
@@ -200,25 +265,19 @@ class DemoParseService:
                     DemoPlayerStat.player_id.is_not(None),
                 ))
             ).scalars().all())
-            if merged_part_one is not None:
-                old_ids.update((await self.session.execute(select(
-                    DemoPlayerStat.player_id,
-                ).where(
-                    DemoPlayerStat.demo_file_id == merged_part_one.id,
+            for previous_part in merged_previous_parts:
+                old_ids.update((await self.session.execute(select(DemoPlayerStat.player_id).where(
+                    DemoPlayerStat.demo_file_id == previous_part.id,
                     DemoPlayerStat.player_id.is_not(None),
                 ))).scalars().all())
-                await self.session.execute(delete(DemoPlayerStat).where(
-                    DemoPlayerStat.demo_file_id == merged_part_one.id,
-                ))
-                first_result = (await self.session.execute(select(DemoMapResult).where(
-                    DemoMapResult.demo_file_id == merged_part_one.id,
+                await self.session.execute(delete(DemoPlayerStat).where(DemoPlayerStat.demo_file_id == previous_part.id))
+                previous_result = (await self.session.execute(select(DemoMapResult).where(
+                    DemoMapResult.demo_file_id == previous_part.id,
                 ))).scalar_one_or_none()
-                if first_result is not None:
-                    first_result.metadata_status = "invalid"
-                    first_result.round_data_status = "partial"
-                await self.session.execute(delete(DemoTeamSideStat).where(
-                    DemoTeamSideStat.demo_file_id == merged_part_one.id,
-                ))
+                if previous_result is not None:
+                    previous_result.metadata_status = "partial"
+                    previous_result.round_data_status = "partial"
+                await self.session.execute(delete(DemoTeamSideStat).where(DemoTeamSideStat.demo_file_id == previous_part.id))
             await self.session.execute(delete(DemoPlayerStat).where(
                 DemoPlayerStat.demo_file_id == demo.id,
             ))
@@ -294,6 +353,14 @@ class DemoParseService:
             await self.session.flush()
             await resolve_demo_rosters(self.session, demo.id, replace_existing=replace_existing)
             await recalculate_demo_affected_aggregates(self.session, demo.id)
+            # A series cannot be identified until both organizations are linked.
+            # The team resolver already emits the actionable unknown-team warning;
+            # avoid adding a redundant generic series warning in that case.
+            if map_result.team_a_id is not None and map_result.team_b_id is not None:
+                try:
+                    await MatchService(self.session).auto_group_demo(demo.id)
+                except MatchValidationError:
+                    diagnostics.append("match_series_unresolved")
             await self.session.commit()
             return DemoParseFileResult(
                 demo_file_id=demo.id, filename=demo.original_filename,

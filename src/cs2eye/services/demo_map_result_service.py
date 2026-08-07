@@ -65,7 +65,9 @@ class NormalizedMapResult:
     issues: list[MetadataIssue] = field(default_factory=list)
 
 
-def validate_demo_map_result(result: NormalizedMapResult) -> list[MetadataIssue]:
+def validate_demo_map_result(
+    result: NormalizedMapResult, *, completed_map: bool = True,
+) -> list[MetadataIssue]:
     issues: list[MetadataIssue] = []
     if not result.map_name:
         issues.append(MetadataIssue("missing_map", "partial", "Map name is missing."))
@@ -84,8 +86,10 @@ def validate_demo_map_result(result: NormalizedMapResult) -> list[MetadataIssue]
         issues.append(MetadataIssue("missing_score", "partial", "Both scores are required."))
     elif result.team_a_score < 0 or result.team_b_score < 0:
         issues.append(MetadataIssue("negative_score", "invalid", "Scores cannot be negative."))
-    elif result.team_a_score == result.team_b_score:
+    elif result.team_a_score == result.team_b_score and completed_map:
         issues.append(MetadataIssue("invalid_final_score", "invalid", "A completed map cannot have a tied score."))
+    elif result.team_a_score == result.team_b_score:
+        issues.append(MetadataIssue("incomplete_split_demo", "partial", "This is an incomplete part of a split demo."))
     else:
         expected_name = result.team_a.raw_name if result.team_a_score > result.team_b_score else result.team_b.raw_name
         if result.winner_team_name != expected_name:
@@ -109,14 +113,16 @@ def refresh_validation(result: NormalizedMapResult) -> None:
     result.metadata_status = _status(result.issues)
 
 
-async def normalize_parsed_map_result(session: AsyncSession, parsed: ParsedMapResult) -> NormalizedMapResult:
+async def normalize_parsed_map_result(
+    session: AsyncSession, parsed: ParsedMapResult, *, completed_map: bool = True,
+) -> NormalizedMapResult:
     team_a, team_b = await resolve_demo_teams(session, [parsed.team_a_name, parsed.team_b_name])
     winner = None
     if parsed.team_a_score is not None and parsed.team_b_score is not None and parsed.team_a_score != parsed.team_b_score:
         winner = team_a if parsed.team_a_score > parsed.team_b_score else team_b
     rounds = parsed.team_a_score + parsed.team_b_score if parsed.team_a_score is not None and parsed.team_b_score is not None else None
     result = NormalizedMapResult(normalize_map_name(parsed.raw_map_name), team_a, parsed.team_a_score, team_b, parsed.team_b_score, winner.team_id if winner else None, winner.raw_name if winner else None, rounds, detect_overtime(parsed.team_a_score, parsed.team_b_score, parsed.parser_overtime_periods), "partial")
-    result.issues = validate_demo_map_result(result)
+    result.issues = validate_demo_map_result(result, completed_map=completed_map)
     if parsed.parser_rounds_count is not None and rounds is not None and parsed.parser_rounds_count != rounds:
         result.issues.append(MetadataIssue("score_round_mismatch", "review", f"Parser reported {parsed.parser_rounds_count} rounds, score implies {rounds}."))
     result.metadata_status = _status(result.issues)

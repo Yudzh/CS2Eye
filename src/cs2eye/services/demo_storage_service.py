@@ -168,7 +168,7 @@ class DemoStorageService:
                             error="Encrypted archive members are not supported.",
                         ))
                         continue
-                    if member.file_size > self.max_file_size_bytes:
+                    if suffix == ".dem" and member.file_size > self.max_file_size_bytes:
                         results.append(DemoUploadFileResult(
                             filename=basename or member.filename, status="failed",
                             error="Archive member exceeds the configured size limit.",
@@ -189,7 +189,7 @@ class DemoStorageService:
                             copied = 0
                             while chunk := source.read(CHUNK_SIZE):
                                 copied += len(chunk)
-                                if copied > self.max_file_size_bytes:
+                                if copied > max(self.max_file_size_bytes, 8 * 1024 * 1024):
                                     raise ValueError(
                                         "Nested archive exceeds the configured size limit.",
                                     )
@@ -205,7 +205,10 @@ class DemoStorageService:
         except (zipfile.BadZipFile, rarfile.Error, OSError, ValueError) as error:
             results.append(DemoUploadFileResult(
                 filename=archive_name, status="failed",
-                error=f"Cannot read {archive_suffix.upper()} archive: {error}",
+                error=(
+                    f"Cannot read {archive_suffix.upper()} archive: {error}. "
+                    "Only .dem files or readable .zip/.rar archives are supported."
+                ),
             ))
         finally:
             await upload.close()

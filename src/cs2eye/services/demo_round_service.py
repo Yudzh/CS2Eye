@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
 from sqlalchemy import delete, select
@@ -46,6 +46,31 @@ class ParsedRound:
     started_at_tick: int | None = None
     ended_at_tick: int | None = None
     duration_seconds: Decimal | None = None
+
+
+def stitch_split_rounds(
+    parts: list[list[ParsedRound]], team_a_name: str | None, team_b_name: str | None,
+) -> list[ParsedRound]:
+    """Rebase independently recorded p1…pN scoreboards onto one map timeline."""
+    score_a = score_b = 0
+    stitched: list[ParsedRound] = []
+    for rounds in parts:
+        for item in rounds:
+            if item.is_warmup or item.is_restart or not item.is_complete:
+                stitched.append(item)
+                continue
+            side = SIDES.get(item.winner_side, "unknown")
+            winner = item.t_team_name if side == "T" else item.ct_team_name if side == "CT" else None
+            if _same_team(winner, team_a_name): score_a += 1
+            elif _same_team(winner, team_b_name): score_b += 1
+            else:
+                stitched.append(item)
+                continue
+            stitched.append(replace(item, raw_scores_after={
+                team_a_name or "team_a": score_a,
+                team_b_name or "team_b": score_b,
+            }))
+    return stitched
 
 
 @dataclass

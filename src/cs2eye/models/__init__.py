@@ -1,6 +1,7 @@
 """Import SQLAlchemy models here for Alembic autogeneration."""
 
 from cs2eye.models.demo_file import DemoFile
+from cs2eye.models.match import Match, Tournament
 from cs2eye.models.demo import (
     DemoMapResult,
     DemoParseRun,
@@ -24,6 +25,8 @@ from cs2eye.models.team import (
 
 __all__ = [
     "DemoFile",
+    "Match",
+    "Tournament",
     "DemoParseRun",
     "DemoMapResult",
     "DemoPlayerStat",

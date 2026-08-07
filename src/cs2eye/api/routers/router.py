@@ -7,6 +7,7 @@ from cs2eye.api.routers.players import router as players_router
 from cs2eye.api.routers.demos import router as demos_router
 from cs2eye.api.routers.meta import router as meta_router
 from cs2eye.api.routers.analysis import router as analysis_router
+from cs2eye.api.routers.matches import router as matches_router
 
 
 api_router = APIRouter(
@@ -29,3 +30,4 @@ api_router.include_router(
 )
 api_router.include_router(meta_router)
 api_router.include_router(analysis_router)
+api_router.include_router(matches_router)

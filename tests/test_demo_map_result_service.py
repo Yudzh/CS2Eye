@@ -29,18 +29,44 @@ def test_overtime_rules():
     assert detect_overtime(16, 13, 0) is False
 
 
+@pytest.mark.asyncio
+async def test_split_demo_part_one_tied_score_is_partial(monkeypatch):
+    async def resolved(_session, names):
+        return [SimpleNamespace(
+            team_id=i, raw_name=name, normalized_name=name.lower(),
+            resolution_status="matched",
+        ) for i, name in enumerate(names, 1)]
+
+    monkeypatch.setattr(
+        "cs2eye.services.demo_map_result_service.resolve_demo_teams", resolved,
+    )
+    result = await normalize_parsed_map_result(
+        None,
+        ParsedMapResult(
+            raw_map_name="de_nuke", team_a_name="MOUZ", team_a_score=1,
+            team_b_name="Legacy", team_b_score=1, parser_rounds_count=2,
+        ),
+        completed_map=False,
+    )
+    assert result.metadata_status == "partial"
+    assert [issue.code for issue in result.issues] == ["incomplete_split_demo"]
+
+
 def test_compact_cs2_team_suffix_is_an_exact_alias():
     assert "wildcard" in team_name_aliases("WILDCARDcs2")
 
 
 @pytest.mark.parametrize(("demo_name", "team_name"), [
     ("MongolZ", "The MongolZ"),
-    ("V$M", "vsm"),
     ("Team Vitality", "Vitality"),
     ("100T", "100 Thieves"),
     ("Aurora Gaming", "Aurora"),
     ("paiN Gaming", "paiN"),
     ("Team Spirit", "Spirit"),
+    ("Team Falcons", "Falcons"),
+    ("BetBoom Team", "BetBoom"),
+    ("Team Liquid", "Liquid"),
+    ("Lynn Vision Gaming", "Lynn Vision"),
     ("DENDELE", "DENDELE CS"),
 ])
 def test_known_demo_team_aliases(demo_name, team_name):

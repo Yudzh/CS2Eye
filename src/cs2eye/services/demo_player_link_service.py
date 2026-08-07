@@ -6,6 +6,8 @@ from cs2eye.models.team import Player
 
 PLAYER_NICKNAME_ALIASES = {
     "naf-fly": "naf",
+    "slaxz-": "slaxz",
+    "v$m": "vsm",
 }
 
 

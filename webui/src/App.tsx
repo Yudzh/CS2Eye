@@ -15,6 +15,7 @@ import {
   refreshPlayer,
   getTeamMaps,
   getTeamMapDetail,
+  getTeamMatchStats,
 } from "./api";
 import type {
   ProbeResult,
@@ -26,9 +27,11 @@ import type {
   TeamMapAggregate,
   TeamMapScope,
   TeamMapDetail,
+  TeamMatchStats,
 } from "./types";
 import { TeamComparePage } from "./pages/TeamComparePage";
 import { DemosPage } from "./pages/DemosPage";
+import { MatchesPage } from "./pages/MatchesPage";
 
 
 type LoadState =
@@ -233,16 +236,36 @@ const roleLabels: Record<string, string> = {
   rifler: "Rifler",
 };
 
+const confidenceLabels = {
+  not_enough_data: "Недостаточно данных",
+  low_confidence: "Низкая надёжность",
+  medium_confidence: "Средняя надёжность",
+  high_confidence: "Высокая надёжность",
+};
+
+const mapWarningLabels: Record<string, string> = {
+  small_sample: "Маленькая выборка: вывод может заметно измениться.",
+  stale_data: "Данные теряют актуальность.",
+  very_stale_data: "Последняя карта сыграна более 90 дней назад.",
+  no_matches_against_top_30: "Нет карт против команд Top-30.",
+  low_ct_sample: "Меньше 12 раундов за CT.",
+  low_t_sample: "Меньше 12 раундов за T.",
+  missing_side_data: "Данные одной из сторон отсутствуют.",
+};
+
 function TeamPage({ id }: { id: number }) {
   const [team, setTeam] = useState<TeamDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [roleError, setRoleError] = useState<string | null>(null);
   const [savingPlayerId, setSavingPlayerId] = useState<number | null>(null);
   const [mapStats, setMapStats] = useState<TeamMapAggregate[]>([]);
+  const [mapsLoading, setMapsLoading] = useState(true);
+  const [mapsError, setMapsError] = useState<string | null>(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapSort, setMapSort] = useState("maps");
   const [mapDetails, setMapDetails] = useState<Record<string, TeamMapDetail>>({});
   const [aggregationLevel, setAggregationLevel] = useState<"organization" | "current_roster">("current_roster");
+  const [matchStats, setMatchStats] = useState<TeamMatchStats | null>(null);
 
   useEffect(() => {
     getTeam(id).then(setTeam).catch((value: unknown) => {
@@ -252,8 +275,14 @@ function TeamPage({ id }: { id: number }) {
 
   useEffect(() => {
     setMapDetails({});
-    getTeamMaps(id, aggregationLevel).then((value) => setMapStats(value.maps)).catch(() => setMapStats([]));
+    setMapsLoading(true); setMapsError(null);
+    getTeamMaps(id, aggregationLevel).then((value) => setMapStats(value.maps)).catch((value: unknown) => {
+      setMapStats([]);
+      setMapsError(value instanceof Error ? value.message : "Не удалось загрузить статистику карт.");
+    }).finally(() => setMapsLoading(false));
   }, [id, aggregationLevel]);
+
+  useEffect(() => { void getTeamMatchStats(id, aggregationLevel).then(setMatchStats).catch(() => setMatchStats(null)); }, [id, aggregationLevel]);
 
   if (error) return <main className="page"><a className="back-link" href="/">← К командам</a><div className="empty-state empty-state--error">{error}</div></main>;
   if (!team) return <main className="page"><div className="empty-state">Загружаю команду…</div></main>;
@@ -271,6 +300,7 @@ function TeamPage({ id }: { id: number }) {
     if (mapFilter === "fresh") return item.all.freshness_label === "fresh";
     return true;
   }).sort((a, b) => {
+    if (mapSort === "strength") return (b.strength.map_strength_score ?? -1) - (a.strength.map_strength_score ?? -1);
     if (mapSort === "winrate") return (b.all.map_win_rate ?? -1) - (a.all.map_win_rate ?? -1);
     if (mapSort === "ct") return (b.all.ct.win_rate ?? -1) - (a.all.ct.win_rate ?? -1);
     if (mapSort === "t") return (b.all.t.win_rate ?? -1) - (a.all.t.win_rate ?? -1);
@@ -321,28 +351,34 @@ function TeamPage({ id }: { id: number }) {
         <article className="metric-card"><span>Бонус / штраф</span><strong className="metric-adjustment">+{strength.roster_bonus.toFixed(2)} / −{strength.roster_penalty.toFixed(2)}</strong></article>
       </section>
 
+      <section className="strength-panel team-match-panel"><div className="section-heading"><div><p className="eyebrow">Серии</p><h2>Матчи</h2></div><a className="back-link" href={`/matches?team_id=${id}`}>Все серии →</a></div>{matchStats ? <><div className="team-match-summary"><article><span>Всего</span><strong>{matchStats.all.matches_played}</strong></article><article><span>Победы</span><strong>{matchStats.all.matches_won}</strong></article><article><span>Поражения</span><strong>{matchStats.all.matches_lost}</strong></article><article><span>Winrate</span><strong>{matchStats.all.match_win_rate === null ? "—" : `${matchStats.all.match_win_rate.toFixed(1)}%`}</strong></article></div><div className="team-match-breakdown"><span>BO1: <b>{matchStats.by_format.bo1.matches_won}–{matchStats.by_format.bo1.matches_lost}</b></span><span>BO3: <b>{matchStats.by_format.bo3.matches_won}–{matchStats.by_format.bo3.matches_lost}</b></span><span>BO5: <b>{matchStats.by_format.bo5.matches_won}–{matchStats.by_format.bo5.matches_lost}</b></span><span>LAN: <b>{matchStats.by_context.lan.matches_won}–{matchStats.by_context.lan.matches_lost}</b></span><span>Playoff: <b>{matchStats.by_context.playoff.matches_won}–{matchStats.by_context.playoff.matches_lost}</b></span><span>Final: <b>{matchStats.by_context.final.matches_won}–{matchStats.by_context.final.matches_lost}</b></span></div></> : <div className="empty-state">Статистика матчей пока недоступна.</div>}</section>
+
       <section className="strength-panel team-map-panel">
         <div className="section-heading"><div><p className="eyebrow">Аналитика</p><h2>Статистика по картам</h2></div></div>
         <div className="team-map-controls">
           <div className="roster-toggle"><button className={aggregationLevel === "current_roster" ? "button button--primary" : "button"} onClick={() => setAggregationLevel("current_roster")}>Текущий состав</button><button className={aggregationLevel === "organization" ? "button button--primary" : "button"} onClick={() => setAggregationLevel("organization")}>История организации</button></div>
           <select value={mapFilter} onChange={(event) => setMapFilter(event.target.value)}><option value="all">Все карты</option><option value="min3">Минимум 3 карты</option><option value="min5">Минимум 5 карт</option><option value="fresh">Только свежие</option></select>
-          <select value={mapSort} onChange={(event) => setMapSort(event.target.value)}><option value="maps">По числу карт</option><option value="winrate">По winrate</option><option value="date">По последней дате</option><option value="ct">По CT winrate</option><option value="t">По T winrate</option></select>
+          <select value={mapSort} onChange={(event) => setMapSort(event.target.value)}><option value="strength">По силе карты</option><option value="maps">По числу карт</option><option value="winrate">По winrate</option><option value="date">По последней дате</option><option value="ct">По CT winrate</option><option value="t">По T winrate</option></select>
         </div>
-        {visibleMaps.length === 0 ? <div className="empty-state">{aggregationLevel === "current_roster" ? "У текущего состава ещё нет сыгранных карт." : "По картам ещё нет полностью распарсенных демок."}</div> : <div className="team-map-grid">{visibleMaps.map((item) => {
+        {mapsLoading ? <div className="empty-state">Загружаю map pool…</div> : mapsError ? <div className="empty-state empty-state--error">{mapsError}</div> : visibleMaps.length === 0 ? <div className="empty-state">{aggregationLevel === "current_roster" ? "У текущего состава ещё нет сыгранных карт." : "По картам ещё нет полностью распарсенных демок."}</div> : <div className="team-map-grid">{visibleMaps.map((item) => {
           const percent = (value: number | null) => value === null ? "—" : `${value.toFixed(1)}%`;
           const record = (scope: TeamMapScope | null | undefined) => scope ? `${scope.maps_won}–${scope.maps_lost}` : "—";
           const detail = mapDetails[item.map_name];
           return <details className="team-map-card" key={item.map_name} onToggle={(event) => event.currentTarget.open && loadMapDetail(item.map_name)}>
             <summary><strong>{item.map_name[0].toUpperCase() + item.map_name.slice(1)}</strong><span>{item.all.maps_won}–{item.all.maps_lost} · {percent(item.all.map_win_rate)}</span></summary>
+            <div className="map-strength-heading">
+              <div>{item.strength.map_strength_score === null ? <><strong>Сила карты: недостаточно данных</strong><small>Нужно минимум 3 полностью распарсенные карты.</small></> : <strong>Сила карты: {item.strength.map_strength_score.toFixed(2)} / 100</strong>}</div>
+              <span className={`confidence-badge confidence-badge--${item.strength.confidence_level}`}>{confidenceLabels[item.strength.confidence_level]} · {item.strength.confidence_score.toFixed(2)}</span>
+            </div>
             <div className="team-map-rates"><span>CT <strong>{percent(item.all.ct.win_rate)}</strong></span><span>T <strong>{percent(item.all.t.win_rate)}</strong></span><span>Раунды <strong>{item.all.rounds_won}–{item.all.rounds_lost}</strong></span></div>
             <div className="team-map-scopes"><span>Последние 5: <b>{record(item.recent.last_5)}</b></span><span>Последние 10: <b>{record(item.recent.last_10)}</b></span><span>Последние 20: <b>{record(item.recent.last_20)}</b></span><span>Top 15: <b>{record(item.versus.top_15)}</b></span><span>Top 16–30: <b>{record(item.versus.top_16_30)}</b></span><span>Тир 2–3: <b>{record(item.versus.tier_2_3)}</b></span></div>
             <small>{item.all.maps_played} карт · Последняя: {item.all.last_match_date ? new Date(item.all.last_match_date).toLocaleDateString("ru-RU") : "дата неизвестна"} · Выборка: {item.all.sample_size_label} · Свежесть: {item.all.freshness_label}</small>
-            {item.all.maps_played <= 2 && <p className="map-warning">Недостаточная выборка — выводы ненадёжны.</p>}
-            {item.all.freshness_label === "very_stale" && <p className="map-warning">Последняя карта сыграна более 90 дней назад.</p>}
+            {item.strength.factors.length > 0 && <div className="map-strength-factors"><b>Из чего сложилась оценка</b>{item.strength.factors.map((factor) => <div key={factor.code}><span>{factor.label}</span><strong>{factor.score === null ? "—" : factor.score.toFixed(2)}</strong><em>{factor.impact >= 0 ? "+" : ""}{factor.impact.toFixed(2)}</em><small>{factor.explanation}</small></div>)}</div>}
+            {item.strength.warnings.map((warning) => <p className="map-warning" key={warning}>{mapWarningLabels[warning] ?? warning}</p>)}
             {detail && <div className="team-map-matches"><b>{aggregationLevel === "current_roster" ? "Последние игры текущего состава" : "Последние карты организации"}</b>{detail.recent_matches.map((match) => <div key={match.demo_file_id}><span>{match.match_date ? new Date(match.match_date).toLocaleDateString("ru-RU") : "Дата неизвестна"}</span><span>{match.opponent_team_name ?? "Неизвестный соперник"}{match.opponent_rank ? ` (#${match.opponent_rank})` : ""}</span><strong className={match.result === "win" ? "match-win" : "match-loss"}>{match.score_for}:{match.score_against}</strong></div>)}</div>}
           </details>;
         })}</div>}
-        <p className="formula">Оценка выборки зависит от количества распарсенных карт и не является оценкой силы команды. Свежесть рассчитывается по дате последней карты.</p>
+        <p className="formula">Сила карты строится из сохранённых агрегатов результатов, раундов, сторон и матчей против Top-30. Надёжность стягивает малую или устаревшую выборку к нейтральной оценке 50.</p>
       </section>
 
       <section className="team-detail-grid">
@@ -435,6 +471,9 @@ function rankChangeLabel(
 
 export default function App() {
   if (/^\/demos\/?$/.test(window.location.pathname)) return <DemosPage />;
+  if (/^\/matches\/?$/.test(window.location.pathname)) return <MatchesPage />;
+  const seriesMatch = window.location.pathname.match(/^\/matches\/(\d+)\/?$/);
+  if (seriesMatch) return <MatchesPage matchId={Number(seriesMatch[1])} />;
   if (/^\/compare\/?$/.test(window.location.pathname)) return <TeamComparePage />;
   const playerMatch = window.location.pathname.match(/^\/players\/(\d+)\/?$/);
   if (playerMatch) return <PlayerPage id={Number(playerMatch[1])} />;

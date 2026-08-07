@@ -10,6 +10,7 @@ import type {
   DemoUploadResponse,
   DemoParseFileResult,
   DemoParseResponse,
+  DemoParseJob,
   DemoPlayerStatsResponse,
   DemoTournamentOption,
   DemoRankReclassifyResponse,
@@ -18,6 +19,9 @@ import type {
   TeamMapsResponse,
   TeamMapDetail,
   CurrentRosterComparison,
+  TeamMapComparisonResponse,
+  TeamH2HComparison,
+  MatchBackfillResult, MatchEnvironment, MatchFormat, MatchListResponse, MatchResolution, MatchSeries, MatchStage, TeamMatchStats,
 } from "./types";
 
 
@@ -100,6 +104,40 @@ export function getTeamMapDetail(id: number, mapName: string, level: "organizati
 
 export function compareCurrentRosters(a: number, b: number): Promise<CurrentRosterComparison> {
   return request<CurrentRosterComparison>(`/api/v1/analysis/compare/teams/${a}/${b}/current-rosters`);
+}
+
+export function getTeamH2H(teamAId: number, teamBId: number, recentLimit = 10): Promise<TeamH2HComparison> {
+  return request<TeamH2HComparison>(`/api/v1/analysis/compare/teams/${teamAId}/${teamBId}/h2h?recent_limit=${recentLimit}`);
+}
+
+export function getMatches(resolutionStatus?: MatchResolution): Promise<MatchListResponse> {
+  return request<MatchListResponse>(`/api/v1/matches${resolutionStatus ? `?resolution_status=${resolutionStatus}` : ""}`);
+}
+export function backfillMatches(): Promise<MatchBackfillResult> { return request<MatchBackfillResult>("/api/v1/matches/backfill", { method: "POST" }); }
+export function getMatch(id: number): Promise<MatchSeries> { return request<MatchSeries>(`/api/v1/matches/${id}`); }
+export function createMatchSeries(demoFileIds: number[], format: MatchFormat, stage: MatchStage, environment: MatchEnvironment): Promise<MatchSeries> {
+  return request<MatchSeries>("/api/v1/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ demo_file_ids: demoFileIds, format, stage, environment, resolution_status: "resolved" }) });
+}
+export function patchMatchSeries(id: number, payload: Partial<{format: MatchFormat; stage: MatchStage; environment: MatchEnvironment; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean}>): Promise<MatchSeries> {
+  return request<MatchSeries>(`/api/v1/matches/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+export function reorderMatchSeries(id: number, demoFileIds: number[]): Promise<MatchSeries> {
+  return request<MatchSeries>(`/api/v1/matches/${id}/reorder`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ demo_file_ids: demoFileIds }) });
+}
+export function splitMatchSeries(id: number, demoFileIds?: number[]): Promise<MatchSeries[]> {
+  return request<MatchSeries[]>(`/api/v1/matches/${id}/split`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ demo_file_ids: demoFileIds }) });
+}
+export function getTeamMatchStats(id: number, level: "organization" | "current_roster"): Promise<TeamMatchStats> {
+  return request<TeamMatchStats>(`/api/v1/analysis/teams/${id}/matches?aggregation_level=${level}`);
+}
+
+export function compareTeamMaps(
+  a: number, b: number,
+  level: "organization" | "current_roster" = "current_roster",
+): Promise<TeamMapComparisonResponse> {
+  return request<TeamMapComparisonResponse>(
+    `/api/v1/analysis/compare/teams/${a}/${b}/maps?aggregation_level=${level}`,
+  );
 }
 
 export function compareTeams(
@@ -206,6 +244,33 @@ export function parseDemoFiles(
       replace_existing: replaceExisting,
     }),
   });
+}
+
+export function parseAllDemoFiles(): Promise<DemoParseResponse> {
+  return request<DemoParseResponse>("/api/v1/demos/parse-all", {
+    method: "POST",
+  });
+}
+
+export function startParseAllDemoJob(): Promise<DemoParseJob> {
+  return request<DemoParseJob>("/api/v1/demos/parse-all/jobs", { method: "POST" });
+}
+
+export function startFilteredDemoParseJob(
+  tournamentName: string, year: number, replaceExisting = false,
+): Promise<DemoParseJob> {
+  return request<DemoParseJob>("/api/v1/demos/parse/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tournament_name: tournamentName, year,
+      replace_existing: replaceExisting,
+    }),
+  });
+}
+
+export function getParseAllDemoJob(jobId: string): Promise<DemoParseJob> {
+  return request<DemoParseJob>(`/api/v1/demos/parse-all/jobs/${jobId}`);
 }
 
 export function parseDemoFile(
