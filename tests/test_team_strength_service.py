@@ -36,7 +36,7 @@ def member(
     return player, membership
 
 
-def test_exact_old_team_strength_logic() -> None:
+def test_team_strength_v2_replaces_discrete_role_and_roster_rules() -> None:
     roster = [
         member("weak_awper", "awper", 35),
         member("captain", "igl", 60),
@@ -51,14 +51,13 @@ def test_exact_old_team_strength_logic() -> None:
 
     assert result.active_players_count == 5
     assert result.base_player_score == 55
-    assert result.roster_bonus == 10
-    assert result.roster_penalty == 15
-    assert result.total_adjustment == -5
-    assert result.score_before_limits == 50
-    assert result.team_strength_score == 50
-    assert result.calculation == "55.00 + 10.00 - 15.00 = 50.00"
-    assert {factor.code for factor in result.factors} >= {
-        "base_player_score", "awper_strength", "stable_roster_90_days",
+    assert result.model_version == "v2"
+    assert result.roster_penalty == 0
+    assert result.raw_score == 56.37
+    assert result.team_strength_score == result.final_score == 54.78
+    assert {factor.key for factor in result.factors} == {
+        "roster_quality", "team_performance", "strong_opponents",
+        "recent_form", "roster_stability",
     }
 
 
@@ -74,4 +73,7 @@ def test_missing_strength_defaults_to_fifty() -> None:
     result = calculate_team_strength(roster, now=NOW)
 
     assert result.base_player_score == 50
-    assert result.team_strength_score == 45
+    assert result.team_strength_score == 40.28
+    roster_factor = next(factor for factor in result.factors if factor.key == "roster_quality")
+    assert roster_factor.available is False
+    assert roster_factor.normalized_score is None

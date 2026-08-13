@@ -19,6 +19,7 @@ dependencies = [
     "uvicorn[standard]>=0.47.0,<0.48.0",
     "beautifulsoup4>=4.13.4,<5.0.0",
     "demoparser2==0.41.4",
+    "numpy>=2.0,<3.0",
 ]
 
 [dependency-groups]

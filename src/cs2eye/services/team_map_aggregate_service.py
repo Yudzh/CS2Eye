@@ -6,11 +6,13 @@ from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.models.demo import (
-    DemoMapResult, DemoParseRun, DemoTeamOpponentContext, DemoTeamSideStat,
+    DemoMapResult, DemoParseRun, DemoTeamBombStat, DemoTeamCombatStat, DemoTeamEconomyStat,
+    DemoTeamOpponentContext, DemoTeamSideStat, DemoTeamUtilityStat,
     DemoTeamRoster, TeamMapAggregate,
 )
 from cs2eye.models.demo_file import DemoFile
 from cs2eye.services.demo_map_result_service import STANDARD_MAPS
+from cs2eye.services.demo_utility_service import COUNT_KEYS, _base as utility_base, finalize as finalize_utility
 
 RECENT_WINDOWS = (5, 10, 20)
 RANK_GROUPS = ("top_15", "top_16_30", "outside_top_30", "tier_2_3", "unknown")
@@ -23,7 +25,11 @@ class SourceMap:
     won: bool
     went_to_overtime: bool
     side: DemoTeamSideStat
+    bomb: DemoTeamBombStat | None
     opponent_context: DemoTeamOpponentContext | None
+    economy: DemoTeamEconomyStat | None = None
+    combat: DemoTeamCombatStat | None = None
+    utility: DemoTeamUtilityStat | None = None
 
 
 @dataclass
@@ -103,6 +109,82 @@ def _aggregate_model(
     ct_won = sum(item.side.ct_rounds_won for item in maps)
     t_played = sum(item.side.t_rounds_played for item in maps)
     t_won = sum(item.side.t_rounds_won for item in maps)
+    bomb_maps = [item.bomb for item in maps if item.bomb is not None]
+    bomb_t_rounds = sum(item.t_rounds_played for item in bomb_maps)
+    plants = sum(item.bomb_plants for item in bomb_maps)
+    postplant_rounds = sum(item.postplant_rounds for item in bomb_maps)
+    postplant_wins = sum(item.postplant_wins for item in bomb_maps)
+    retake_opportunities = sum(item.retake_opportunities for item in bomb_maps)
+    retake_wins = sum(item.retake_wins for item in bomb_maps)
+    economy_maps = [item.economy for item in maps if item.economy is not None]
+    economy_pairs = {
+        "pistol": ("pistol_rounds_played", "pistol_rounds_won"),
+        "first_pistol": ("first_pistol_opportunities", "first_pistol_wins"),
+        "second_pistol": ("second_pistol_opportunities", "second_pistol_wins"),
+        "both_pistols": ("both_pistols_opportunities", "both_pistols_wins"),
+        "conversion": ("pistol_conversion_opportunities", "pistol_conversions"),
+        "post_pistol_vs_force": ("post_pistol_vs_force_rounds", "post_pistol_vs_force_wins"),
+        "second_round_comeback": ("second_round_comeback_opportunities", "second_round_comeback_wins"),
+        "eco": ("eco_rounds", "eco_wins"), "force_buy": ("force_buy_rounds", "force_buy_wins"),
+        "full_buy": ("full_buy_rounds", "full_buy_wins"), "anti_eco": ("anti_eco_rounds", "anti_eco_wins"),
+        "full_buy_vs_full_buy": ("full_buy_vs_full_buy_rounds", "full_buy_vs_full_buy_wins"),
+        "force_vs_full_buy": ("force_vs_full_buy_rounds", "force_vs_full_buy_wins"),
+    }
+    economy_data = {}
+    for label, (rounds_field, wins_field) in economy_pairs.items():
+        played = sum(getattr(item, rounds_field) for item in economy_maps)
+        metric_wins = sum(getattr(item, wins_field) for item in economy_maps)
+        economy_data[label] = {
+            "rounds": played, "wins": metric_wins, "losses": played - metric_wins,
+            "win_rate": float(_rate(metric_wins, played)) if played else None,
+        }
+    economy_data["save"] = {
+        "rounds": sum(item.save_rounds for item in economy_maps),
+        "players_saved": sum(item.players_saved for item in economy_maps),
+        "status": "not_parsed",
+    }
+    combat_maps = [item.combat.combat_data for item in maps if item.combat is not None]
+    def combat_sum(key: str) -> int:
+        return sum(int(item.get(key, 0)) for item in combat_maps)
+    def combat_rate(num: str, den: str) -> float | None:
+        denominator = combat_sum(den)
+        return float(_rate(combat_sum(num), denominator)) if denominator else None
+    opening_attempts = combat_sum("opening_kills") + combat_sum("opening_deaths")
+    combat_data = {
+        "opening": {
+            "kills": combat_sum("opening_kills"), "deaths": combat_sum("opening_deaths"),
+            "success_rate": float(_rate(combat_sum("opening_kills"), opening_attempts)) if opening_attempts else None,
+            "conversion_wins": combat_sum("opening_conversion_wins"),
+            "conversion_losses": combat_sum("opening_conversion_losses"),
+            "conversion_rate": combat_rate("opening_conversion_wins", "rounds_with_opening_kill"),
+            "recovery_wins": combat_sum("opening_recovery_wins"),
+            "recovery_losses": combat_sum("opening_recovery_losses"),
+            "recovery_rate": combat_rate("opening_recovery_wins", "opening_death_rounds"),
+            "ct_kills": combat_sum("ct_opening_kills"), "ct_deaths": combat_sum("ct_opening_deaths"),
+            "t_kills": combat_sum("t_opening_kills"), "t_deaths": combat_sum("t_opening_deaths"),
+            "ct_success_rate": float(_rate(combat_sum("ct_opening_kills"), combat_sum("ct_opening_kills") + combat_sum("ct_opening_deaths"))) if combat_sum("ct_opening_kills") + combat_sum("ct_opening_deaths") else None,
+            "t_success_rate": float(_rate(combat_sum("t_opening_kills"), combat_sum("t_opening_kills") + combat_sum("t_opening_deaths"))) if combat_sum("t_opening_kills") + combat_sum("t_opening_deaths") else None,
+        },
+        "trade": {"trade_kills": combat_sum("trade_kills"), "deaths_traded": combat_sum("deaths_traded"),
+                  "eligible_team_deaths": combat_sum("eligible_team_deaths"),
+                  "trade_rate": combat_rate("deaths_traded", "eligible_team_deaths")},
+        "clutch": {"opportunities": combat_sum("clutch_opportunities"), "wins": combat_sum("clutch_wins"),
+                   "win_rate": combat_rate("clutch_wins", "clutch_opportunities"),
+                   "clutches_lost_to_opponent": combat_sum("clutches_lost_to_opponent"),
+                   "breakdown": {f"1v{x}": {"attempts": combat_sum(f"clutch_1v{x}_attempts"), "wins": combat_sum(f"clutch_1v{x}_wins")} for x in range(1, 6)}},
+    } if combat_maps else None
+    utility_maps = [item.utility.utility_data for item in maps if item.utility is not None]
+    utility_data = None
+    if utility_maps:
+        utility_data = utility_base(sum(int(item.get("rounds_played", 0)) for item in utility_maps))
+        for item in utility_maps:
+            for key in COUNT_KEYS: utility_data[key] += int(item.get(key, 0))
+            utility_data["enemy_flash_duration"] += float(item.get("enemy_flash_duration", 0))
+            utility_data["teammate_flash_duration"] += float(item.get("teammate_flash_duration", 0))
+            for side_key in ("ct", "t"):
+                utility_data[side_key]["rounds_played"] += int(item.get(side_key, {}).get("rounds_played", 0))
+                for key in COUNT_KEYS: utility_data[side_key][key] += int(item.get(side_key, {}).get(key, 0))
+        utility_data = finalize_utility(utility_data)
     dated = [item.match_date for item in maps if item.match_date is not None]
     first_date, last_date = (min(dated), max(dated)) if dated else (None, None)
     return TeamMapAggregate(
@@ -117,6 +199,19 @@ def _aggregate_model(
         ct_rounds_lost=ct_played - ct_won, ct_win_rate=_rate(ct_won, ct_played),
         t_rounds_played=t_played, t_rounds_won=t_won,
         t_rounds_lost=t_played - t_won, t_win_rate=_rate(t_won, t_played),
+        bomb_t_rounds_played=bomb_t_rounds, bomb_plants=plants,
+        plant_rate=_rate(plants, bomb_t_rounds),
+        postplant_rounds=postplant_rounds, postplant_wins=postplant_wins,
+        postplant_losses=postplant_rounds-postplant_wins,
+        postplant_win_rate=_rate(postplant_wins, postplant_rounds),
+        retake_opportunities=retake_opportunities, retake_wins=retake_wins,
+        retake_losses=retake_opportunities-retake_wins,
+        retake_win_rate=_rate(retake_wins, retake_opportunities),
+        bomb_explosions=sum(item.bomb_explosions for item in bomb_maps),
+        bomb_defuses=sum(item.bomb_defuses for item in bomb_maps),
+        economy_data=economy_data,
+        combat_data=combat_data,
+        utility_data=utility_data,
         overtime_maps=sum(item.went_to_overtime for item in maps),
         overtime_rounds_played=sum(item.side.overtime_rounds_played for item in maps),
         overtime_rounds_won=sum(item.side.overtime_rounds_won for item in maps),
@@ -130,12 +225,32 @@ def _aggregate_model(
 async def _source_maps(session: AsyncSession, team_id: int, map_name: str,
                        roster_id: int | None = None) -> list[SourceMap]:
     query = (
-        select(DemoFile, DemoMapResult, DemoTeamSideStat, DemoTeamOpponentContext)
+        select(DemoFile, DemoMapResult, DemoTeamSideStat, DemoTeamBombStat, DemoTeamEconomyStat, DemoTeamCombatStat, DemoTeamUtilityStat, DemoTeamOpponentContext)
         .join(DemoMapResult, DemoMapResult.demo_file_id == DemoFile.id)
         .join(DemoParseRun, DemoParseRun.demo_file_id == DemoFile.id)
         .join(DemoTeamSideStat, and_(
             DemoTeamSideStat.demo_file_id == DemoFile.id,
             DemoTeamSideStat.team_id == team_id,
+        ))
+        .outerjoin(DemoTeamBombStat, and_(
+            DemoTeamBombStat.demo_file_id == DemoFile.id,
+            DemoTeamBombStat.team_id == team_id,
+            DemoMapResult.bomb_data_status == "complete",
+        ))
+        .outerjoin(DemoTeamEconomyStat, and_(
+            DemoTeamEconomyStat.demo_file_id == DemoFile.id,
+            DemoTeamEconomyStat.team_id == team_id,
+            DemoMapResult.economy_data_status == "complete",
+        ))
+        .outerjoin(DemoTeamCombatStat, and_(
+            DemoTeamCombatStat.demo_file_id == DemoFile.id,
+            DemoTeamCombatStat.team_id == team_id,
+            DemoMapResult.combat_data_status == "complete",
+        ))
+        .outerjoin(DemoTeamUtilityStat, and_(
+            DemoTeamUtilityStat.demo_file_id == DemoFile.id,
+            DemoTeamUtilityStat.team_id == team_id,
+            DemoMapResult.utility_data_status == "complete",
         ))
         .outerjoin(DemoTeamOpponentContext, and_(
             DemoTeamOpponentContext.demo_file_id == DemoFile.id,
@@ -158,7 +273,7 @@ async def _source_maps(session: AsyncSession, team_id: int, map_name: str,
         ))
     rows = (await session.execute(query)).all()
     sources = []
-    for demo, result, side, context in rows:
+    for demo, result, side, bomb, economy, combat, utility, context in rows:
         if result.map_name not in STANDARD_MAPS:
             continue
         is_a = result.team_a_id == team_id
@@ -176,6 +291,10 @@ async def _source_maps(session: AsyncSession, team_id: int, map_name: str,
             demo_file_id=demo.id, match_date=demo.match_date,
             won=score_for > score_against,
             went_to_overtime=bool(result.went_to_overtime), side=side,
+            bomb=bomb,
+            economy=economy,
+            combat=combat,
+            utility=utility,
             opponent_context=context,
         ))
     return sources

@@ -28,6 +28,9 @@ class PlayerResponse(BaseModel):
     bo3_rating: Decimal | None
     bo3_avg_rating: Decimal | None
     player_strength: int | None
+    player_strength_raw_score: float | None
+    player_strength_reliability: float | None
+    player_strength_model_version: str | None
     steam_id: str | None
     internal_rating: Decimal | None
     internal_rating_maps_count: int
@@ -41,6 +44,11 @@ class PlayerResponse(BaseModel):
     internal_rating_top16_30_maps_count: int
     internal_rating_top16_30_rounds_count: int
     strength_breakdown: dict[str, Any] | None
+    combat: dict[str, Any]
+    utility: dict[str, Any]
+    round_swing: dict[str, Any]
     stats_synced_at: datetime | None
     source_updated_at: datetime | None
     teams: list[PlayerTeamResponse]
+    igl: dict[str, Any] | None = None
+    captain_strength: float | None = None

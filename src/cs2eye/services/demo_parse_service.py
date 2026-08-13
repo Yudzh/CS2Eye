@@ -4,13 +4,14 @@ import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from decimal import Decimal, ROUND_HALF_UP
+from dataclasses import replace
 from pathlib import Path
 
 from sqlalchemy import delete, extract, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.api.schemas.demos import DemoParseFileResult, DemoParseResponse
-from cs2eye.models.demo import DemoMapResult, DemoParseRun, DemoPlayerStat, DemoTeamSideStat
+from cs2eye.models.demo import DemoBombEvent, DemoDamageEvent, DemoKill, DemoMapResult, DemoParseRun, DemoPlayerStat, DemoRound, DemoTeamBombStat, DemoTeamCombatStat, DemoTeamEconomyStat, DemoTeamSideStat, DemoTeamUtilityStat, DemoUtilityEvent
 from cs2eye.models.demo_file import DemoFile
 from cs2eye.services.demo_parser_service import Demoparser2Adapter, ParsedDemoPlayerStat
 from cs2eye.services.demo_player_link_service import link_demo_player
@@ -24,11 +25,14 @@ from cs2eye.services.demo_map_result_service import ParsedMapResult, apply_to_mo
 from cs2eye.services.demo_parser_service import ParsedDemo
 from cs2eye.services.demo_round_service import (
     normalize_rounds, recalculate_demo_team_side_stats, replace_rounds,
-    round_data_status, stitch_split_rounds,
+    bomb_data_status, economy_data_status, recalculate_demo_team_bomb_stats,
+    recalculate_demo_team_economy_stats, round_data_status, stitch_split_rounds,
 )
 from cs2eye.services.team_map_aggregate_service import recalculate_demo_affected_aggregates
 from cs2eye.services.team_roster_service import resolve_demo_rosters
 from cs2eye.services.match_service import MatchService, MatchValidationError
+from cs2eye.services.demo_combat_service import replace_demo_combat
+from cs2eye.services.demo_utility_service import replace_demo_utility
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +129,21 @@ class DemoParseService:
             progress_callback=progress_callback,
         )
 
+    async def parse_ids(
+        self, demo_file_ids: list[int], *, replace_existing: bool = True,
+        progress_callback: Callable[[int, int, DemoParseFileResult | None], Awaitable[None]] | None = None,
+    ) -> DemoParseResponse:
+        """Parse exactly the successfully stored uploads, never a broader filter."""
+        unique_ids = list(dict.fromkeys(demo_file_ids))
+        demos = list((await self.session.execute(select(DemoFile).where(
+            DemoFile.id.in_(unique_ids)))).scalars()) if unique_ids else []
+        by_id = {demo.id: demo for demo in demos}
+        ordered = [by_id[demo_id] for demo_id in unique_ids if demo_id in by_id]
+        return await self._parse_demos(
+            ordered, replace_existing, tournament_name="Uploaded demos", year=0,
+            progress_callback=progress_callback,
+        )
+
     async def _parse_demos(
         self,
         demos: list[DemoFile],
@@ -136,17 +155,32 @@ class DemoParseService:
     ) -> DemoParseResponse:
         results: list[DemoParseFileResult] = []
         affected: set[int] = set()
+        # A rollback in parse_one expires every ORM instance attached to the
+        # shared session, including demos that have not been processed yet.
+        # Keep plain IDs and explicitly reload each row in async context so a
+        # failed file cannot make the next iteration perform implicit IO.
+        demo_ids = [demo.id for demo in demos]
         if progress_callback is not None:
-            await progress_callback(0, len(demos), None)
-        for demo in demos:
+            await progress_callback(0, len(demo_ids), None)
+        for demo_id in demo_ids:
+            demo = await self.session.get(DemoFile, demo_id, populate_existing=True)
+            if demo is None:
+                result = DemoParseFileResult(
+                    demo_file_id=demo_id, filename=f"demo:{demo_id}",
+                    status="failed", error="Demo file disappeared during parsing.",
+                )
+                results.append(result)
+                if progress_callback is not None:
+                    await progress_callback(len(results), len(demo_ids), result)
+                continue
             result, player_ids = await self.parse_one(demo, replace_existing)
             results.append(result)
             affected.update(player_ids)
             if progress_callback is not None:
-                await progress_callback(len(results), len(demos), result)
+                await progress_callback(len(results), len(demo_ids), result)
         recalculated = await recalculate_players_internal_rating(self.session, affected)
         return DemoParseResponse(
-            tournament_name=tournament_name, year=year, total_files=len(demos),
+            tournament_name=tournament_name, year=year, total_files=len(demo_ids),
             parsed_count=sum(item.status == "parsed" for item in results),
             skipped_count=sum(item.status == "skipped" for item in results),
             failed_count=sum(item.status == "failed" for item in results),
@@ -163,12 +197,44 @@ class DemoParseService:
         await recalculate_players_internal_rating(self.session, affected)
         return result, affected
 
+    async def _replace_swing_source_events(self, demo_file_id: int, parsed_demo: ParsedDemo) -> None:
+        """Persist parser-independent inputs so future Swing versions only recalculate."""
+        await self.session.execute(delete(DemoDamageEvent).where(DemoDamageEvent.demo_file_id == demo_file_id))
+        await self.session.execute(delete(DemoBombEvent).where(DemoBombEvent.demo_file_id == demo_file_id))
+        rounds = list((await self.session.execute(select(DemoRound).where(
+            DemoRound.demo_file_id == demo_file_id))).scalars())
+        round_by_number = {row.round_number: row for row in rounds}
+        players = list((await self.session.execute(select(DemoPlayerStat).where(
+            DemoPlayerStat.demo_file_id == demo_file_id))).scalars())
+        player_by_key = {row.identity_key: row for row in players}
+        for event in parsed_demo.damage_events:
+            rnd = round_by_number.get(event.gameplay_round_number or event.round_number)
+            if rnd is None or event.tick <= 0 or event.attacker.team_num == event.victim.team_num: continue
+            attacker = player_by_key.get(event.attacker.key); victim = player_by_key.get(event.victim.key)
+            self.session.add(DemoDamageEvent(demo_file_id=demo_file_id, round_id=rnd.id, tick=event.tick,
+                attacker_player_id=attacker.player_id if attacker else None, victim_player_id=victim.player_id if victim else None,
+                attacker_identity_key=event.attacker.key, victim_identity_key=event.victim.key,
+                attacker_side="T" if event.attacker.team_num == 2 else "CT" if event.attacker.team_num == 3 else None,
+                victim_side="T" if event.victim.team_num == 2 else "CT" if event.victim.team_num == 3 else None,
+                health_damage=max(0, event.damage)))
+        for event in parsed_demo.bomb_events:
+            rnd = round_by_number.get(event.gameplay_round_number)
+            if rnd is not None and event.tick > 0:
+                self.session.add(DemoBombEvent(demo_file_id=demo_file_id, round_id=rnd.id,
+                    tick=event.tick, event_kind=event.event_kind, bombsite=event.bombsite))
+
     async def parse_one(
         self, demo: DemoFile, replace_existing: bool,
     ) -> tuple[DemoParseFileResult, set[int]]:
+        # rollback() expires ORM state even when expire_on_commit=False. Keep
+        # scalar diagnostics outside the ORM object so the error handler never
+        # triggers an implicit async lazy load (MissingGreenlet) and masks the
+        # actual parser/database exception.
+        demo_id = demo.id
+        demo_filename = demo.original_filename
         run = (
             await self.session.execute(select(DemoParseRun).where(
-                DemoParseRun.demo_file_id == demo.id,
+                DemoParseRun.demo_file_id == demo_id,
             ))
         ).scalar_one_or_none()
         if run and run.status == "success" and not replace_existing:
@@ -224,6 +290,44 @@ class DemoParseService:
                             parsed_demo.map_result.team_a_name,
                             parsed_demo.map_result.team_b_name,
                         ),
+                        kills=[
+                            type(kill)(
+                                kill.round_number, kill.victim, kill.attacker, kill.assister,
+                                kill.tick, kill.weapon, kill.is_headshot,
+                                (kill.gameplay_round_number or kill.round_number) + offset,
+                            )
+                            for item, offset in zip([*previous, parsed_demo], [
+                                sum(
+                                    sum(not round_item.is_warmup and not round_item.is_restart and round_item.is_complete
+                                        for round_item in part_demo.rounds)
+                                    for part_demo in previous[:index]
+                                )
+                                for index in range(len(previous) + 1)
+                            ])
+                            for kill in item.kills
+                        ],
+                        utility_events=[
+                            replace(event, gameplay_round_number=event.gameplay_round_number + offset)
+                            for item, offset in zip([*previous, parsed_demo], [
+                                sum(
+                                    sum(not round_item.is_warmup and not round_item.is_restart and round_item.is_complete
+                                        for round_item in part_demo.rounds)
+                                    for part_demo in previous[:index]
+                                )
+                                for index in range(len(previous) + 1)
+                            ])
+                            for event in item.utility_events
+                        ],
+                        damage_events=[
+                            replace(event, gameplay_round_number=(event.gameplay_round_number or event.round_number) + offset)
+                            for item, offset in zip([*previous, parsed_demo], [sum(len(p.rounds) for p in previous[:index]) for index in range(len(previous)+1)])
+                            for event in item.damage_events
+                        ],
+                        bomb_events=[
+                            replace(event, gameplay_round_number=event.gameplay_round_number + offset)
+                            for item, offset in zip([*previous, parsed_demo], [sum(len(p.rounds) for p in previous[:index]) for index in range(len(previous)+1)])
+                            for event in item.bomb_events
+                        ],
                     )
             # Keep third-party/test adapters using the pre-iteration list contract
             # operational; their map result is intentionally partial, never guessed.
@@ -277,7 +381,17 @@ class DemoParseService:
                 if previous_result is not None:
                     previous_result.metadata_status = "partial"
                     previous_result.round_data_status = "partial"
+                    previous_result.bomb_data_status = "partial"
+                    previous_result.economy_data_status = "partial"
+                    previous_result.combat_data_status = "partial"
+                    previous_result.utility_data_status = "partial"
                 await self.session.execute(delete(DemoTeamSideStat).where(DemoTeamSideStat.demo_file_id == previous_part.id))
+                await self.session.execute(delete(DemoTeamBombStat).where(DemoTeamBombStat.demo_file_id == previous_part.id))
+                await self.session.execute(delete(DemoTeamEconomyStat).where(DemoTeamEconomyStat.demo_file_id == previous_part.id))
+                await self.session.execute(delete(DemoKill).where(DemoKill.demo_file_id == previous_part.id))
+                await self.session.execute(delete(DemoTeamCombatStat).where(DemoTeamCombatStat.demo_file_id == previous_part.id))
+                await self.session.execute(delete(DemoUtilityEvent).where(DemoUtilityEvent.demo_file_id == previous_part.id))
+                await self.session.execute(delete(DemoTeamUtilityStat).where(DemoTeamUtilityStat.demo_file_id == previous_part.id))
             await self.session.execute(delete(DemoPlayerStat).where(
                 DemoPlayerStat.demo_file_id == demo.id,
             ))
@@ -301,6 +415,12 @@ class DemoParseService:
             await self.session.flush()
             await recalculate_demo_team_side_stats(self.session, map_result)
             map_result.round_data_status = status
+            bomb_status, bomb_warnings = bomb_data_status(normalized_rounds, status)
+            map_result.bomb_data_status = bomb_status
+            await recalculate_demo_team_bomb_stats(self.session, map_result)
+            economy_status, economy_warnings = economy_data_status(normalized_rounds, status)
+            map_result.economy_data_status = economy_status
+            await recalculate_demo_team_economy_stats(self.session, map_result)
             blocking_round_issues = {
                 "unknown_round_side", "unknown_round_winner",
                 "round_score_mismatch", "invalid_score_transition",
@@ -311,6 +431,8 @@ class DemoParseService:
             )
             diagnostics.extend(round_warnings)
             diagnostics.extend(consistency_warnings)
+            diagnostics.extend(bomb_warnings)
+            diagnostics.extend(economy_warnings)
             diagnostics = list(dict.fromkeys(diagnostics))
             linked_ids: set[int] = set()
             unlinked_players: list[dict[str, str | None]] = []
@@ -351,6 +473,14 @@ class DemoParseService:
             run.status = "success"
             run.finished_at = datetime.now(UTC)
             await self.session.flush()
+            diagnostics.extend(await replace_demo_combat(
+                self.session, map_result, parsed_demo.kills, status,
+            ))
+            diagnostics.extend(await replace_demo_utility(
+                self.session, map_result, parsed_demo.utility_events, status,
+            ))
+            await self.session.flush()
+            await self._replace_swing_source_events(demo.id, parsed_demo)
             await resolve_demo_rosters(self.session, demo.id, replace_existing=replace_existing)
             await recalculate_demo_affected_aggregates(self.session, demo.id)
             # A series cannot be identified until both organizations are linked.
@@ -371,17 +501,18 @@ class DemoParseService:
                 diagnostics=diagnostics,
             ), old_ids | linked_ids
         except Exception as error:
+            original_error = str(error)
             await self.session.rollback()
             run = (
                 await self.session.execute(select(DemoParseRun).where(
-                    DemoParseRun.demo_file_id == demo.id,
+                    DemoParseRun.demo_file_id == demo_id,
                 ))
             ).scalar_one()
             run.status = "success" if previous_success else "failed"
             run.finished_at = datetime.now(UTC)
-            run.error_message = str(error)[:2000]
+            run.error_message = original_error[:2000]
             await self.session.commit()
             return DemoParseFileResult(
-                demo_file_id=demo.id, filename=demo.original_filename,
-                status="failed", error=str(error),
+                demo_file_id=demo_id, filename=demo_filename,
+                status="failed", error=original_error,
             ), set()

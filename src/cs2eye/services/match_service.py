@@ -27,6 +27,8 @@ class MatchMap:
     team_a_score: int | None
     team_b_score: int | None
     winner_team_id: int | None
+    map_role: str
+    picked_by_team_id: int | None
 
 
 @dataclass(frozen=True)
@@ -74,10 +76,15 @@ class MatchService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def list(self, *, team_id: int | None = None, resolution_status: str | None = None) -> list[MatchView]:
+    async def list(self, *, team_id: int | None = None, resolution_status: str | None = None,
+                   veto_filter: str | None = None) -> list[MatchView]:
         query = select(Match).order_by(Match.match_date.desc(), Match.id.desc())
         if team_id is not None: query = query.where(or_(Match.team_a_id == team_id, Match.team_b_id == team_id))
         if resolution_status is not None: query = query.where(Match.resolution_status == resolution_status)
+        if veto_filter == "expected_missing":
+            query = query.where(Match.resolution_status == "resolved", Match.format.in_(("bo1", "bo3", "bo5")), Match.team_a_id.is_not(None), Match.team_b_id.is_not(None), Match.veto_data_status == "not_available")
+        elif veto_filter == "has_veto": query = query.where(Match.veto_data_status != "not_available")
+        elif veto_filter is not None: raise MatchValidationError("veto_filter must be expected_missing or has_veto")
         return [await self.get(item.id) for item in (await self.session.execute(query)).scalars().all()]
 
     async def backfill(self) -> MatchBackfillResult:
@@ -131,7 +138,7 @@ class MatchService:
         score_a = result.team_a_score if normal else result.team_b_score if reverse else None
         score_b = result.team_b_score if normal else result.team_a_score if reverse else None
         winner = match.team_a_id if score_a is not None and score_b is not None and score_a > score_b else match.team_b_id if score_a is not None and score_b is not None and score_b > score_a else None
-        return MatchMap(demo.id, demo.map_number or 0, result.map_name, score_a, score_b, winner)
+        return MatchMap(demo.id, demo.map_number or 0, result.map_name, score_a, score_b, winner, demo.map_role, demo.picked_by_team_id)
 
     async def recalculate(self, match_id: int) -> MatchView:
         view = await self.get(match_id); match = view.match

@@ -14,7 +14,9 @@ from cs2eye.api.schemas.demos import (
     DemoMapResultPatch, DemoMapResultResponse, DemoMapTeamResponse,
     DemoMapWinnerResponse,
     DemoRoundsResponse, DemoRoundResponse, DemoSideStatsResponse,
-    DemoTeamSideStatResponse, SideSummary,
+    DemoTeamSideStatResponse, SideSummary, DemoBombStatsResponse, DemoTeamBombStatResponse,
+    DemoEconomyStatsResponse, DemoTeamEconomyStatResponse, EconomyMetricResponse,
+    DemoCombatStatsResponse, DemoUtilityStatsResponse,
 )
 from cs2eye.core.config import settings
 from cs2eye.db.session import get_db_session
@@ -22,7 +24,8 @@ from cs2eye.services.demo_storage_service import DemoStorageService, make_tourna
 from cs2eye.services.demo_parse_service import DemoParseService
 from cs2eye.services.demo_parse_job_service import demo_parse_job_manager
 from cs2eye.models.demo import (
-    DemoMapResult, DemoParseRun, DemoPlayerStat, DemoRound, DemoTeamSideStat,
+    DemoMapResult, DemoParseRun, DemoPlayerStat, DemoRound, DemoTeamBombStat,
+    DemoTeamCombatStat, DemoTeamEconomyStat, DemoTeamSideStat, DemoTeamUtilityStat,
 )
 from cs2eye.models.team import Team
 from cs2eye.models.demo_file import DemoFile
@@ -97,6 +100,10 @@ def map_result_response(result: DemoMapResult, issues: list[str] | None = None) 
         result_source=result.result_source, metadata_status=result.metadata_status,
         issues=issues or [],
         round_data_status=result.round_data_status,
+        bomb_data_status=result.bomb_data_status,
+        economy_data_status=result.economy_data_status,
+        combat_data_status=result.combat_data_status,
+        utility_data_status=result.utility_data_status,
         rounds_parsed_count=result.rounds_parsed_count,
         rounds_expected_count=result.rounds_count,
         rounds_consistent=(
@@ -120,16 +127,25 @@ async def upload_demos(
     tournament_name: str = Form(...),
     event_type: Literal["online", "lan"] = Form(...),
     match_date: date = Form(...),
+    parse_after_upload: bool = Form(False),
     files: list[UploadFile] = File(...),
     session: AsyncSession = Depends(get_db_session),
 ) -> DemoUploadResponse:
     name = validate_tournament_name(tournament_name)
     if not files:
         raise HTTPException(status_code=422, detail="At least one demo file is required.")
-    return await DemoStorageService(
+    result = await DemoStorageService(
         session, settings.demo_storage_root, settings.demo_max_file_size_bytes,
         settings.demo_archive_max_depth,
     ).upload(name, event_type, match_date, files)
+    if parse_after_upload:
+        # A failed upload has no id and is deliberately excluded. Unchanged
+        # files are valid stored demos and may be parsed if still pending.
+        demo_ids = [item.id for item in result.files if item.id is not None and item.status != "failed"]
+        if demo_ids:
+            job = demo_parse_job_manager.start_for_files(demo_ids, replace_existing=False)
+            result.parse_job_id, result.parse_job_status = job.job_id, job.status
+    return result
 
 
 @router.get("", response_model=DemoListResponse)
@@ -303,8 +319,47 @@ async def demo_player_stats(
             opponent_rank_group=item.opponent_rank_group,
             opponent_rank_source=item.opponent_rank_source,
             opponent_rank_snapshot_date=item.opponent_rank_snapshot_date,
+            combat=item.combat_data,
+            utility=item.utility_data,
         ) for item in stats],
     )
+
+
+@router.get("/{demo_file_id}/combat-stats", response_model=DemoCombatStatsResponse)
+async def get_demo_combat_stats(
+    demo_file_id: int, session: AsyncSession = Depends(get_db_session),
+) -> DemoCombatStatsResponse:
+    result = (await session.execute(select(DemoMapResult).where(
+        DemoMapResult.demo_file_id == demo_file_id))).scalar_one_or_none()
+    if result is None:
+        raise HTTPException(status_code=404, detail="Demo map result not found.")
+    teams = list((await session.execute(select(DemoTeamCombatStat).where(
+        DemoTeamCombatStat.demo_file_id == demo_file_id).order_by(DemoTeamCombatStat.team_name))).scalars())
+    players = list((await session.execute(select(DemoPlayerStat).where(
+        DemoPlayerStat.demo_file_id == demo_file_id).order_by(DemoPlayerStat.nickname))).scalars())
+    return DemoCombatStatsResponse(
+        demo_file_id=demo_file_id, map_name=result.map_name,
+        combat_data_status=result.combat_data_status,
+        teams=[{"team_id": item.team_id, "team_name": item.team_name, **item.combat_data} for item in teams],
+        players=[{"player_id": item.player_id, "nickname": item.nickname,
+                  "team_id": item.demo_team_id, "team_name": item.demo_team_name,
+                  **(item.combat_data or {})} for item in players],
+    )
+
+
+@router.get("/{demo_file_id}/utility-stats", response_model=DemoUtilityStatsResponse)
+async def get_demo_utility_stats(demo_file_id: int, session: AsyncSession = Depends(get_db_session)) -> DemoUtilityStatsResponse:
+    result = (await session.execute(select(DemoMapResult).where(DemoMapResult.demo_file_id == demo_file_id))).scalar_one_or_none()
+    if result is None: raise HTTPException(status_code=404, detail="Demo map result not found.")
+    teams = list((await session.execute(select(DemoTeamUtilityStat).where(
+        DemoTeamUtilityStat.demo_file_id == demo_file_id).order_by(DemoTeamUtilityStat.team_name))).scalars())
+    players = list((await session.execute(select(DemoPlayerStat).where(
+        DemoPlayerStat.demo_file_id == demo_file_id).order_by(DemoPlayerStat.nickname))).scalars())
+    return DemoUtilityStatsResponse(
+        demo_file_id=demo_file_id, map_name=result.map_name, utility_data_status=result.utility_data_status,
+        teams=[{"team_id": row.team_id, "team_name": row.team_name, **row.utility_data} for row in teams],
+        players=[{"player_id": row.player_id, "nickname": row.nickname, "team_id": row.demo_team_id,
+                  "team_name": row.demo_team_name, **(row.utility_data or {})} for row in players])
 
 
 @router.get("/{demo_file_id}/map-result", response_model=DemoMapResultResponse)
@@ -364,6 +419,8 @@ async def patch_demo_map_result(
     }
     if supplied.intersection(round_sensitive_fields):
         current.round_data_status = "needs_review"
+        current.bomb_data_status = "needs_review"
+        current.economy_data_status = "needs_review"
     stat_names = set((await session.execute(select(DemoPlayerStat.demo_team_name).where(DemoPlayerStat.demo_file_id == demo_file_id))).scalars().all())
     result_names = {current.team_a_name, current.team_b_name}
     issues = [issue.code for issue in normalized.issues]
@@ -429,6 +486,86 @@ async def get_demo_side_stats(
     if result is None: raise HTTPException(status_code=404, detail="Demo map result not found.")
     stats = list((await session.execute(select(DemoTeamSideStat).where(DemoTeamSideStat.demo_file_id == demo_file_id).order_by(DemoTeamSideStat.id))).scalars().all())
     return DemoSideStatsResponse(demo_file_id=demo_file_id, map_name=result.map_name, round_data_status=result.round_data_status, teams=[side_stat_response(item) for item in stats])
+
+
+def bomb_stat_response(item: DemoTeamBombStat) -> DemoTeamBombStatResponse:
+    return DemoTeamBombStatResponse(
+        team_id=item.team_id, team_name=item.team_name,
+        t_rounds_played=item.t_rounds_played, plants=item.bomb_plants, plant_rate=item.plant_rate,
+        postplant_rounds=item.postplant_rounds, postplant_wins=item.postplant_wins,
+        postplant_losses=item.postplant_losses, postplant_win_rate=item.postplant_win_rate,
+        retake_opportunities=item.retake_opportunities, retake_wins=item.retake_wins,
+        retake_losses=item.retake_losses, retake_win_rate=item.retake_win_rate,
+        explosions=item.bomb_explosions, defuses=item.bomb_defuses,
+    )
+
+
+@router.get("/{demo_file_id}/bomb-stats", response_model=DemoBombStatsResponse)
+async def get_demo_bomb_stats(
+    demo_file_id: int, session: AsyncSession = Depends(get_db_session),
+) -> DemoBombStatsResponse:
+    result = (await session.execute(select(DemoMapResult).where(DemoMapResult.demo_file_id == demo_file_id))).scalar_one_or_none()
+    if result is None: raise HTTPException(status_code=404, detail="Demo map result not found.")
+    stats = list((await session.execute(select(DemoTeamBombStat).where(
+        DemoTeamBombStat.demo_file_id == demo_file_id,
+    ).order_by(DemoTeamBombStat.id))).scalars().all())
+    return DemoBombStatsResponse(
+        demo_file_id=demo_file_id, map_name=result.map_name,
+        bomb_data_status=result.bomb_data_status,
+        teams=[bomb_stat_response(item) for item in stats],
+    )
+
+
+def _economy_metric(wins: int, rounds: int) -> EconomyMetricResponse:
+    from decimal import Decimal
+    rate = Decimal(wins) * 100 / Decimal(rounds) if rounds else None
+    return EconomyMetricResponse(
+        rounds=rounds, wins=wins, losses=rounds - wins,
+        win_rate=rate.quantize(Decimal("0.0001")) if rate is not None else None,
+    )
+
+
+def economy_stat_response(item: DemoTeamEconomyStat) -> DemoTeamEconomyStatResponse:
+    pairs = {
+        "pistol": (item.pistol_rounds_won, item.pistol_rounds_played),
+        "first_pistol": (item.first_pistol_wins, item.first_pistol_opportunities),
+        "second_pistol": (item.second_pistol_wins, item.second_pistol_opportunities),
+        "both_pistols": (item.both_pistols_wins, item.both_pistols_opportunities),
+        "conversion": (item.pistol_conversions, item.pistol_conversion_opportunities),
+        "post_pistol_vs_force": (item.post_pistol_vs_force_wins, item.post_pistol_vs_force_rounds),
+        "second_round_comeback": (item.second_round_comeback_wins, item.second_round_comeback_opportunities),
+        "eco": (item.eco_wins, item.eco_rounds),
+        "force_buy": (item.force_buy_wins, item.force_buy_rounds),
+        "full_buy": (item.full_buy_wins, item.full_buy_rounds),
+        "anti_eco": (item.anti_eco_wins, item.anti_eco_rounds),
+        "full_buy_vs_full_buy": (item.full_buy_vs_full_buy_wins, item.full_buy_vs_full_buy_rounds),
+        "force_vs_full_buy": (item.force_vs_full_buy_wins, item.force_vs_full_buy_rounds),
+    }
+    return DemoTeamEconomyStatResponse(
+        team_id=item.team_id, team_name=item.team_name,
+        **{key: _economy_metric(*value) for key, value in pairs.items()},
+        save_rounds=item.save_rounds, players_saved=item.players_saved,
+        save_data_status=item.save_data_status,
+    )
+
+
+@router.get("/{demo_file_id}/economy-stats", response_model=DemoEconomyStatsResponse)
+async def get_demo_economy_stats(
+    demo_file_id: int, session: AsyncSession = Depends(get_db_session),
+) -> DemoEconomyStatsResponse:
+    result = (await session.execute(select(DemoMapResult).where(
+        DemoMapResult.demo_file_id == demo_file_id,
+    ))).scalar_one_or_none()
+    if result is None:
+        raise HTTPException(status_code=404, detail="Результат карты demo не найден.")
+    stats = list((await session.execute(select(DemoTeamEconomyStat).where(
+        DemoTeamEconomyStat.demo_file_id == demo_file_id,
+    ).order_by(DemoTeamEconomyStat.id))).scalars())
+    return DemoEconomyStatsResponse(
+        demo_file_id=demo_file_id, map_name=result.map_name,
+        economy_data_status=result.economy_data_status,
+        teams=[economy_stat_response(item) for item in stats],
+    )
 
 
 @router.post("/{demo_file_id}/recalculate-side-stats", response_model=DemoSideStatsResponse)

@@ -26,6 +26,13 @@ class MatchScoreResponse(BaseModel):
 class MatchMapResponse(BaseModel):
     map_number: int; map_name: str | None; team_a_score: int | None; team_b_score: int | None
     winner_team_id: int | None; demo_file_id: int
+    map_role: Literal["team_pick", "opponent_pick", "decider", "unknown"] = "unknown"
+    picked_by_team_id: int | None = None
+
+class MatchVetoActionResponse(BaseModel):
+    id: int; order_index: int; team_id: int | None; team_name: str | None
+    action: Literal["ban", "pick", "decider"]; map_name: str
+    source: str; source_external_id: str | None
 
 
 class MatchResponse(BaseModel):
@@ -34,6 +41,9 @@ class MatchResponse(BaseModel):
     status: str; resolution_status: MatchResolution; is_playoff: bool; is_elimination: bool
     team_a: MatchTeamResponse; team_b: MatchTeamResponse; score: MatchScoreResponse
     winner_team_id: int | None; maps: list[MatchMapResponse]
+    veto_data_status: Literal["not_available", "complete", "partial", "needs_review", "invalid"]
+    veto_expected: bool
+    veto: list[MatchVetoActionResponse]
 
 
 class MatchListResponse(BaseModel):
@@ -58,6 +68,16 @@ class MatchReorderRequest(BaseModel):
 
 class MatchSplitRequest(BaseModel):
     demo_file_ids: list[int] | None = None
+
+class MatchVetoActionRequest(BaseModel):
+    order_index: int = Field(ge=1); team_id: int | None = None; team_name: str | None = None
+    action: Literal["ban", "pick", "decider"]; map_name: str; source_external_id: str | None = None
+
+class MatchVetoUpdateRequest(BaseModel):
+    actions: list[MatchVetoActionRequest] | None = None
+    text: str | None = None
+    status: Literal["not_available", "complete", "partial", "needs_review", "invalid"] | None = None
+    source_external_id: str | None = None
 
 
 class MatchStatLineResponse(BaseModel):

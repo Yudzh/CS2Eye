@@ -38,6 +38,10 @@ class DeathEvent:
     victim: PlayerRef
     attacker: PlayerRef | None
     assister: PlayerRef | None
+    tick: int = 0
+    weapon: str | None = None
+    is_headshot: bool | None = None
+    gameplay_round_number: int | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,29 @@ class DamageEvent:
     attacker: PlayerRef
     victim: PlayerRef
     damage: int
+    tick: int = 0
+    gameplay_round_number: int | None = None
+
+
+@dataclass(frozen=True)
+class BombEvent:
+    event_kind: str
+    tick: int
+    gameplay_round_number: int
+    bombsite: str | None = None
+
+
+@dataclass(frozen=True)
+class UtilityEvent:
+    event_kind: str
+    tick: int
+    gameplay_round_number: int
+    player: PlayerRef
+    grenade_type: str
+    raw_grenade_type: str
+    target: PlayerRef | None = None
+    damage: int | None = None
+    flash_duration: Decimal | None = None
 
 
 @dataclass
@@ -74,10 +101,22 @@ class ParsedDemo:
     map_result: ParsedMapResult
     player_stats: list[ParsedDemoPlayerStat]
     rounds: list[ParsedRound] = None
+    kills: list[DeathEvent] = None
+    utility_events: list[UtilityEvent] = None
+    damage_events: list[DamageEvent] = None
+    bomb_events: list[BombEvent] = None
 
     def __post_init__(self) -> None:
         if self.rounds is None:
             self.rounds = []
+        if self.kills is None:
+            self.kills = []
+        if self.utility_events is None:
+            self.utility_events = []
+        if self.damage_events is None:
+            self.damage_events = []
+        if self.bomb_events is None:
+            self.bomb_events = []
 
     def __iter__(self):
         """Preserve the old adapter's iterable player-stat contract."""
@@ -174,13 +213,32 @@ def aggregate_player_events(
 
 
 def _rows(frame: Any) -> list[dict[str, Any]]:
-    return frame.to_dicts() if hasattr(frame, "to_dicts") else frame.to_dict("records")
+    if frame is None:
+        return []
+    if isinstance(frame, dict):
+        return [frame]
+    if isinstance(frame, (list, tuple)):
+        rows: list[dict[str, Any]] = []
+        for item in frame:
+            rows.extend(_rows(item))
+        return rows
+    if hasattr(frame, "to_dicts"):
+        return frame.to_dicts()
+    if hasattr(frame, "to_dict"):
+        converted = frame.to_dict("records")
+        return converted if isinstance(converted, list) else [converted]
+    raise TypeError(f"Unsupported demoparser2 tabular result: {type(frame).__name__}")
 
 
 def _value(row: dict[str, Any], *names: str, default: Any = None) -> Any:
     for name in names:
         if name in row and row[name] is not None:
-            return row[name]
+            value = row[name]
+            # pandas represents absent demoparser scalar values as NaN. Treat
+            # them as missing; otherwise "nan" becomes a fake player/team.
+            if isinstance(value, float) and value != value:
+                continue
+            return value
     return default
 
 
@@ -205,6 +263,21 @@ def is_valid_round_row(row: dict[str, Any]) -> bool:
     return not bool(_value(row, "is_warmup_period", default=False)) and not bool(
         _value(row, "is_technical_timeout", default=False),
     )
+
+
+def is_restart_round_row(row: dict[str, Any]) -> bool:
+    reason = _value(row, "reason", "end_reason", "round_end_reason", "round_win_reason")
+    return bool(_value(row, "is_game_restart", default=False)) or str(reason).strip().casefold() in {
+        "game_commencing", "15",
+    }
+
+
+def is_gameplay_round_end_row(row: dict[str, Any]) -> bool:
+    if not is_valid_round_row(row) or is_restart_round_row(row):
+        return False
+    winner_fields_present = any(name in row for name in ("winner", "winner_side", "team_num"))
+    winner = _value(row, "winner", "winner_side", "team_num")
+    return not winner_fields_present or winner in {2, 3, "2", "3", "T", "CT"}
 
 
 def completed_rounds_count(rows: list[dict[str, Any]]) -> int:
@@ -233,7 +306,137 @@ class Demoparser2Adapter:
             ],
         ))
         valid = [row for row in round_rows if is_valid_round_row(row)]
+        round_start_rows = [row for row in _rows(parser.parse_event(
+            "round_start", other=[
+                "total_rounds_played", "is_warmup_period", "is_technical_timeout", "is_game_restart",
+            ],
+        )) if is_valid_round_row(row) and not bool(_value(row, "is_game_restart", default=False))]
+        round_start_ticks = sorted({
+            int(row["tick"]) for row in round_start_rows if row.get("tick") is not None
+        })
+        freeze_rows = [row for row in _rows(parser.parse_event(
+            "round_freeze_end", other=[
+                "total_rounds_played", "is_warmup_period", "is_technical_timeout", "is_game_restart",
+            ],
+        )) if is_valid_round_row(row) and not bool(_value(row, "is_game_restart", default=False))]
+        freeze_ticks = sorted({int(row["tick"]) for row in freeze_rows if row.get("tick") is not None})
+        equipment_by_freeze_tick: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+        if freeze_ticks:
+            for item in _rows(parser.parse_ticks(
+                ["team_num", "current_equip_value"], ticks=freeze_ticks,
+            )):
+                tick = int(_value(item, "tick", default=-1))
+                team_num = _value(item, "team_num")
+                value = _value(item, "current_equip_value")
+                if tick >= 0 and team_num in {2, 3} and value is not None:
+                    equipment_by_freeze_tick[tick][int(team_num)] += max(0, int(value))
+        bomb_events_without_ticks: dict[int, set[str]] = defaultdict(set)
+        bomb_events_with_ticks: list[tuple[int, str]] = []
+        for event_name in ("bomb_planted", "bomb_defused", "bomb_exploded"):
+            for row in _rows(parser.parse_event(event_name, other=[
+                "total_rounds_played", "is_warmup_period", "is_technical_timeout", "is_game_restart",
+            ])):
+                if not is_valid_round_row(row) or bool(_value(row, "is_game_restart", default=False)):
+                    continue
+                round_index = _value(row, "total_rounds_played")
+                if row.get("tick") is not None:
+                    bomb_events_with_ticks.append((int(row["tick"]), event_name))
+                elif round_index is not None:
+                    bomb_events_without_ticks[int(round_index)].add(event_name)
         ticks = [int(row["tick"]) for row in valid if row.get("tick") is not None]
+        # A bomb can explode after round_end (for example, after the last CT is
+        # killed). Its lifecycle therefore belongs to the interval beginning
+        # at round_start and ending at the next round_start, not merely to the
+        # next round_end. Fall back to the old end-tick binding for demos where
+        # round_start is unavailable.
+        gameplay_end_ticks = sorted(set(ticks))
+        combat_end_ticks = sorted({
+            int(row["tick"]) for row in valid
+            if row.get("tick") is not None and is_gameplay_round_end_row(row)
+        })
+        def gameplay_ordinal(event_tick: int) -> int:
+            return next((index + 1 for index, end_tick in enumerate(combat_end_ticks) if event_tick <= end_tick), 0)
+
+        bomb_events = [BombEvent(name.removeprefix("bomb_"), tick, gameplay_ordinal(tick))
+                       for tick, name in bomb_events_with_ticks if gameplay_ordinal(tick)]
+
+        utility_events: list[UtilityEvent] = []
+        utility_other = ["total_rounds_played", "is_warmup_period", "is_technical_timeout", "is_game_restart"]
+        grenade_aliases = {
+            "hegrenade": "he", "flashbang": "flash", "smokegrenade": "smoke",
+            "molotov": "fire", "incgrenade": "fire", "incendiary": "fire", "decoy": "decoy",
+        }
+        for row in _rows(parser.parse_event("grenade_thrown", player=["team_num", "team_clan_name"], other=utility_other)):
+            if not is_valid_round_row(row) or bool(_value(row, "is_game_restart", default=False)):
+                continue
+            player, raw = _player(row, "user_"), str(_value(row, "weapon", default="")).casefold()
+            grenade_type = grenade_aliases.get(raw)
+            tick = int(_value(row, "tick", default=-1))
+            ordinal = gameplay_ordinal(tick)
+            if player and grenade_type and ordinal:
+                utility_events.append(UtilityEvent("throw", tick, ordinal, player, grenade_type, raw))
+
+        for row in _rows(parser.parse_event("player_hurt", player=["team_num", "team_clan_name"], other=utility_other)):
+            if not is_valid_round_row(row) or bool(_value(row, "is_game_restart", default=False)):
+                continue
+            raw = str(_value(row, "weapon", default="")).casefold()
+            grenade_type = "he" if raw == "hegrenade" else "fire" if raw in {"inferno", "molotov", "incgrenade", "incendiary"} else None
+            player, target = _player(row, "attacker_"), _player(row, "user_")
+            tick = int(_value(row, "tick", default=-1)); ordinal = gameplay_ordinal(tick)
+            if player and target and grenade_type and ordinal:
+                utility_events.append(UtilityEvent("damage", tick, ordinal, player, grenade_type, raw, target, max(0, int(_value(row, "dmg_health", default=0)))))
+
+        flash_rows = _rows(parser.parse_event("flashbang_detonate", player=["team_num", "team_clan_name"], other=utility_other))
+        flash_ticks = [int(row["tick"]) for row in flash_rows if row.get("tick") is not None and is_valid_round_row(row)]
+        flashed_by_tick: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        if flash_ticks:
+            for row in _rows(parser.parse_ticks(["team_num", "team_clan_name", "flash_duration", "flash_max_alpha"], ticks=flash_ticks)):
+                if float(_value(row, "flash_duration", default=0) or 0) > 0:
+                    flashed_by_tick[int(row["tick"])].append(row)
+        for row in flash_rows:
+            if not is_valid_round_row(row):
+                continue
+            player = _player(row, "user_"); tick = int(_value(row, "tick", default=-1)); ordinal = gameplay_ordinal(tick)
+            if not player or not ordinal:
+                continue
+            for affected in flashed_by_tick.get(tick, []):
+                target = _player(affected)
+                if target:
+                    utility_events.append(UtilityEvent("flash", tick, ordinal, player, "flash", "flashbang", target,
+                                                       flash_duration=Decimal(str(_value(affected, "flash_duration")))))
+        # Связываем freeze time с round_end по физическому tick-интервалу. В
+        # split-demo счётчик total_rounds_played у этих событий иногда сдвинут
+        # на единицу или продолжает счёт из предыдущей части, поэтому он не
+        # является надёжным ключом economy snapshot.
+        equipment_by_end_tick: dict[int, dict[int, int]] = {}
+        previous_end_tick: int | None = None
+        for end_tick in gameplay_end_ticks:
+            candidates = [
+                freeze_tick for freeze_tick in freeze_ticks
+                if freeze_tick <= end_tick
+                and (previous_end_tick is None or freeze_tick > previous_end_tick)
+            ]
+            if candidates:
+                equipment_by_end_tick[end_tick] = dict(
+                    equipment_by_freeze_tick[max(candidates)]
+                )
+            previous_end_tick = end_tick
+        bomb_events_by_end_tick: dict[int, set[str]] = defaultdict(set)
+        if round_start_ticks:
+            lifecycle_by_start_tick: dict[int, set[str]] = defaultdict(set)
+            for event_tick, event_name in bomb_events_with_ticks:
+                start_tick = next((candidate for candidate in reversed(round_start_ticks) if candidate <= event_tick), None)
+                if start_tick is not None:
+                    lifecycle_by_start_tick[start_tick].add(event_name)
+            for end_tick in gameplay_end_ticks:
+                start_tick = next((candidate for candidate in reversed(round_start_ticks) if candidate <= end_tick), None)
+                if start_tick is not None:
+                    bomb_events_by_end_tick[end_tick].update(lifecycle_by_start_tick.get(start_tick, set()))
+        else:
+            for event_tick, event_name in bomb_events_with_ticks:
+                end_tick = next((candidate for candidate in gameplay_end_ticks if candidate >= event_tick), None)
+                if end_tick is not None:
+                    bomb_events_by_end_tick[end_tick].add(event_name)
         round_by_tick = {int(row["tick"]): int(_value(row, "total_rounds_played", default=index + 1)) for index, row in enumerate(valid) if row.get("tick") is not None}
         tick_rows = _rows(parser.parse_ticks(
             ["team_clan_name", "team_num", "team_rounds_total", "team_score_overtime", "is_alive"],
@@ -250,16 +453,35 @@ class Demoparser2Adapter:
         death_events: list[DeathEvent] = []
         for row in _rows(parser.parse_event(
             "player_death", player=["team_num"],
-            other=["total_rounds_played", "is_warmup_period", "is_technical_timeout"],
+            other=["total_rounds_played", "is_warmup_period", "is_technical_timeout", "is_game_restart", "noreplay"],
         )):
-            if _value(row, "is_warmup_period", default=False) or _value(row, "is_technical_timeout", default=False):
+            if (_value(row, "is_warmup_period", default=False) or _value(row, "is_technical_timeout", default=False)
+                    or _value(row, "is_game_restart", default=False)
+                    or _value(row, "noreplay", default=False)):
                 continue
             victim = _player(row, "user_")
             if victim:
+                event_tick = int(_value(row, "tick", default=0))
+                # Bind combat events to the same accepted gameplay round_end
+                # sequence that feeds normalized rounds; parser round counters
+                # are unreliable in split demos and around restarts.
+                ordinal = next((index + 1 for index, end_tick in enumerate(combat_end_ticks) if event_tick <= end_tick), 0)
+                # demoparser2 also emits player_death during post-match cleanup.
+                # Such an event is outside every accepted gameplay round and is
+                # intentionally ignored instead of poisoning combat_data_status.
+                if ordinal == 0:
+                    continue
                 death_events.append(DeathEvent(
                     int(_value(row, "total_rounds_played", default=0)), victim,
                     _player(row, "attacker_"), _player(row, "assister_"),
+                    event_tick, str(_value(row, "weapon")) if _value(row, "weapon") else None,
+                    bool(_value(row, "headshot")) if _value(row, "headshot") is not None else None,
+                    ordinal,
                 ))
+                if bool(_value(row, "assistedflash", default=False)):
+                    flash_assister = _player(row, "assister_")
+                    if flash_assister:
+                        utility_events.append(UtilityEvent("flash_assist", event_tick, ordinal, flash_assister, "flash", "flashbang", victim))
         damage_events: list[DamageEvent] = []
         for row in _rows(parser.parse_event(
             "player_hurt", player=["team_num"],
@@ -272,6 +494,7 @@ class Demoparser2Adapter:
                 damage_events.append(DamageEvent(
                     int(_value(row, "total_rounds_played", default=0)), attacker,
                     victim, int(_value(row, "dmg_health", default=0)),
+                    int(_value(row, "tick", default=0)), gameplay_ordinal(int(_value(row, "tick", default=0))),
                 ))
         header = parser.parse_header() or {} if hasattr(parser, "parse_header") else {}
         raw_map_name = _value(header, "map_name", "map", "mapname")
@@ -308,14 +531,25 @@ class Demoparser2Adapter:
                 if name and score is not None
             }
             raw_reason = _value(row, "reason", "end_reason", "round_end_reason", "round_win_reason")
+            raw_round_index = int(_value(row, "total_rounds_played", default=len(parsed_rounds)))
+            lifecycle = (
+                bomb_events_by_end_tick.get(tick, set()) if tick >= 0
+                else bomb_events_without_ticks.get(raw_round_index, set())
+            )
             parsed_rounds.append(ParsedRound(
-                raw_round_index=int(_value(row, "total_rounds_played", default=len(parsed_rounds))),
+                raw_round_index=raw_round_index,
                 winner_side=_value(row, "winner", "winner_side", "team_num"),
                 t_team_name=t_state[0], ct_team_name=ct_state[0], end_reason=raw_reason,
                 raw_scores_after=scores, is_warmup=False,
                 is_restart=bool(_value(row, "is_game_restart", default=False)) or str(raw_reason).casefold() in {"game_commencing", "15"},
                 is_complete=_value(row, "winner", "winner_side", "team_num") in {2, 3, "2", "3", "T", "CT"},
                 ended_at_tick=tick if tick >= 0 else None, duration_seconds=duration,
+                started_at_tick=next((candidate for candidate in reversed(round_start_ticks) if candidate <= tick), None),
+                bomb_planted="bomb_planted" in lifecycle,
+                bomb_defused="bomb_defused" in lifecycle,
+                bomb_exploded="bomb_exploded" in lifecycle,
+                t_equipment_value=equipment_by_end_tick.get(tick, {}).get(2),
+                ct_equipment_value=equipment_by_end_tick.get(tick, {}).get(3),
             ))
         return ParsedDemo(
             map_result=ParsedMapResult(
@@ -330,4 +564,8 @@ class Demoparser2Adapter:
             ),
             player_stats=aggregate_player_events(snapshots, death_events, damage_events),
             rounds=parsed_rounds,
+            kills=death_events,
+            utility_events=utility_events,
+            damage_events=damage_events,
+            bomb_events=bomb_events,
         )

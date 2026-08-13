@@ -1,6 +1,6 @@
 from cs2eye.models.demo import DemoMapResult
 from cs2eye.services.demo_round_service import (
-    ParsedRound, normalize_end_reason, normalize_rounds, round_data_status,
+    ParsedRound, bomb_data_status, normalize_end_reason, normalize_rounds, round_data_status,
 )
 
 
@@ -89,6 +89,31 @@ def test_repeated_raw_number_with_new_score_is_not_a_duplicate():
     assert rounds[-1].team_b_score_after == 2
 
 
+def test_physical_duplicate_keeps_later_authoritative_interval():
+    result = map_result(1, 0)
+    rounds, warnings = normalize_rounds([
+        ParsedRound(1, "T", "Spirit", "NAVI", started_at_tick=100, ended_at_tick=200,
+                    raw_scores_after={"Spirit": 1, "NAVI": 0}, end_reason="ct_killed"),
+        ParsedRound(1, "T", "Spirit", "NAVI", started_at_tick=300, ended_at_tick=500,
+                    raw_scores_after={"Spirit": 1, "NAVI": 0}, end_reason="ct_killed"),
+    ], result)
+    assert len(rounds) == 1
+    assert (rounds[0].started_at_tick, rounds[0].ended_at_tick) == (300, 500)
+    assert "duplicate_round_event" in warnings
+
+
+def test_incomplete_service_event_cannot_replace_gameplay_interval():
+    result = map_result(1, 0)
+    rounds, warnings = normalize_rounds([
+        ParsedRound(1, "T", "Spirit", "NAVI", started_at_tick=100, ended_at_tick=500,
+                    raw_scores_after={"Spirit": 1, "NAVI": 0}, end_reason="ct_killed"),
+        ParsedRound(1, None, "Spirit", "NAVI", started_at_tick=700, ended_at_tick=700,
+                    raw_scores_after={"Spirit": 1, "NAVI": 0}, is_complete=False),
+    ], result)
+    assert (rounds[0].started_at_tick, rounds[0].ended_at_tick) == (100, 500)
+    assert "incomplete_round_skipped" in warnings
+
+
 def test_missing_winner_is_recovered_from_single_score_increment():
     result = map_result(1, 0)
     rounds, warnings = normalize_rounds([
@@ -161,3 +186,54 @@ def test_continuation_demo_keeps_initial_score_and_real_round_numbers():
     assert (rounds[0].team_a_score_before, rounds[0].team_b_score_before) == (11, 6)
     assert (rounds[-1].team_a_score_after, rounds[-1].team_b_score_after) == (13, 6)
     assert round_data_status(rounds, result) == ("partial", [])
+
+
+def bomb_round(*, reason="cts_eliminated", winner="Spirit", planted=False, defused=False, exploded=False):
+    return ParsedRound(
+        1, "T" if winner == "Spirit" else "CT", "Spirit", "NAVI",
+        end_reason=reason, raw_scores_after={"Spirit": int(winner == "Spirit"), "NAVI": int(winner == "NAVI")},
+        bomb_planted=planted, bomb_defused=defused, bomb_exploded=exploded,
+    )
+
+
+def test_bomb_lifecycle_keeps_plant_when_t_wins_by_elimination():
+    rounds, _ = normalize_rounds([bomb_round(planted=True)], map_result(1, 0))
+    assert rounds[0].bomb_planted is True
+    assert rounds[0].bomb_exploded is False
+    assert bomb_data_status(rounds, "complete") == ("complete", [])
+
+
+def test_round_before_plant_has_no_bomb_opportunity():
+    rounds, _ = normalize_rounds([bomb_round()], map_result(1, 0))
+    assert not rounds[0].bomb_planted
+
+
+def test_target_bombed_and_defused_end_reasons_guarantee_plant():
+    exploded, _ = normalize_rounds([bomb_round(reason="target_bombed")], map_result(1, 0))
+    defused, _ = normalize_rounds([bomb_round(reason="bomb_defused", winner="NAVI")], map_result(0, 1))
+    assert exploded[0].bomb_planted
+    assert defused[0].bomb_planted
+
+
+def test_bomb_event_inconsistency_requires_review():
+    rounds, _ = normalize_rounds([
+        bomb_round(reason="target_bombed", defused=True),
+    ], map_result(1, 0))
+    status, issues = bomb_data_status(rounds, "complete")
+    assert status == "needs_review"
+    assert "bomb_event_end_reason_conflict" in issues
+
+
+def test_defuse_and_explosion_together_requires_review():
+    rounds, _ = normalize_rounds([
+        bomb_round(reason="bomb_defused", winner="NAVI", planted=True, defused=True, exploded=True),
+    ], map_result(0, 1))
+    assert bomb_data_status(rounds, "complete")[0] == "needs_review"
+
+
+def test_bomb_can_explode_after_t_wins_by_elimination():
+    rounds, _ = normalize_rounds([
+        bomb_round(reason="cts_eliminated", planted=True, exploded=True),
+    ], map_result(1, 0))
+    assert (rounds[0].bomb_planted, rounds[0].bomb_defused, rounds[0].bomb_exploded) == (True, False, True)
+    assert bomb_data_status(rounds, "complete") == ("complete", [])

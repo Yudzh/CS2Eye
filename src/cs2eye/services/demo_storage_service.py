@@ -413,6 +413,8 @@ class DemoStorageService:
                 winner_team_name=result.winner_team_name if result else None,
                 metadata_status=result.metadata_status if result else None,
                 round_data_status=result.round_data_status if result else None,
+                bomb_data_status=result.bomb_data_status if result else None,
+                economy_data_status=result.economy_data_status if result else None,
             ))
         dates = [DemoDateGroup(match_date=day, files=groups[day]) for day in sorted(groups, reverse=True)]
         display_name = records[0].tournament_name if records else name

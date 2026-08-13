@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { getDemoFiles, getDemoMapResult, getDemoMaps, getDemoPlayerStats, getDemoRounds, getDemoSideStats, getDemoTournaments, getParseAllDemoJob, getTeams, parseDemoFile, patchDemoMapResult, recalculateDemoSideStats, reclassifyDemoOpponentRanks, reclassifyOpponentRanks, startFilteredDemoParseJob, startParseAllDemoJob, uploadDemoFiles } from "../api";
-import type { DemoListResponse, DemoMapOption, DemoMapResult, DemoMapResultPatch, DemoParseJob, DemoParseResponse, DemoPlayerStatsResponse, DemoRoundsResponse, DemoSideStatsResponse, DemoTournamentOption, DemoUploadResponse, DemoUploadStatus, Team } from "../types";
+import { getDemoBombStats, getDemoCombatStats, getDemoUtilityStats, getDemoEconomyStats, getDemoFiles, getDemoMapResult, getDemoMaps, getDemoPlayerStats, getDemoRounds, getDemoSideStats, getDemoTournaments, getParseAllDemoJob, getTeams, parseDemoFile, patchDemoMapResult, recalculateDemoSideStats, reclassifyDemoOpponentRanks, reclassifyOpponentRanks, startFilteredDemoParseJob, startParseAllDemoJob, uploadDemoFiles } from "../api";
+import type { DemoBombStatsResponse, DemoCombatStatsResponse, DemoUtilityStatsResponse, DemoEconomyStatsResponse, DemoListResponse, DemoMapOption, DemoMapResult, DemoMapResultPatch, DemoParseJob, DemoParseResponse, DemoPlayerStatsResponse, DemoRoundsResponse, DemoSideStatsResponse, DemoTournamentOption, DemoUploadResponse, DemoUploadStatus, Team } from "../types";
 
 
 const statusLabels: Record<DemoUploadStatus, string> = {
@@ -90,6 +90,33 @@ function detailedDiagnostics(items: string[]): string[] {
   });
 }
 
+function diagnosticGroupKey(value: string): string {
+  if (/^Demo team ".*" was not found/.test(value)) return "team_not_found";
+  return value.split(":", 1)[0];
+}
+
+function GroupedDiagnostics({ files }: { files: DemoParseResponse["files"] }) {
+  const groups = new Map<string, Array<{ filename: string; diagnostic: string }>>();
+  files.forEach((file) => detailedDiagnostics(file.diagnostics).forEach((diagnostic) => {
+    const key = diagnosticGroupKey(diagnostic);
+    const entries = groups.get(key) ?? [];
+    if (!entries.some((entry) => entry.filename === file.filename && entry.diagnostic === diagnostic)) {
+      entries.push({ filename: file.filename, diagnostic });
+    }
+    groups.set(key, entries);
+  }));
+  return <>{Array.from(groups.entries()).map(([key, entries]) => {
+    const title = key === "team_not_found"
+      ? "Команда из demo отсутствует во внутреннем справочнике"
+      : formatDiagnostic(key);
+    const filesCount = new Set(entries.map((entry) => entry.filename)).size;
+    return <details className="notice notice--warning" key={`diagnostic-group-${key}`}>
+      <summary><strong>{title}</strong> · {filesCount} demo · {entries.length} сообщений</summary>
+      <div className="diagnostic-group-list">{entries.map((entry, index) => <div key={`${entry.filename}-${entry.diagnostic}-${index}`}><strong>{entry.filename}</strong>{entry.diagnostic === key ? null : <span>{formatDiagnostic(entry.diagnostic)}</span>}</div>)}</div>
+    </details>;
+  })}</>;
+}
+
 export function DemosPage() {
   const today = new Date().toISOString().slice(0, 10);
   const [tournament, setTournament] = useState("");
@@ -99,6 +126,7 @@ export function DemosPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<DemoUploadResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [parseAfterUpload, setParseAfterUpload] = useState(false);
   const [filterTournament, setFilterTournament] = useState("");
   const [tournaments, setTournaments] = useState<DemoTournamentOption[]>([]);
   const [year, setYear] = useState(new Date().getFullYear());
@@ -119,6 +147,10 @@ export function DemosPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [maps, setMaps] = useState<DemoMapOption[]>([]);
   const [sideStats, setSideStats] = useState<DemoSideStatsResponse | null>(null);
+  const [bombStats, setBombStats] = useState<DemoBombStatsResponse | null>(null);
+  const [economyStats, setEconomyStats] = useState<DemoEconomyStatsResponse | null>(null);
+  const [combatStats, setCombatStats] = useState<DemoCombatStatsResponse | null>(null);
+  const [utilityStats, setUtilityStats] = useState<DemoUtilityStatsResponse | null>(null);
   const [rounds, setRounds] = useState<DemoRoundsResponse | null>(null);
   const [roundFilter, setRoundFilter] = useState("all");
   const [roundsOpen, setRoundsOpen] = useState(false);
@@ -135,7 +167,17 @@ export function DemosPage() {
     setUploadError(null);
     setUploadResult(null);
     try {
-      setUploadResult(await uploadDemoFiles(tournament, eventType, matchDate, files));
+      const result = await uploadDemoFiles(tournament, eventType, matchDate, files, parseAfterUpload);
+      setUploadResult(result);
+      if (result.parse_job_id) {
+        let job = await getParseAllDemoJob(result.parse_job_id);
+        setParseJob(job);
+        while (job.status === "queued" || job.status === "running") {
+          await new Promise((resolve) => window.setTimeout(resolve, 1000));
+          job = await getParseAllDemoJob(result.parse_job_id);
+          setParseJob(job);
+        }
+      }
       try {
         setTournaments(await getDemoTournaments());
       } catch (error) {
@@ -206,6 +248,10 @@ export function DemosPage() {
       setPlayerStats(await getDemoPlayerStats(id));
       setMapResult(await getDemoMapResult(id));
       setSideStats(await getDemoSideStats(id));
+      setBombStats(await getDemoBombStats(id));
+      setEconomyStats(await getDemoEconomyStats(id));
+      setCombatStats(await getDemoCombatStats(id));
+      setUtilityStats(await getDemoUtilityStats(id));
       setRounds(await getDemoRounds(id));
       setListResult(await getDemoFiles(filterTournament, year));
     } catch (error) {
@@ -222,6 +268,10 @@ export function DemosPage() {
       setPlayerStats(await getDemoPlayerStats(id));
       setMapResult(await getDemoMapResult(id));
       setSideStats(await getDemoSideStats(id));
+      setBombStats(await getDemoBombStats(id));
+      setEconomyStats(await getDemoEconomyStats(id));
+      setCombatStats(await getDemoCombatStats(id));
+      setUtilityStats(await getDemoUtilityStats(id));
       setRounds(await getDemoRounds(id));
     } catch (error) {
       setListError(message(error));
@@ -320,6 +370,7 @@ export function DemosPage() {
             <label>Формат турнира<select value={eventType} onChange={(event) => setEventType(event.target.value as "online" | "lan")}><option value="online">Online</option><option value="lan">LAN</option></select></label>
             <label>Дата матчей<input required type="date" value={matchDate} onChange={(event) => setMatchDate(event.target.value)} /></label>
             <label>Demo-файлы или архивы<input required multiple accept=".dem,.zip,.rar" type="file" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
+            <label className="checkbox-label"><input type="checkbox" checked={parseAfterUpload} onChange={(event) => setParseAfterUpload(event.target.checked)} />Сразу парсить успешно загруженные демки</label>
             {files.length > 0 && <ul className="selected-files">{files.map((file) => <li key={`${file.name}-${file.size}`}>{file.name}<small>{formatSize(file.size)}</small></li>)}</ul>}
             <button className="button button--primary" disabled={uploading || files.length === 0} type="submit">{uploading ? "Загружаю…" : "Загрузить"}</button>
           </form>
@@ -345,7 +396,7 @@ export function DemosPage() {
             </div>
             {parsingMode !== null && parseJob && <div className="demo-parse-progress"><div><strong>{parseJob.processed_files}/{parseJob.total_files || "?"} файлов</strong><span>Успешно: {parseJob.parsed_count} · Пропущено: {parseJob.skipped_count} · Ошибок: {parseJob.failed_count}</span></div><progress max={parseJob.total_files || 1} value={parseJob.processed_files} />{parseJob.current_filename && <small>{parseJob.current_filename}</small>}</div>}
             {reclassifyMessage && <div className="notice">{reclassifyMessage}</div>}
-            {parseResult && <><div className="parse-summary"><span>Обработано: {parseResult.parsed_count}</span><span>Пропущено: {parseResult.skipped_count}</span><span>Ошибок: {parseResult.failed_count}</span><span>Найдено игроков: {parseResult.files.reduce((sum, file) => sum + file.players_found, 0)}</span><span>Связано: {parseResult.files.reduce((sum, file) => sum + file.players_linked, 0)}</span><span>Не связано: {parseResult.files.reduce((sum, file) => sum + file.players_unlinked, 0)}</span></div>{parseResult.files.filter((file) => file.status === "failed").map((file) => <div className="notice notice--error" key={`error-${file.demo_file_id}`}><strong>{file.filename}</strong><div>{file.error || "Неизвестная ошибка парсинга."}</div></div>)}{parseResult.files.map((file) => { const visible = detailedDiagnostics(file.diagnostics); return visible.length > 0 ? <div className="notice notice--warning" key={`diagnostics-${file.demo_file_id}`}><strong>{file.filename}</strong>{visible.map((diagnostic) => <div key={diagnostic}>{formatDiagnostic(diagnostic)}</div>)}</div> : null; })}{parseResult.files.flatMap((file) => file.unlinked_players).length > 0 && <div className="unlinked-players"><strong>Нераспознанные игроки</strong>{parseResult.files.flatMap((file) => file.unlinked_players).map((player, index) => <span key={`${player.demo_filename}-${player.steam_id}-${index}`}>{player.nickname} · {player.steam_id || "Steam ID нет"} · {player.team_name || "команда не указана"} · {player.demo_filename}</span>)}</div>}</>}
+            {parseResult && <><div className="parse-summary"><span>Обработано: {parseResult.parsed_count}</span><span>Пропущено: {parseResult.skipped_count}</span><span>Ошибок: {parseResult.failed_count}</span><span>Найдено игроков: {parseResult.files.reduce((sum, file) => sum + file.players_found, 0)}</span><span>Связано: {parseResult.files.reduce((sum, file) => sum + file.players_linked, 0)}</span><span>Не связано: {parseResult.files.reduce((sum, file) => sum + file.players_unlinked, 0)}</span></div>{parseResult.files.filter((file) => file.status === "failed").map((file) => <div className="notice notice--error" key={`error-${file.demo_file_id}`}><strong>{file.filename}</strong><div>{file.error || "Неизвестная ошибка парсинга."}</div></div>)}<GroupedDiagnostics files={parseResult.files} />{parseResult.files.flatMap((file) => file.unlinked_players).length > 0 && <div className="unlinked-players"><strong>Нераспознанные игроки</strong>{parseResult.files.flatMap((file) => file.unlinked_players).map((player, index) => <span key={`${player.demo_filename}-${player.steam_id}-${index}`}>{player.nickname} · {player.steam_id || "Steam ID нет"} · {player.team_name || "команда не указана"} · {player.demo_filename}</span>)}</div>}</>}
             {playerStats && <div className="opponent-classification">
               <strong>{playerStats.filename}</strong>
               <label>Источник рейтинга<select value={rankSourceFilter} onChange={(event) => setRankSourceFilter(event.target.value)}><option value="all">Все источники</option><option value="historical_snapshot">Исторический рейтинг</option><option value="current_fallback">Текущий fallback</option><option value="unknown">Не определено</option></select></label>
@@ -373,6 +424,24 @@ export function DemosPage() {
               {mapResult && <p>{mapResult.rounds_parsed_count} из {mapResult.rounds_expected_count ?? "—"} раундов</p>}
               <div className="side-stats-grid">{sideStats.teams.map((team) => <article key={`${team.team_id}-${team.team_name}`}><h4>{team.team_name}</h4><div className="side-stat-row"><strong>CT</strong><span>{team.ct.rounds_won} / {team.ct.rounds_played}</span><span>{team.ct.win_rate === null ? "—" : `${Number(team.ct.win_rate).toFixed(1)}%`}</span></div><div className="side-stat-row"><strong>T</strong><span>{team.t.rounds_won} / {team.t.rounds_played}</span><span>{team.t.win_rate === null ? "—" : `${Number(team.t.win_rate).toFixed(1)}%`}</span></div><p>Первая половина: {team.first_half.rounds_won} / {team.first_half.rounds_played}</p><p>Вторая половина: {team.second_half.rounds_won} / {team.second_half.rounds_played}</p>{team.overtime.rounds_played > 0 && <p>Overtime: {team.overtime.rounds_won} / {team.overtime.rounds_played}</p>}</article>)}</div>
               <button className="button" onClick={() => void recalculateSides()}>Пересчитать CT/T из раундов</button>
+            </section>}
+            {bombStats && <section className="map-result-card">
+              <p className="eyebrow">Bomb / Postplant</p>
+              {bombStats.bomb_data_status === "not_parsed" ? <div className="notice notice--warning">Для этой demo bomb analytics ещё не рассчитана. Необходим повторный парсинг.</div> : bombStats.bomb_data_status !== "complete" ? <div className="notice notice--warning">Bomb analytics недоступна: данные неполны или требуют проверки.</div> : <div className="side-stats-grid">{bombStats.teams.map((team) => <article key={`${team.team_id}-${team.team_name}`}><h4>{team.team_name}</h4><p>Plants: {team.plants} / {team.t_rounds_played} · {team.plant_rate === null ? "—" : `${Number(team.plant_rate).toFixed(1)}%`}</p><p>Postplant: {team.postplant_wins}–{team.postplant_losses} · {team.postplant_win_rate === null ? "—" : `${Number(team.postplant_win_rate).toFixed(1)}%`}</p><p>Retake: {team.retake_wins}–{team.retake_losses} · {team.retake_win_rate === null ? "—" : `${Number(team.retake_win_rate).toFixed(1)}%`}</p><p>Explosions: {team.explosions} · Defuses: {team.defuses}</p></article>)}</div>}
+            </section>}
+            {economyStats && <section className="map-result-card">
+              <p className="eyebrow">Экономика и пистолетные раунды</p>
+              {economyStats.economy_data_status === "not_parsed" ? <div className="notice notice--warning">Аналитика экономики для этой demo ещё не рассчитана. Необходим повторный парсинг.</div> : economyStats.economy_data_status !== "complete" ? <div className="notice notice--warning">Аналитика экономики неполна: один или несколько раундов не удалось достоверно классифицировать.</div> : <div className="side-stats-grid">{economyStats.teams.map((team) => {
+                const row = (label: string, metric: {wins: number; rounds: number; win_rate: string | number | null}) => <p title={metric.win_rate === null ? "Нет выборки" : `${Number(metric.win_rate).toFixed(1)}%`}>{label}: {metric.wins}/{metric.rounds}</p>;
+                return <article key={`${team.team_id}-${team.team_name}`}><h4>{team.team_name}</h4>{row("Пистолетные", team.pistol)}{row("Конверсия", team.conversion)}{row("Эко", team.eco)}{row("Форс-бай", team.force_buy)}{row("Полный закуп", team.full_buy)}{row("Анти-эко", team.anti_eco)}{row("Полный закуп против полного", team.full_buy_vs_full_buy)}{row("Камбэк во втором раунде", team.second_round_comeback)}<p>Сохранения: {team.save_data_status === "not_parsed" ? "пока не определяются надёжно" : `${team.save_rounds} раундов, ${team.players_saved} игроков`}</p></article>;
+              })}</div>}
+            </section>}
+            {combatStats && <section className="map-result-card">
+              <p className="eyebrow">Combat</p><h3>Opening / Trades / Clutches</h3>
+              {combatStats.combat_data_status === "not_parsed" ? <div className="notice notice--warning">Combat analytics ещё не рассчитана. Необходим повторный парсинг.</div> : combatStats.combat_data_status !== "complete" ? <div className="notice notice--warning">Combat analytics неполна или требует проверки.</div> : <><div className="side-stats-grid">{combatStats.teams.map((team) => <article key={`${team.team_id}-${team.team_name}`}><h4>{team.team_name}</h4><p>Opening: {Number(team.opening_kills)}–{Number(team.opening_deaths)}</p><p>Conversion: {team.opening_conversion_rate == null ? "—" : `${Number(team.opening_conversion_rate).toFixed(1)}%`} · Recovery: {team.opening_recovery_rate == null ? "—" : `${Number(team.opening_recovery_rate).toFixed(1)}%`}</p><p>Trade rate: {team.trade_rate == null ? "—" : `${Number(team.trade_rate).toFixed(1)}%`} · Clutches: {Number(team.clutch_wins)}/{Number(team.clutch_opportunities)}</p></article>)}</div><div className="rounds-table">{combatStats.players.map((player) => <div key={`${player.player_id}-${player.nickname}`}><span>{player.nickname}</span><span>Opening {Number(player.opening_kills)}–{Number(player.opening_deaths)}</span><span>Trades {Number(player.trade_kills)}</span><span>Deaths traded {Number(player.deaths_traded)}</span><span>Clutches {Number(player.clutch_wins)}/{Number(player.clutch_opportunities)}</span></div>)}</div></>}
+            </section>}
+            {utilityStats && <section className="map-result-card"><h3>Utility</h3>
+              {utilityStats.utility_data_status === "not_parsed" ? <div className="notice notice--warning">Utility analytics ещё не рассчитана. Необходим повторный парсинг.</div> : utilityStats.utility_data_status !== "complete" ? <div className="notice notice--warning">Utility analytics неполна или требует проверки.</div> : <><div className="side-stats-grid">{utilityStats.teams.map((team) => <article key={`${team.team_id}-${team.team_name}`}><h4>{team.team_name}</h4><p>Utility/round: {team.utility_per_round?.toFixed(2) ?? "—"}</p><p>Damage/round: {team.utility_damage_per_round?.toFixed(2) ?? "—"} · HE {team.he_damage} · Fire {team.fire_damage}</p><p>Enemies flashed: {team.enemies_flashed} · assists {team.flash_assists} · team flashes {team.teammates_flashed}</p></article>)}</div><div className="rounds-table">{utilityStats.players.slice().sort((a,b) => (b.utility_damage_per_round ?? -1) - (a.utility_damage_per_round ?? -1)).slice(0,5).map((player) => <div key={`${player.player_id}-${player.nickname}`}><span>{player.nickname}</span><span>UD/round {player.utility_damage_per_round?.toFixed(2) ?? "—"}</span><span>Utility/round {player.utility_per_round?.toFixed(2) ?? "—"}</span><span>Enemies/flash {player.enemies_flashed_per_flash?.toFixed(2) ?? "—"}</span><span>FA {player.flash_assists}</span></div>)}</div></>}
             </section>}
             {rounds && <section className="map-result-card">
               <button className="button" onClick={() => setRoundsOpen(!roundsOpen)}>{roundsOpen ? "Скрыть раунды" : `Раунды (${rounds.total})`}</button>

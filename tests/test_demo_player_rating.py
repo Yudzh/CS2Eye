@@ -15,8 +15,9 @@ from cs2eye.services.demo_parser_service import (
     DamageEvent, DeathEvent, Demoparser2Adapter, ParsedDemoPlayerStat,
     PlayerRef, RoundSnapshot,
     aggregate_player_events,
-    completed_rounds_count, is_valid_round_row,
+    completed_rounds_count, is_gameplay_round_end_row, is_restart_round_row, is_valid_round_row,
 )
+from cs2eye.services.demo_parser_service import _rows
 from cs2eye.services.player_internal_rating_service import (
     INTERNAL_RATING_VERSION, calculate_internal_rating, calculate_rating_sample,
     recalculate_player_internal_rating,
@@ -28,6 +29,15 @@ from cs2eye.services.demo_team_link_service import opponent_rank_group, resolve_
 
 def player(steam_id: str, nickname: str, team: int) -> PlayerRef:
     return PlayerRef(steam_id, nickname, f"Team {team}", team)
+
+
+def test_restart_round_rows_are_not_gameplay_boundaries() -> None:
+    assert is_restart_round_row({"is_game_restart": True, "winner": 2})
+    assert is_restart_round_row({"round_win_reason": 15, "winner": 3})
+    assert is_restart_round_row({"reason": "game_commencing"})
+    assert not is_restart_round_row({"round_win_reason": 8, "winner": 3})
+    assert not is_gameplay_round_end_row({"tick": 1, "winner": float("nan")})
+    assert is_gameplay_round_end_row({"tick": 100, "winner": "CT"})
 
 
 def test_adr_and_kast_and_team_damage() -> None:
@@ -53,6 +63,11 @@ def test_adr_and_kast_and_team_damage() -> None:
     assert stats["Alpha"].kast_rounds == 1
     assert stats["Alpha"].kast_percent == Decimal("50.0000")
     assert stats["Ally"].assists == 1
+
+
+def test_demoparser_rows_accepts_plain_and_nested_lists() -> None:
+    assert _rows([{"tick": 10}, {"tick": 20}]) == [{"tick": 10}, {"tick": 20}]
+    assert _rows([[{"tick": 10}], [{"tick": 20}]]) == [{"tick": 10}, {"tick": 20}]
 
 
 def test_trade_counts_for_kast() -> None:
@@ -166,7 +181,10 @@ def test_demoparser_adapter_normalizes_events(monkeypatch, tmp_path) -> None:
             if name == "round_end":
                 return Frame([{"tick": 100, **common}])
             if name == "player_death":
-                return Frame([{**common, "user_steamid": "2", "user_name": "B", "user_team_num": 3, "attacker_steamid": "1", "attacker_name": "A", "attacker_team_num": 2}])
+                return Frame([
+                    {**common, "tick": 90, "user_steamid": "2", "user_name": "B", "user_team_num": 3, "attacker_steamid": "1", "attacker_name": "A", "attacker_team_num": 2},
+                    {**common, "tick": 95, "noreplay": True, "user_steamid": "1", "user_name": "A", "user_team_num": 2, "attacker_steamid": "2", "attacker_name": "B", "attacker_team_num": 3},
+                ])
             return Frame([{**common, "user_steamid": "2", "user_name": "B", "user_team_num": 3, "attacker_steamid": "1", "attacker_name": "A", "attacker_team_num": 2, "dmg_health": 90}])
 
     monkeypatch.setattr("cs2eye.services.demo_parser_service.DemoParser", Parser)
@@ -213,6 +231,55 @@ def test_demoparser_adapter_extracts_team_rounds_total(monkeypatch, tmp_path) ->
     assert (parsed.map_result.team_a_name, parsed.map_result.team_a_score) == ("Spirit", 13)
     assert (parsed.map_result.team_b_name, parsed.map_result.team_b_score) == ("NAVI", 9)
     assert parsed.map_result.parser_rounds_count is None
+
+
+def test_bomb_event_after_round_end_stays_with_started_round(monkeypatch, tmp_path) -> None:
+    class Frame:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def to_dicts(self):
+            return self.rows
+
+    common = {"is_warmup_period": False, "is_technical_timeout": False}
+
+    class Parser:
+        def __init__(self, _path):
+            pass
+
+        def parse_header(self):
+            return {"map_name": "de_mirage"}
+
+        def parse_event(self, name, **_kwargs):
+            if name == "round_start":
+                return Frame([
+                    {"tick": 10, "total_rounds_played": 0, **common},
+                    {"tick": 110, "total_rounds_played": 1, **common},
+                ])
+            if name == "round_end":
+                return Frame([
+                    {"tick": 100, "total_rounds_played": 1, "winner": 2, "round_win_reason": 9, **common},
+                    {"tick": 200, "total_rounds_played": 2, "winner": 3, "round_win_reason": 8, **common},
+                ])
+            if name == "bomb_planted":
+                return Frame([{"tick": 80, "total_rounds_played": 0, **common}])
+            if name == "bomb_exploded":
+                return Frame([{"tick": 105, "total_rounds_played": 1, **common}])
+            return Frame([])
+
+        def parse_ticks(self, _props, *, ticks=None, **_kwargs):
+            rows = []
+            for tick, t_score, ct_score in [(100, 1, 0), (200, 1, 1)]:
+                rows.extend([
+                    {"tick": tick, "team_num": 2, "team_clan_name": "Alpha", "team_rounds_total": t_score, "team_score_overtime": 0},
+                    {"tick": tick, "team_num": 3, "team_clan_name": "Bravo", "team_rounds_total": ct_score, "team_score_overtime": 0},
+                ])
+            return Frame(rows)
+
+    monkeypatch.setattr("cs2eye.services.demo_parser_service.DemoParser", Parser)
+    rounds = Demoparser2Adapter().parse(tmp_path / "fixture.dem").rounds
+    assert (rounds[0].bomb_planted, rounds[0].bomb_exploded) == (True, True)
+    assert (rounds[1].bomb_planted, rounds[1].bomb_exploded) == (False, False)
 
 
 @pytest.fixture
@@ -387,6 +454,63 @@ async def test_reparse_replaces_stats_without_duplicates(db_session, tmp_path) -
     assert await db_session.scalar(select(func.count(DemoPlayerStat.id))) == 0
     run = (await db_session.execute(select(DemoParseRun))).scalar_one()
     assert run.status == "pending"
+
+
+async def test_parse_failure_is_not_masked_by_missing_greenlet(db_session, tmp_path) -> None:
+    demo = DemoFile(
+        tournament_name="Cup", tournament_slug="cup", match_date=__import__("datetime").date(2026, 2, 2),
+        original_filename="broken.dem", storage_path="broken.dem", file_size_bytes=1, sha256="f" * 64,
+    )
+    db_session.add(demo)
+    await db_session.commit()
+    service = DemoParseService(db_session, tmp_path)
+
+    class BrokenParser:
+        parser_name = "test"
+        parser_version = "1"
+
+        def parse(self, path):
+            raise RuntimeError("real parser failure")
+
+    service.parser = BrokenParser()
+    result, _ = await service.parse_one(demo, False)
+    assert result.status == "failed"
+    assert result.filename == "broken.dem"
+    assert result.error == "real parser failure"
+    run = (await db_session.execute(select(DemoParseRun))).scalar_one()
+    assert run.error_message == "real parser failure"
+
+
+async def test_batch_reloads_next_demo_after_previous_rollback(db_session, tmp_path) -> None:
+    demos = [DemoFile(
+        tournament_name="Cup", tournament_slug="cup", match_date=__import__("datetime").date(2026, 2, day),
+        original_filename=name, storage_path=name, file_size_bytes=1, sha256=letter * 64,
+    ) for day, name, letter in ((3, "broken.dem", "a"), (4, "good.dem", "b"))]
+    db_session.add_all(demos)
+    await db_session.commit()
+    service = DemoParseService(db_session, tmp_path)
+
+    class MixedParser:
+        parser_name = "test"
+        parser_version = "1"
+
+        def parse(self, path):
+            if path.name == "broken.dem":
+                raise RuntimeError("first demo failed")
+            return [ParsedDemoPlayerStat(
+                steam_id="30", nickname="Good", team_name="Team",
+                rounds_played=10, kills=10, deaths=5, assists=2,
+                total_damage=800, adr=Decimal("80"), kast_rounds=7,
+                kast_percent=Decimal("70"), internal_rating=Decimal("7"),
+            )]
+
+    service.parser = MixedParser()
+    result = await service._parse_demos(
+        demos, False, tournament_name="Cup", year=2026,
+    )
+    assert result.failed_count == 1
+    assert result.parsed_count == 1
+    assert [item.error for item in result.files] == ["first demo failed", None]
 
 
 async def test_parse_all_aborts_before_touching_runs_when_storage_is_missing(

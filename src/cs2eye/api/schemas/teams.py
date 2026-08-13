@@ -54,6 +54,18 @@ class TeamStrengthFactorResponse(BaseModel):
     value: float
     explanation: str
     players: list[str]
+    key: str
+    raw_value: object | None
+    normalized_score: float | None
+    weight: float
+    effective_weight: float
+    impact: float
+    sample_size: int | None
+    confidence: float | None
+    reason: str | None
+    available: bool
+    reference_value: float | None = None
+    reference_source: str | None = None
 
 
 class TeamStrengthResponse(BaseModel):
@@ -68,6 +80,14 @@ class TeamStrengthResponse(BaseModel):
     missing_required_roles: list[str]
     factors: list[TeamStrengthFactorResponse]
     notes: list[str]
+    model_version: str
+    raw_score: float
+    reliability: float
+    confidence_adjustment: float
+    final_score: float
+    team_strength_raw_score: float
+    team_strength_reliability: float
+    team_strength_model_version: str
 
 
 class TeamListItem(BaseModel):
@@ -94,6 +114,7 @@ class TeamListItem(BaseModel):
 
 class TeamDetailResponse(TeamListItem):
     strength: TeamStrengthResponse
+    leadership: dict | None = None
 
 
 class TeamComparisonPlayerResponse(BaseModel):
@@ -131,6 +152,7 @@ class TeamComparisonSideResponse(BaseModel):
     coaches: list[TeamComparisonPlayerResponse]
     strength: TeamStrengthResponse
     relative_strength_percent: float | None
+    leadership: dict | None = None
 
 
 class TeamRoleComparisonResponse(BaseModel):
@@ -163,6 +185,7 @@ class TeamComparisonResponse(BaseModel):
     ranking: TeamRankingComparisonResponse
     role_comparisons: list[TeamRoleComparisonResponse]
     summary_notes: list[str]
+    round_swing_comparison: dict
 
 
 class RankingRunResponse(BaseModel):

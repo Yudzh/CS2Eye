@@ -16,6 +16,21 @@ class MapStrengthFactor:
     effective_weight: float
     impact: float
     explanation: str
+    raw_value: float | None = None
+    sample_size: int | None = None
+    confidence: float | None = None
+    available: bool = True
+    reference_value: float | None = None
+    reference_source: str | None = None
+
+    @property
+    def key(self) -> str: return self.code
+    @property
+    def normalized_score(self) -> float | None: return self.score
+    @property
+    def weight(self) -> float: return self.configured_weight
+    @property
+    def reason(self) -> str: return self.explanation
 
 
 @dataclass(frozen=True)
@@ -27,6 +42,11 @@ class MapStrengthResult:
     confidence_level: str
     factors: list[MapStrengthFactor]
     warnings: list[str]
+    model_version: str = "v2"
+    raw_score: float | None = None
+    reliability: float = 0.0
+    confidence_adjustment: float | None = None
+    final_score: float | None = None
 
 
 COMPONENT_WEIGHTS = {
@@ -230,8 +250,12 @@ def calculate_map_strength(
     if ct_rate is None or t_rate is None:
         warnings.append("missing_side_data")
 
+    reliability = (0.5 + 0.5 * confidence / 100.0) if strength is not None else 0.0
     return MapStrengthResult(
         status=status, map_strength_score=strength,
         performance_score=performance, confidence_score=confidence,
         confidence_level=confidence_level, factors=factors, warnings=warnings,
+        raw_score=performance, reliability=reliability,
+        confidence_adjustment=(strength - performance if strength is not None and performance is not None else None),
+        final_score=strength,
     )

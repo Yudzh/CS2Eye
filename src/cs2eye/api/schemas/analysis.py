@@ -19,6 +19,16 @@ class MapStrengthFactorResponse(BaseModel):
     effective_weight: float
     impact: float
     explanation: str
+    key: str
+    raw_value: float | None
+    normalized_score: float | None
+    weight: float
+    sample_size: int | None
+    confidence: float | None
+    available: bool
+    reason: str
+    reference_value: float | None
+    reference_source: str | None
 
 
 class MapStrengthResponse(BaseModel):
@@ -29,6 +39,11 @@ class MapStrengthResponse(BaseModel):
     confidence_level: ConfidenceLevel
     factors: list[MapStrengthFactorResponse]
     warnings: list[str]
+    model_version: str
+    raw_score: float | None
+    reliability: float
+    confidence_adjustment: float | None
+    final_score: float | None
 
 
 class SideScopeResponse(BaseModel):
@@ -36,6 +51,22 @@ class SideScopeResponse(BaseModel):
     rounds_won: int
     rounds_lost: int
     win_rate: float | None
+
+
+class BombScopeResponse(BaseModel):
+    t_rounds_played: int
+    plants: int
+    plant_rate: float | None
+    postplant_rounds: int
+    postplant_wins: int
+    postplant_losses: int
+    postplant_win_rate: float | None
+    retake_opportunities: int
+    retake_wins: int
+    retake_losses: int
+    retake_win_rate: float | None
+    explosions: int
+    defuses: int
 
 
 class TeamMapScopeResponse(BaseModel):
@@ -49,6 +80,10 @@ class TeamMapScopeResponse(BaseModel):
     round_win_rate: float | None
     ct: SideScopeResponse
     t: SideScopeResponse
+    bomb: BombScopeResponse
+    economy: dict | None
+    combat: dict | None
+    utility: dict | None
     overtime_maps: int
     overtime_rounds_played: int
     overtime_rounds_won: int
@@ -144,6 +179,10 @@ class MapComparisonTeamResponse(BaseModel):
     confidence_score: float
     confidence_level: ConfidenceLevel
     status: StrengthStatus
+    bomb: BombScopeResponse
+    economy: dict | None
+    combat: dict | None
+    utility: dict | None
 
 
 ComparisonStatus = Literal[

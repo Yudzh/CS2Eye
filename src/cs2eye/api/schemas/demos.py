@@ -25,6 +25,8 @@ class DemoUploadResponse(BaseModel):
     unchanged_count: int
     failed_count: int
     files: list[DemoUploadFileResult]
+    parse_job_id: str | None = None
+    parse_job_status: str | None = None
 
 
 class DemoListFile(BaseModel):
@@ -44,6 +46,9 @@ class DemoListFile(BaseModel):
     winner_team_name: str | None = None
     metadata_status: str | None = None
     round_data_status: str | None = None
+    bomb_data_status: str | None = None
+    economy_data_status: str | None = None
+    utility_data_status: str | None = None
 
 
 class DemoDateGroup(BaseModel):
@@ -131,6 +136,8 @@ class DemoPlayerStatResponse(BaseModel):
         "historical_snapshot", "current_fallback", "unknown",
     ]
     opponent_rank_snapshot_date: date | None
+    combat: dict | None = None
+    utility: dict | None = None
 
 
 class DemoPlayerStatsResponse(BaseModel):
@@ -163,6 +170,10 @@ class DemoMapResultResponse(BaseModel):
     metadata_status: str
     issues: list[str] = Field(default_factory=list)
     round_data_status: str
+    bomb_data_status: str
+    economy_data_status: str
+    combat_data_status: str
+    utility_data_status: str
     rounds_parsed_count: int
     rounds_expected_count: int | None
     rounds_consistent: bool
@@ -185,6 +196,15 @@ class DemoRoundResponse(BaseModel):
     started_at_tick: int | None
     ended_at_tick: int | None
     duration_seconds: Decimal | None
+    bomb_planted: bool
+    bomb_defused: bool
+    bomb_exploded: bool
+    is_pistol_round: bool
+    pistol_round_number: int | None
+    team_a_equipment_value: int | None
+    team_b_equipment_value: int | None
+    team_a_economy: str
+    team_b_economy: str
 
 
 class DemoRoundsResponse(BaseModel):
@@ -219,6 +239,82 @@ class DemoSideStatsResponse(BaseModel):
     map_name: str | None
     round_data_status: str
     teams: list[DemoTeamSideStatResponse]
+
+
+class DemoTeamBombStatResponse(BaseModel):
+    team_id: int | None
+    team_name: str
+    t_rounds_played: int
+    plants: int
+    plant_rate: Decimal | None
+    postplant_rounds: int
+    postplant_wins: int
+    postplant_losses: int
+    postplant_win_rate: Decimal | None
+    retake_opportunities: int
+    retake_wins: int
+    retake_losses: int
+    retake_win_rate: Decimal | None
+    explosions: int
+    defuses: int
+
+
+class DemoBombStatsResponse(BaseModel):
+    demo_file_id: int
+    map_name: str | None
+    bomb_data_status: str
+    teams: list[DemoTeamBombStatResponse]
+
+
+class EconomyMetricResponse(BaseModel):
+    rounds: int
+    wins: int
+    losses: int
+    win_rate: Decimal | None
+
+
+class DemoTeamEconomyStatResponse(BaseModel):
+    team_id: int | None
+    team_name: str
+    pistol: EconomyMetricResponse
+    first_pistol: EconomyMetricResponse
+    second_pistol: EconomyMetricResponse
+    both_pistols: EconomyMetricResponse
+    conversion: EconomyMetricResponse
+    post_pistol_vs_force: EconomyMetricResponse
+    second_round_comeback: EconomyMetricResponse
+    eco: EconomyMetricResponse
+    force_buy: EconomyMetricResponse
+    full_buy: EconomyMetricResponse
+    anti_eco: EconomyMetricResponse
+    full_buy_vs_full_buy: EconomyMetricResponse
+    force_vs_full_buy: EconomyMetricResponse
+    save_rounds: int
+    players_saved: int
+    save_data_status: str
+
+
+class DemoEconomyStatsResponse(BaseModel):
+    demo_file_id: int
+    map_name: str | None
+    economy_data_status: str
+    teams: list[DemoTeamEconomyStatResponse]
+
+
+class DemoCombatStatsResponse(BaseModel):
+    demo_file_id: int
+    map_name: str | None
+    combat_data_status: str
+    teams: list[dict]
+    players: list[dict]
+
+
+class DemoUtilityStatsResponse(BaseModel):
+    demo_file_id: int
+    map_name: str | None
+    utility_data_status: str
+    teams: list[dict]
+    players: list[dict]
 
 
 class DemoMapResultPatch(BaseModel):

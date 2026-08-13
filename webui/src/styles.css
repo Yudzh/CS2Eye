@@ -300,6 +300,10 @@ h2 {
   background: rgba(255, 123, 136, 0.08);
 }
 .notice--warning { border-color: rgba(230, 200, 120, .35); color: var(--yellow); background: rgba(230, 200, 120, .08); }
+.notice > summary { cursor: pointer; }
+.diagnostic-group-list { display: grid; gap: 7px; margin-top: 12px; color: var(--text); }
+.diagnostic-group-list > div { display: grid; grid-template-columns: minmax(220px, .8fr) minmax(280px, 1.2fr); gap: 12px; padding-top: 7px; border-top: 1px solid rgba(230, 200, 120, .18); }
+.diagnostic-group-list span { color: var(--muted); }
 
 .demo-heading { padding: 20px 0 32px; }
 .demo-heading h1 { margin-bottom: 12px; }

@@ -20,7 +20,7 @@ from cs2eye.services.top_teams_service import (
     list_active_rosters,
     get_team_with_roster,
 )
-from cs2eye.services.team_strength_service import calculate_team_strength
+from cs2eye.services.team_strength_service import calculate_team_strength, load_team_performance
 from cs2eye.services.team_comparison_service import (
     ComparisonSide,
     InactiveTeamError,
@@ -28,6 +28,8 @@ from cs2eye.services.team_comparison_service import (
     TeamComparisonService,
     TeamNotFoundError,
 )
+from cs2eye.services.leadership_service import LeadershipService
+from cs2eye.services.round_swing_service import roster_swing_profile
 from cs2eye.models.team import Player, Team, TeamParticipantMembership, TeamRoster, TeamRosterMember
 
 
@@ -121,7 +123,8 @@ async def compare_teams(
     except (TeamNotFoundError, InactiveTeamError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    def side_response(side: ComparisonSide) -> TeamComparisonSideResponse:
+    leadership_a=await LeadershipService(session).team(team_a_id);leadership_b=await LeadershipService(session).team(team_b_id)
+    def side_response(side: ComparisonSide, leadership:dict) -> TeamComparisonSideResponse:
         team = side.team
         return TeamComparisonSideResponse(
             id=team.id,
@@ -154,11 +157,12 @@ async def compare_teams(
                 side.strength, from_attributes=True,
             ),
             relative_strength_percent=side.relative_strength_percent,
+            leadership=leadership,
         )
 
     return TeamComparisonResponse(
-        team_a=side_response(comparison.team_a),
-        team_b=side_response(comparison.team_b),
+        team_a=side_response(comparison.team_a,leadership_a),
+        team_b=side_response(comparison.team_b,leadership_b),
         strength_advantage_team_id=comparison.strength_advantage_team_id,
         strength_advantage_team_name=comparison.strength_advantage_team_name,
         strength_advantage_diff=comparison.strength_advantage_diff,
@@ -172,6 +176,12 @@ async def compare_teams(
             for role in comparison.role_comparisons
         ],
         summary_notes=comparison.summary_notes,
+        round_swing_comparison={
+            "scope":"current_roster",
+            "team_a":await roster_swing_profile(session,[player.id for player in comparison.team_a.roster]),
+            "team_b":await roster_swing_profile(session,[player.id for player in comparison.team_b.roster]),
+            "per_map":{},
+        },
     )
 
 
@@ -213,7 +223,10 @@ async def get_team(
         )
         for player, membership in roster
     ]
-    strength = calculate_team_strength(roster)
+    strength = calculate_team_strength(
+        roster,
+        performance=await load_team_performance(session, team.id, team.current_roster_id),
+    )
     return TeamDetailResponse(
         **TeamListItem.model_validate(team).model_dump(exclude={"roster"}),
         roster=participants,
@@ -221,6 +234,7 @@ async def get_team(
             strength,
             from_attributes=True,
         ),
+        leadership=await LeadershipService(session).team(team_id),
     )
 
 

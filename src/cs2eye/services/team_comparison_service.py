@@ -8,6 +8,7 @@ from cs2eye.models.team import Player, Team, TeamParticipantMembership
 from cs2eye.services.team_strength_service import (
     TeamStrength,
     calculate_team_strength,
+    load_team_performance,
 )
 from cs2eye.services.top_teams_service import get_team_with_roster
 
@@ -121,8 +122,14 @@ class TeamComparisonService:
 
         team_a, roster_a = await self._load_active_team(team_a_id)
         team_b, roster_b = await self._load_active_team(team_b_id)
-        strength_a = calculate_team_strength(roster_a, now=self._now)
-        strength_b = calculate_team_strength(roster_b, now=self._now)
+        strength_a = calculate_team_strength(
+            roster_a, now=self._now,
+            performance=await load_team_performance(self._session, team_a.id, team_a.current_roster_id),
+        )
+        strength_b = calculate_team_strength(
+            roster_b, now=self._now,
+            performance=await load_team_performance(self._session, team_b.id, team_b.current_roster_id),
+        )
         relative_a, relative_b = self._relative_strength(
             strength_a.team_strength_score,
             strength_b.team_strength_score,

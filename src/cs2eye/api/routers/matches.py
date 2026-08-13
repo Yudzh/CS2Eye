@@ -4,19 +4,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cs2eye.api.schemas.matches import (
     MatchBackfillResponse, MatchCreateRequest, MatchListResponse, MatchMapResponse, MatchPatchRequest, MatchReorderRequest,
     MatchResponse, MatchScoreResponse, MatchSplitRequest, MatchTeamResponse,
-    TeamMatchStatsResponse, TournamentResponse,
+    TeamMatchStatsResponse, TournamentResponse, MatchVetoUpdateRequest,
 )
 from cs2eye.db.session import get_db_session
 from cs2eye.services.match_service import (
     MatchNotFoundError, MatchService, MatchValidationError, MatchView,
 )
+from cs2eye.services.veto_service import VetoError, VetoService
 
 
 router = APIRouter(tags=["matches"])
 
 
-def response(view: MatchView) -> MatchResponse:
+async def response(view: MatchView, session: AsyncSession) -> MatchResponse:
     item = view.match
+    veto = await VetoService(session).actions(item.id)
     return MatchResponse(
         id=item.id,
         tournament=TournamentResponse.model_validate(view.tournament, from_attributes=True) if view.tournament else None,
@@ -28,6 +30,9 @@ def response(view: MatchView) -> MatchResponse:
         score=MatchScoreResponse(team_a=item.team_a_maps_won, team_b=item.team_b_maps_won),
         winner_team_id=item.winner_team_id,
         maps=[MatchMapResponse.model_validate(map_item, from_attributes=True) for map_item in view.maps],
+        veto_data_status=item.veto_data_status,
+        veto_expected=item.resolution_status == "resolved" and item.format in {"bo1", "bo3", "bo5"} and item.team_a_id is not None and item.team_b_id is not None,
+        veto=[{"id":a.id,"order_index":a.order_index,"team_id":a.team_id,"team_name":a.team_name,"action":a.action,"map_name":a.map_name,"source":a.source,"source_external_id":a.source_external_id} for a in veto],
     )
 
 
@@ -45,15 +50,16 @@ async def backfill_matches(session: AsyncSession = Depends(get_db_session)) -> M
 @router.get("/matches", response_model=MatchListResponse)
 async def list_matches(
     team_id: int | None = Query(None), resolution_status: str | None = Query(None),
+    veto_filter: str | None = Query(None, pattern="^(expected_missing|has_veto)$"),
     session: AsyncSession = Depends(get_db_session),
 ) -> MatchListResponse:
-    views = await MatchService(session).list(team_id=team_id, resolution_status=resolution_status)
-    return MatchListResponse(total=len(views), items=[response(view) for view in views])
+    views = await MatchService(session).list(team_id=team_id, resolution_status=resolution_status, veto_filter=veto_filter)
+    return MatchListResponse(total=len(views), items=[await response(view, session) for view in views])
 
 
 @router.get("/matches/{match_id}", response_model=MatchResponse)
 async def get_match(match_id: int, session: AsyncSession = Depends(get_db_session)) -> MatchResponse:
-    try: return response(await MatchService(session).get(match_id))
+    try: return await response(await MatchService(session).get(match_id), session)
     except MatchNotFoundError as error: raise expected_error(error) from error
 
 
@@ -61,7 +67,7 @@ async def get_match(match_id: int, session: AsyncSession = Depends(get_db_sessio
 async def create_match(payload: MatchCreateRequest, session: AsyncSession = Depends(get_db_session)) -> MatchResponse:
     try:
         view = await MatchService(session).create_manual(**payload.model_dump())
-        await session.commit(); return response(view)
+        await session.commit(); return await response(view, session)
     except MatchValidationError as error:
         await session.rollback(); raise expected_error(error) from error
 
@@ -70,7 +76,7 @@ async def create_match(payload: MatchCreateRequest, session: AsyncSession = Depe
 async def patch_match(match_id: int, payload: MatchPatchRequest, session: AsyncSession = Depends(get_db_session)) -> MatchResponse:
     try:
         view = await MatchService(session).update(match_id, **payload.model_dump(exclude_unset=True))
-        await session.commit(); return response(view)
+        await session.commit(); return await response(view, session)
     except (MatchNotFoundError, MatchValidationError) as error:
         await session.rollback(); raise expected_error(error) from error
 
@@ -79,7 +85,7 @@ async def patch_match(match_id: int, payload: MatchPatchRequest, session: AsyncS
 async def reorder_match(match_id: int, payload: MatchReorderRequest, session: AsyncSession = Depends(get_db_session)) -> MatchResponse:
     try:
         view = await MatchService(session).reorder(match_id, payload.demo_file_ids)
-        await session.commit(); return response(view)
+        await session.commit(); return await response(view, session)
     except (MatchNotFoundError, MatchValidationError) as error:
         await session.rollback(); raise expected_error(error) from error
 
@@ -88,9 +94,22 @@ async def reorder_match(match_id: int, payload: MatchReorderRequest, session: As
 async def split_match(match_id: int, payload: MatchSplitRequest, session: AsyncSession = Depends(get_db_session)) -> list[MatchResponse]:
     try:
         views = await MatchService(session).split(match_id, payload.demo_file_ids)
-        await session.commit(); return [response(view) for view in views]
+        await session.commit(); return [await response(view, session) for view in views]
     except (MatchNotFoundError, MatchValidationError) as error:
         await session.rollback(); raise expected_error(error) from error
+
+@router.put("/matches/{match_id}/veto", response_model=MatchResponse)
+async def put_match_veto(match_id: int, payload: MatchVetoUpdateRequest, session: AsyncSession = Depends(get_db_session)) -> MatchResponse:
+    try:
+        if payload.text is not None:
+            await VetoService(session).replace_text(match_id, payload.text, status=payload.status)
+        elif payload.actions is not None:
+            await VetoService(session).replace(match_id, [a.model_dump() for a in payload.actions], status=payload.status, source="manual", source_external_id=payload.source_external_id)
+        else:
+            raise VetoError("Передайте text или actions.")
+        await session.commit(); return await response(await MatchService(session).get(match_id), session)
+    except VetoError as error:
+        await session.rollback(); raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @router.get("/analysis/teams/{team_id}/matches", response_model=TeamMatchStatsResponse)

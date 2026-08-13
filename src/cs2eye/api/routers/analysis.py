@@ -27,8 +27,37 @@ from cs2eye.services.team_map_strength_service import (
 from cs2eye.services.team_h2h_service import (
     H2HTeamNotFoundError, SameTeamH2HError, TeamH2HService,
 )
+from cs2eye.services.veto_service import VetoError, VetoService, comparison as veto_comparison
+from cs2eye.services.calculated_veto_service import CalculatedVetoService
+from cs2eye.services.leadership_service import LeadershipService
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
+
+@router.get("/teams/{team_id}/leadership")
+async def team_leadership(team_id:int,session:AsyncSession=Depends(get_db_session))->dict:
+    try:return await LeadershipService(session).team(team_id)
+    except ValueError as error:raise HTTPException(404,str(error)) from error
+
+@router.get("/teams/{team_id}/veto")
+async def team_veto(team_id:int, aggregation_level:str=Query("organization",pattern="^(organization|current_roster)$"), recent:int|None=Query(None), rank_scope:str|None=Query(None), context:str|None=Query(None), session:AsyncSession=Depends(get_db_session)) -> dict:
+    if recent not in (None,5,10,20): raise HTTPException(422,"recent must be 5, 10 or 20")
+    try:return await VetoService(session).profile(team_id,aggregation_level=aggregation_level,recent=recent,rank_scope=rank_scope,context=context)
+    except VetoError as error:raise HTTPException(404,str(error)) from error
+
+@router.get("/compare/teams/{team_a_id}/{team_b_id}/veto")
+async def compare_veto(team_a_id:int,team_b_id:int,aggregation_level:str=Query("current_roster",pattern="^(organization|current_roster)$"),session:AsyncSession=Depends(get_db_session))->dict:
+    try:return await veto_comparison(session,team_a_id,team_b_id,aggregation_level)
+    except VetoError as error:raise HTTPException(404,str(error)) from error
+
+@router.get("/calculated-veto")
+async def calculated_veto(team_a_id:int,team_b_id:int,format:str=Query("bo3"),first_actor:str|None=Query(None),session:AsyncSession=Depends(get_db_session))->dict:
+    try:return await CalculatedVetoService(session).calculate(team_a_id,team_b_id,format,first_actor)
+    except ValueError as error:raise HTTPException(422,str(error)) from error
+
+@router.get("/calculated-veto/backtest/{match_id}")
+async def calculated_veto_backtest(match_id:int,session:AsyncSession=Depends(get_db_session))->dict:
+    try:return await CalculatedVetoService(session).backtest(match_id)
+    except ValueError as error:raise HTTPException(422,str(error)) from error
 
 
 async def _roster_players(session: AsyncSession, roster_id: int) -> list[dict]:
@@ -119,6 +148,10 @@ def _scope(item: TeamMapAggregate, today: date) -> dict:
                "rounds_lost": item.ct_rounds_lost, "win_rate": _number(item.ct_win_rate)},
         "t": {"rounds_played": item.t_rounds_played, "rounds_won": item.t_rounds_won,
               "rounds_lost": item.t_rounds_lost, "win_rate": _number(item.t_win_rate)},
+        "bomb": _bomb_scope(item),
+        "economy": item.economy_data,
+        "combat": item.combat_data,
+        "utility": item.utility_data,
         "overtime_maps": item.overtime_maps,
         "overtime_rounds_played": item.overtime_rounds_played,
         "overtime_rounds_won": item.overtime_rounds_won,
@@ -131,6 +164,18 @@ def _scope(item: TeamMapAggregate, today: date) -> dict:
     }
 
 
+def _bomb_scope(item: TeamMapAggregate) -> dict:
+    return {
+        "t_rounds_played": item.bomb_t_rounds_played, "plants": item.bomb_plants,
+        "plant_rate": _number(item.plant_rate),
+        "postplant_rounds": item.postplant_rounds, "postplant_wins": item.postplant_wins,
+        "postplant_losses": item.postplant_losses, "postplant_win_rate": _number(item.postplant_win_rate),
+        "retake_opportunities": item.retake_opportunities, "retake_wins": item.retake_wins,
+        "retake_losses": item.retake_losses, "retake_win_rate": _number(item.retake_win_rate),
+        "explosions": item.bomb_explosions, "defuses": item.bomb_defuses,
+    }
+
+
 def _strength_payload(result: MapStrengthResult) -> dict:
     return {
         "status": result.status,
@@ -138,6 +183,10 @@ def _strength_payload(result: MapStrengthResult) -> dict:
         "performance_score": round(result.performance_score, 2) if result.performance_score is not None else None,
         "confidence_score": round(result.confidence_score, 2),
         "confidence_level": result.confidence_level,
+        "model_version": result.model_version, "raw_score": result.raw_score,
+        "reliability": result.reliability,
+        "confidence_adjustment": result.confidence_adjustment,
+        "final_score": result.final_score,
         "factors": [{
             "code": factor.code, "label": factor.label,
             "score": round(factor.score, 2) if factor.score is not None else None,
@@ -145,6 +194,12 @@ def _strength_payload(result: MapStrengthResult) -> dict:
             "effective_weight": round(factor.effective_weight, 6),
             "impact": round(factor.impact, 2),
             "explanation": factor.explanation,
+            "key": factor.key, "raw_value": factor.raw_value,
+            "normalized_score": factor.normalized_score, "weight": factor.weight,
+            "sample_size": factor.sample_size, "confidence": factor.confidence,
+            "available": factor.available, "reason": factor.reason,
+            "reference_value": factor.reference_value,
+            "reference_source": factor.reference_source,
         } for factor in result.factors],
         "warnings": result.warnings,
     }
@@ -246,6 +301,10 @@ def _comparison_side(items: list[TeamMapAggregate], today: date) -> dict | None:
         "confidence_score": round(strength.confidence_score, 2),
         "confidence_level": strength.confidence_level,
         "status": strength.status,
+        "bomb": _bomb_scope(all_item),
+        "economy": all_item.economy_data,
+        "combat": all_item.combat_data,
+        "utility": all_item.utility_data,
     }
 
 

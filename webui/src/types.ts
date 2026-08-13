@@ -23,6 +23,11 @@ export interface TeamStrengthFactor {
   value: number;
   explanation: string;
   players: string[];
+  key: string; raw_value: unknown; normalized_score: number | null;
+  weight: number; effective_weight: number; impact: number;
+  sample_size: number | null; confidence: number | null;
+  reason: string | null; available: boolean;
+  reference_value: number | null; reference_source: string | null;
 }
 
 export interface TeamStrength {
@@ -37,20 +42,65 @@ export interface TeamStrength {
   missing_required_roles: string[];
   factors: TeamStrengthFactor[];
   notes: string[];
+  model_version: string; raw_score: number; reliability: number;
+  confidence_adjustment: number; final_score: number;
+  team_strength_raw_score: number; team_strength_reliability: number;
+  team_strength_model_version: string;
 }
 
 export interface TeamDetail extends Team {
   strength: TeamStrength;
+  leadership: Leadership;
 }
+export interface LeadershipFactor {key:string;label:string;raw_value:unknown;normalized_score:number|null;weight:number;effective_weight:number;impact:number;sample_size:number|null;confidence:number|null;reason:string|null;available:boolean}
+export interface LeadershipScore {score:number;raw_score:number;reliability:number;model_version:string;management_residual:number|null;actual_performance:number|null;expected_performance:number|null;sample:{maps:number;available_factors:number;total_factors:number};factors:LeadershipFactor[]}
+export interface Leadership {management_context:{roster_id:number|null;period_started_at:string|null;role_history_status:string};igl:(LeadershipScore&{player_id:number;name:string;player_strength:number|null;captain_strength:number|null;period:{started_at:string|null;ended_at:string|null;source:string}})|null;coach:(LeadershipScore&{id:number;name:string;roster_attribution_factor:number;tenure:{started_at:string|null;ended_at:string|null;source:string}})|null}
 
 export interface TeamMapScope {
   maps_played: number; maps_won: number; maps_lost: number; map_win_rate: number | null;
   rounds_played: number; rounds_won: number; rounds_lost: number; round_win_rate: number | null;
   ct: { rounds_played: number; rounds_won: number; rounds_lost: number; win_rate: number | null };
   t: { rounds_played: number; rounds_won: number; rounds_lost: number; win_rate: number | null };
+  bomb: BombStats;
+  economy: EconomyStats | null;
+  combat: TeamCombatStats | null;
+  utility: UtilityStats | null;
   sample_size_score: number; sample_size_label: string;
   freshness_score: number; freshness_label: string;
   first_match_date: string | null; last_match_date: string | null;
+}
+
+export interface TeamCombatStats {
+  opening: { kills: number; deaths: number; success_rate: number | null; conversion_rate: number | null; recovery_rate: number | null; ct_kills: number; ct_deaths: number; t_kills: number; t_deaths: number };
+  trade: { trade_kills: number; deaths_traded: number; eligible_team_deaths: number; trade_rate: number | null };
+  clutch: { opportunities: number; wins: number; win_rate: number | null; clutches_lost_to_opponent: number; breakdown: Record<string, {attempts: number; wins: number}> };
+}
+export interface UtilityStats {
+  rounds_played: number; total_utility_thrown: number; utility_per_round: number | null;
+  he_thrown: number; flash_thrown: number; smoke_thrown: number; fire_thrown: number;
+  he_damage: number; fire_damage: number; utility_damage: number;
+  he_damage_per_round: number | null; fire_damage_per_round: number | null; utility_damage_per_round: number | null;
+  enemies_flashed: number; teammates_flashed: number; enemies_flashed_per_flash: number | null;
+  flash_assists: number; flash_assists_per_round: number | null;
+  ct: Record<string, number | null>; t: Record<string, number | null>;
+}
+
+export interface BombStats {
+  t_rounds_played: number; plants: number; plant_rate: number | null;
+  postplant_rounds: number; postplant_wins: number; postplant_losses: number; postplant_win_rate: number | null;
+  retake_opportunities: number; retake_wins: number; retake_losses: number; retake_win_rate: number | null;
+  explosions: number; defuses: number;
+}
+
+export interface EconomyMetric { rounds: number; wins: number; losses: number; win_rate: number | null }
+export interface EconomyStats {
+  pistol: EconomyMetric; first_pistol: EconomyMetric; second_pistol: EconomyMetric;
+  both_pistols: EconomyMetric; conversion: EconomyMetric;
+  post_pistol_vs_force: EconomyMetric; second_round_comeback: EconomyMetric;
+  eco: EconomyMetric; force_buy: EconomyMetric; full_buy: EconomyMetric;
+  anti_eco: EconomyMetric; full_buy_vs_full_buy: EconomyMetric;
+  force_vs_full_buy: EconomyMetric;
+  save: {rounds: number; players_saved: number; status: string};
 }
 
 export type MapStrengthStatus = "available" | "not_enough_data";
@@ -74,6 +124,8 @@ export interface MapStrengthResult {
   confidence_level: MapConfidenceLevel;
   factors: MapStrengthFactor[];
   warnings: string[];
+  model_version: string; raw_score: number | null; reliability: number;
+  confidence_adjustment: number | null; final_score: number | null;
 }
 
 export interface TeamMapAggregate {
@@ -191,8 +243,18 @@ export interface MatchSeries {
   status: string; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean;
   team_a: { id: number | null; name: string | null }; team_b: { id: number | null; name: string | null };
   score: { team_a: number; team_b: number }; winner_team_id: number | null;
-  maps: Array<{ map_number: number; map_name: string | null; team_a_score: number | null; team_b_score: number | null; winner_team_id: number | null; demo_file_id: number }>;
+  maps: Array<{ map_number: number; map_name: string | null; team_a_score: number | null; team_b_score: number | null; winner_team_id: number | null; demo_file_id: number; map_role: "team_pick"|"opponent_pick"|"decider"|"unknown"; picked_by_team_id:number|null }>;
+  veto_data_status: "not_available"|"complete"|"partial"|"needs_review"|"invalid";
+  veto_expected: boolean;
+  veto: VetoAction[];
 }
+export interface VetoAction { id?:number; order_index:number; team_id:number|null; team_name?:string|null; action:"ban"|"pick"|"decider"; map_name:string; source?:string; source_external_id?:string|null }
+export interface VetoMap { map_name:string; active:boolean; eligible_series:number; veto_appearances:number; ban:{count:number;rate:number|null;first_ban_count:number;first_ban_rate:number|null}; pick:{count:number;rate:number|null;first_pick_count:number;first_pick_rate:number|null;maps:number;wins:number;losses:number;win_rate:number|null}; opponent_pick:{maps:number;wins:number;losses:number;win_rate:number|null}; decider:{maps:number;wins:number;losses:number;win_rate:number|null}; is_likely_permaban:boolean;permaban_confidence:number;pick_preference_score:number|null }
+export interface TeamVetoProfile { team_id:number;team_name:string;aggregation_level:"organization"|"current_roster";roster_id:number|null;sample:{series:number;complete_series:number};veto_confidence:number;denominator:string;maps:VetoMap[] }
+export interface VetoComparison {team_a:TeamVetoProfile;team_b:TeamVetoProfile;maps:Array<{map_name:string;team_a:VetoMap;team_b:VetoMap;collision:"unknown"|"low"|"medium"|"high";availability:"unknown"|"likely_available"|"contested"|"likely_removed"}>;h2h:{series:number;maps:VetoMap[]}}
+export interface CalculatedVetoFactor {key:string;label:string;raw_value:unknown;score:number|null;normalized_score:number|null;weight:number;effective_weight:number;impact:number;sample_size:number|null;confidence:number|null;reason:string|null;available:boolean}
+export interface CalculatedVetoSide {matchup_map_score:number;calculated_pick_score:number;calculated_ban_score:number;matchup_confidence:number;pick_confidence:number;ban_confidence:number;matchup_factors:CalculatedVetoFactor[];pick_factors:CalculatedVetoFactor[];ban_factors:CalculatedVetoFactor[]}
+export interface CalculatedVeto {calculated_veto_model_version:string;score_semantics:"analytical_score_0_100_not_probability";format:"bo3";veto_format_assumption:string;first_actor_known:boolean;team_a:{id:number;name:string};team_b:{id:number;name:string};maps:Array<{map:string;active:boolean;team_a:CalculatedVetoSide;team_b:CalculatedVetoSide;collision_score:number;collision:"low"|"medium"|"high"}>;scenarios:Array<{first_actor:"team_a"|"team_b";actions:Array<{order:number;team:"team_a"|"team_b"|null;action:"ban"|"pick"|"decider";map:string;effective_action_score:number|null}>}>}
 export interface MatchListResponse { total: number; items: MatchSeries[] }
 export interface MatchStatLine { matches_played: number; matches_won: number; matches_lost: number; match_win_rate: number | null }
 export interface TeamMatchStats { team_id: number; aggregation_level: "organization" | "current_roster"; roster_id: number | null; all: MatchStatLine; by_format: Record<"bo1" | "bo3" | "bo5", MatchStatLine>; by_context: Record<"lan" | "online" | "playoff" | "elimination" | "final", MatchStatLine> }
@@ -202,6 +264,10 @@ export interface TeamMapComparisonSide {
   maps_played: number; maps_won: number; maps_lost: number; map_win_rate: number | null;
   map_strength_score: number | null; confidence_score: number;
   confidence_level: MapConfidenceLevel; status: MapStrengthStatus;
+  bomb: BombStats;
+  economy: EconomyStats | null;
+  combat: TeamCombatStats | null;
+  utility: UtilityStats | null;
 }
 
 export interface TeamMapComparisonItem {
@@ -259,6 +325,7 @@ export interface TeamComparisonSide {
   coaches: TeamComparisonPlayer[];
   strength: TeamStrength;
   relative_strength_percent: number | null;
+  leadership: Leadership;
 }
 
 export interface TeamRoleComparison {
@@ -289,7 +356,10 @@ export interface TeamComparison {
   };
   role_comparisons: TeamRoleComparison[];
   summary_notes: string[];
+  round_swing_comparison: {scope:string;team_a:RosterSwingProfile;team_b:RosterSwingProfile;per_map:Record<string,unknown>};
 }
+
+export interface RosterSwingProfile {status:string;avg_swing?:number;top2_swing?:number;bottom2_swing?:number;ct_swing?:number|null;t_swing?:number|null;opening_swing?:number|null;clutch_swing?:number|null;confidence:number;sample:{players:number;rounds:number}}
 
 
 export interface TeamParticipant {
@@ -351,6 +421,11 @@ export interface Player {
   bo3_rating: string | number | null;
   bo3_avg_rating: string | number | null;
   player_strength: number | null;
+  player_strength_raw_score: number | null;
+  player_strength_reliability: number | null;
+  player_strength_model_version: string | null;
+  igl: Leadership["igl"];
+  captain_strength: number|null;
   steam_id: string | null;
   internal_rating: string | number | null;
   internal_rating_maps_count: number;
@@ -364,13 +439,20 @@ export interface Player {
   internal_rating_top16_30_maps_count: number;
   internal_rating_top16_30_rounds_count: number;
   strength_breakdown: {
-    baseline: number;
-    formula: string;
-    factors: StrengthFactor[];
+    model_version: string; raw_score: number; reliability: number;
+    confidence_adjustment: number; final_score: number;
+    normalization_source: string;
+    factors: Array<{key: string; label: string; raw_value: unknown;
+      normalized_score: number | null; weight: number; effective_weight: number;
+      impact: number; sample_size: number | null; confidence: number | null;
+      reason: string | null; available: boolean}>;
   } | null;
   stats_synced_at: string | null;
   source_updated_at: string | null;
   teams: PlayerTeam[];
+  combat: { overall: Record<string, number | null> | null; recent_10: Record<string, number | null> | null; top_15: Record<string, number | null> | null; top_16_30: Record<string, number | null> | null; maps: Record<string, Record<string, number | null> | null> };
+  utility: { overall: UtilityStats | null; recent_5: UtilityStats | null; recent_10: UtilityStats | null; recent_20: UtilityStats | null; top_15: UtilityStats | null; top_16_30: UtilityStats | null; maps: Record<string, UtilityStats | null> };
+  round_swing: {status:string;score?:number;raw_per_round?:number;adjusted_per_round?:number;confidence?:number;rounds?:number;ct?:number|null;t?:number|null;opening?:number|null;trade?:number|null;clutch?:number|null;postplant?:number|null;retake?:number|null};
 }
 
 
@@ -440,6 +522,8 @@ export interface DemoUploadResponse {
   unchanged_count: number;
   failed_count: number;
   files: DemoUploadFileResult[];
+  parse_job_id: string | null;
+  parse_job_status: string | null;
 }
 
 export interface DemoListFile {
@@ -459,6 +543,8 @@ export interface DemoListFile {
   winner_team_name: string | null;
   metadata_status: DemoMetadataStatus | null;
   round_data_status: RoundDataStatus | null;
+  bomb_data_status: RoundDataStatus | null;
+  economy_data_status: RoundDataStatus | null;
 }
 
 export type DemoMetadataStatus = "complete" | "partial" | "needs_review" | "invalid";
@@ -476,6 +562,10 @@ export interface DemoMapResult {
   metadata_status: DemoMetadataStatus;
   issues: string[];
   round_data_status: RoundDataStatus;
+  bomb_data_status: RoundDataStatus;
+  economy_data_status: RoundDataStatus;
+  combat_data_status: RoundDataStatus;
+  utility_data_status: RoundDataStatus;
   rounds_parsed_count: number;
   rounds_expected_count: number | null;
   rounds_consistent: boolean;
@@ -488,6 +578,11 @@ export interface DemoRound {
   end_reason: string; team_a_score_before: number | null; team_b_score_before: number | null;
   team_a_score_after: number | null; team_b_score_after: number | null;
   started_at_tick: number | null; ended_at_tick: number | null; duration_seconds: string | number | null;
+  bomb_planted: boolean; bomb_defused: boolean; bomb_exploded: boolean;
+  is_pistol_round: boolean; pistol_round_number: number | null;
+  team_a_equipment_value: number | null; team_b_equipment_value: number | null;
+  team_a_economy: "eco" | "force_buy" | "full_buy" | "unknown";
+  team_b_economy: "eco" | "force_buy" | "full_buy" | "unknown";
 }
 
 export interface DemoRoundsResponse {
@@ -502,6 +597,26 @@ export interface DemoTeamSideStat {
 }
 export interface DemoSideStatsResponse {
   demo_file_id: number; map_name: string | null; round_data_status: RoundDataStatus; teams: DemoTeamSideStat[];
+}
+export interface DemoTeamBombStat extends BombStats { team_id: number | null; team_name: string }
+export interface DemoBombStatsResponse { demo_file_id: number; map_name: string | null; bomb_data_status: RoundDataStatus; teams: DemoTeamBombStat[] }
+export interface DemoTeamEconomyStat extends Omit<EconomyStats, "save"> {
+  team_id: number | null; team_name: string; save_rounds: number;
+  players_saved: number; save_data_status: string;
+}
+export interface DemoEconomyStatsResponse {
+  demo_file_id: number; map_name: string | null; economy_data_status: RoundDataStatus;
+  teams: DemoTeamEconomyStat[];
+}
+export interface DemoCombatStatsResponse {
+  demo_file_id: number; map_name: string | null; combat_data_status: RoundDataStatus;
+  teams: Array<{team_id: number | null; team_name: string; [key: string]: unknown}>;
+  players: Array<{player_id: number | null; nickname: string; team_name: string | null; [key: string]: unknown}>;
+}
+export interface DemoUtilityStatsResponse {
+  demo_file_id: number; map_name: string | null; utility_data_status: RoundDataStatus;
+  teams: Array<UtilityStats & {team_id: number | null; team_name: string}>;
+  players: Array<UtilityStats & {player_id: number | null; nickname: string; team_name: string | null}>;
 }
 
 export interface DemoMapResultPatch {
@@ -545,6 +660,8 @@ export interface DemoPlayerStat {
   opponent_rank_group: "top_15" | "top_16_30" | "outside_top_30" | "unknown";
   opponent_rank_source: "historical_snapshot" | "current_fallback" | "unknown";
   opponent_rank_snapshot_date: string | null;
+  combat: Record<string, number | null> | null;
+  utility: UtilityStats | null;
 }
 
 export interface DemoRankReclassifyResponse {

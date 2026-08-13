@@ -16,6 +16,7 @@ import {
   getTeamMaps,
   getTeamMapDetail,
   getTeamMatchStats,
+  getTeamVeto,
 } from "./api";
 import type {
   ProbeResult,
@@ -28,6 +29,8 @@ import type {
   TeamMapScope,
   TeamMapDetail,
   TeamMatchStats,
+  TeamVetoProfile,
+  LeadershipScore,
 } from "./types";
 import { TeamComparePage } from "./pages/TeamComparePage";
 import { DemosPage } from "./pages/DemosPage";
@@ -38,6 +41,8 @@ type LoadState =
   | { kind: "loading" }
   | { kind: "ready" }
   | { kind: "error"; message: string };
+
+function LeadershipFactors({value}:{value:LeadershipScore}) { return <details><summary>Breakdown · model {value.model_version}</summary>{value.factors.map(f=><div className="factor" key={f.key}><span className={`factor__impact factor__impact--${f.impact>0?"positive":f.impact<0?"negative":"neutral"}`}>{f.impact>0?"+":""}{f.impact.toFixed(2)}</span><div><strong>{f.label}: {f.available?f.normalized_score?.toFixed(1):"нет данных"}</strong><small>Вес {(f.effective_weight*100).toFixed(1)}% · sample {f.sample_size??"—"}</small></div></div>)}</details> }
 
 type ActionState =
   | { kind: "idle" }
@@ -212,15 +217,23 @@ function PlayerPage({ id }: { id: number }) {
       <section className="player-grid">
         <article className="metric-card"><span>Avg BO3.gg</span><strong>{player.bo3_avg_rating === null ? "—" : Number(player.bo3_avg_rating).toFixed(2)}</strong></article>
         <article className="metric-card internal-rating-card" title="Группа соперника определяется по его месту на дату матча. Если исторических данных нет, используется текущее место."><span>Внутренний рейтинг</span>{[["Общий", player.internal_rating, player.internal_rating_maps_count, player.internal_rating_rounds_count], ["Против Top 1–15", player.internal_rating_top15, player.internal_rating_top15_maps_count, player.internal_rating_top15_rounds_count], ["Против Top 16–30", player.internal_rating_top16_30, player.internal_rating_top16_30_maps_count, player.internal_rating_top16_30_rounds_count]].map(([label, rating, maps, rounds]) => <div className="internal-rating-row" key={String(label)}><span>{label}</span><strong>{rating === null ? "—" : Number(rating).toFixed(2)}</strong><small>{rating === null ? "Нет данных" : `${maps} карт · ${rounds} раундов`}</small></div>)}</article>
-        <article className="metric-card"><span>Сила игрока</span><strong>{player.player_strength ?? "—"}<small>/100</small></strong></article>
+        <article className="metric-card"><span>Сила игрока V2</span><strong>{player.player_strength ?? "—"}<small>/100</small></strong><small>Надёжность данных: {player.player_strength_reliability === null ? "—" : `${(player.player_strength_reliability * 100).toFixed(0)}%`} · модель {player.player_strength_model_version ?? "—"}</small></article>
+        {player.igl&&<><article className="metric-card"><span>IGL Strength</span><strong>{player.igl.score.toFixed(1)}<small>/100</small></strong><small>Отдельно от индивидуальной силы · confidence {(player.igl.reliability*100).toFixed(0)}%</small></article><article className="metric-card"><span>Captain Strength</span><strong>{player.captain_strength?.toFixed(1)??"—"}<small>/100</small></strong><small>35% Player + 65% IGL</small></article></>}
         <article className="metric-card"><span>Последнее обновление</span><strong className="metric-date">{formatDate(player.stats_synced_at)}</strong></article>
+      </section>
+      {player.igl&&<section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">In-game leadership</p><h2>IGL Strength breakdown</h2></div></div><LeadershipFactors value={player.igl}/><p className="formula">Actual {player.igl.actual_performance?.toFixed(1)??"—"} vs expected {player.igl.expected_performance?.toFixed(1)??"—"}; residual {player.igl.management_residual?.toFixed(1)??"—"}. Корреляция, не доказательство причинности.</p></section>}
+      <section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">Win probability impact</p><h2>Round Swing</h2></div><span>model v1</span></div>{player.round_swing.status==="complete"?<><div className="team-map-rates"><span>Swing score <strong>{player.round_swing.score?.toFixed(1)??"—"}</strong><small>50 = reference average</small></span><span>Swing / round <strong>{player.round_swing.adjusted_per_round?.toFixed(2)??"—"}</strong><small>raw {player.round_swing.raw_per_round?.toFixed(2)} п.п. · confidence {((player.round_swing.confidence??0)*100).toFixed(0)}%</small></span><span>CT / T <strong>{player.round_swing.ct?.toFixed(2)??"—"} / {player.round_swing.t?.toFixed(2)??"—"}</strong><small>{player.round_swing.rounds} rounds</small></span></div><details><summary>Context breakdown</summary><div className="team-map-rates">{(["opening","trade","clutch","postplant","retake"] as const).map(key=><span key={key}>{key}<strong>{player.round_swing[key]?.toFixed(2)??"—"}</strong></span>)}</div></details></>:<div className="empty-state">Round Swing: {player.round_swing.status.replaceAll("_"," ")}</div>}</section>
+      <section className="strength-panel">
+        <div className="section-heading"><div><p className="eyebrow">Combat</p><h2>Opening / Trades / Clutches</h2></div></div>
+        {player.combat.overall ? <div className="team-map-rates"><span>Opening K/D <strong>{player.combat.overall.opening_kills}–{player.combat.overall.opening_deaths}</strong><small>{player.combat.overall.opening_success_rate === null ? "Нет выборки" : `${Number(player.combat.overall.opening_success_rate).toFixed(1)}%`}</small></span><span>Trades <strong>{player.combat.overall.trade_kills}</strong><small>Смертей разменяно: {player.combat.overall.deaths_traded}</small></span><span>Clutches <strong>{player.combat.overall.clutch_wins}/{player.combat.overall.clutch_opportunities}</strong><small>1v1 {player.combat.overall.clutch_1v1_wins}/{player.combat.overall.clutch_1v1_attempts} · 1v2 {player.combat.overall.clutch_1v2_wins}/{player.combat.overall.clutch_1v2_attempts} · 1v3 {player.combat.overall.clutch_1v3_wins}/{player.combat.overall.clutch_1v3_attempts}</small></span></div> : <div className="empty-state">Нужен повторный парсинг demo для combat analytics.</div>}
+        <h3>Utility</h3>{player.utility.overall ? <div className="team-map-rates"><span>Utility dmg/round <strong>{player.utility.overall.utility_damage_per_round?.toFixed(2) ?? "—"}</strong><small>HE {player.utility.overall.he_damage_per_round?.toFixed(2) ?? "—"} · Fire {player.utility.overall.fire_damage_per_round?.toFixed(2) ?? "—"}</small></span><span>Flash <strong>{player.utility.overall.enemies_flashed_per_flash?.toFixed(2) ?? "—"}</strong><small>assists/round {player.utility.overall.flash_assists_per_round?.toFixed(2) ?? "—"} · team flashes {player.utility.overall.teammates_flashed}</small></span><span>Utility/round <strong>{player.utility.overall.utility_per_round?.toFixed(2) ?? "—"}</strong><small>HE {player.utility.overall.he_thrown} · Flash {player.utility.overall.flash_thrown} · Smoke {player.utility.overall.smoke_thrown} · Fire {player.utility.overall.fire_thrown}</small></span></div> : <div className="empty-state">Нужен повторный парсинг demo для utility analytics.</div>}
       </section>
       <section className="strength-panel">
         <div className="section-heading"><div><p className="eyebrow">Расшифровка</p><h2>Что повлияло на силу</h2></div></div>
         {player.strength_breakdown ? player.strength_breakdown.factors.map((factor) => (
-          <div className="factor" key={factor.metric}><span className={`factor__impact factor__impact--${factor.direction}`}>{factor.impact > 0 ? "+" : ""}{factor.impact}</span><div><strong>Avg BO3.gg: {factor.value.toFixed(2)}</strong><p>{factor.explanation}</p></div></div>
+          <div className="factor" key={factor.key}><span className={`factor__impact factor__impact--${factor.impact > 0 ? "positive" : factor.impact < 0 ? "negative" : "neutral"}`}>{factor.impact > 0 ? "+" : ""}{factor.impact.toFixed(2)}</span><div><strong>{factor.label}: {factor.available ? factor.normalized_score?.toFixed(1) : "нет данных"}</strong><p>{factor.reason}</p><small>Эффективный вес {(factor.effective_weight * 100).toFixed(1)}% · выборка {factor.sample_size ?? "—"} · надёжность {factor.confidence === null ? "—" : `${(factor.confidence * 100).toFixed(0)}%`}</small></div></div>
         )) : <div className="empty-state">BO3.gg пока не предоставил рейтинг. Нажмите «Обновить».</div>}
-        {player.strength_breakdown && <small className="formula">{player.strength_breakdown.formula}</small>}
+        {player.strength_breakdown && <small className="formula">Исходная оценка {player.strength_breakdown.raw_score.toFixed(2)} · надёжность {player.strength_breakdown.reliability.toFixed(2)} · поправка {player.strength_breakdown.confidence_adjustment >= 0 ? "+" : ""}{player.strength_breakdown.confidence_adjustment.toFixed(2)} · итог {player.strength_breakdown.final_score.toFixed(2)}</small>}
       </section>
     </main>
   );
@@ -266,6 +279,7 @@ function TeamPage({ id }: { id: number }) {
   const [mapDetails, setMapDetails] = useState<Record<string, TeamMapDetail>>({});
   const [aggregationLevel, setAggregationLevel] = useState<"organization" | "current_roster">("current_roster");
   const [matchStats, setMatchStats] = useState<TeamMatchStats | null>(null);
+  const [veto,setVeto]=useState<TeamVetoProfile|null>(null);
 
   useEffect(() => {
     getTeam(id).then(setTeam).catch((value: unknown) => {
@@ -283,6 +297,7 @@ function TeamPage({ id }: { id: number }) {
   }, [id, aggregationLevel]);
 
   useEffect(() => { void getTeamMatchStats(id, aggregationLevel).then(setMatchStats).catch(() => setMatchStats(null)); }, [id, aggregationLevel]);
+  useEffect(() => { void getTeamVeto(id, aggregationLevel).then(setVeto).catch(() => setVeto(null)); }, [id, aggregationLevel]);
 
   if (error) return <main className="page"><a className="back-link" href="/">← К командам</a><div className="empty-state empty-state--error">{error}</div></main>;
   if (!team) return <main className="page"><div className="empty-state">Загружаю команду…</div></main>;
@@ -342,16 +357,20 @@ function TeamPage({ id }: { id: number }) {
           <h1>{team.name}</h1>
           <p className="lead">{team.country_name || team.country_code || team.region || "Регион не указан"}</p>
         </div>
-        <div className="team-strength-score"><small>Сила команды</small><strong>{strength.team_strength_score.toFixed(2)}</strong><span>/100</span></div>
+        <div className="team-strength-score"><small>Сила команды {strength.model_version.toUpperCase()}</small><strong>{strength.team_strength_score.toFixed(2)}</strong><span>/100 · надёжность {(strength.reliability * 100).toFixed(0)}%</span></div>
       </section>
 
       <section className="team-metrics">
         <article className="metric-card"><span>Активных игроков</span><strong>{strength.active_players_count}<small>/5</small></strong></article>
         <article className="metric-card"><span>Средняя сила игроков</span><strong>{strength.base_player_score.toFixed(2)}</strong></article>
-        <article className="metric-card"><span>Бонус / штраф</span><strong className="metric-adjustment">+{strength.roster_bonus.toFixed(2)} / −{strength.roster_penalty.toFixed(2)}</strong></article>
+        <article className="metric-card"><span>Исходная → итоговая</span><strong className="metric-adjustment">{strength.raw_score.toFixed(2)} → {strength.final_score.toFixed(2)}</strong></article>
       </section>
 
+      <section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">Standalone analytics</p><h2>Leadership</h2></div></div><div className="h2h-grid"><article className="h2h-card"><h3>IGL</h3>{team.leadership.igl?<><a href={`/players/${team.leadership.igl.player_id}`}><strong>{team.leadership.igl.name}</strong></a><div className="team-map-rates"><span>Player Strength <b>{team.leadership.igl.player_strength??"—"}</b></span><span>IGL Strength <b>{team.leadership.igl.score.toFixed(1)}</b></span><span>Captain Strength <b>{team.leadership.igl.captain_strength?.toFixed(1)??"—"}</b></span></div><LeadershipFactors value={team.leadership.igl}/></>:<p>Активная роль IGL достоверно не назначена.</p>}</article><article className="h2h-card"><h3>Coach</h3>{team.leadership.coach?<><a href={`/players/${team.leadership.coach.id}`}><strong>{team.leadership.coach.name}</strong></a><div className="team-map-rates"><span>Coach Impact <b>{team.leadership.coach.score.toFixed(1)}</b></span><span>Confidence <b>{(team.leadership.coach.reliability*100).toFixed(0)}%</b></span><span>Maps <b>{team.leadership.coach.sample.maps}</b></span></div><LeadershipFactors value={team.leadership.coach}/></>:<p>Активный coach не определён.</p>}</article></div><p className="formula">Leadership — корреляционная attribution-модель и не входит в Team Strength.</p></section>
+
       <section className="strength-panel team-match-panel"><div className="section-heading"><div><p className="eyebrow">Серии</p><h2>Матчи</h2></div><a className="back-link" href={`/matches?team_id=${id}`}>Все серии →</a></div>{matchStats ? <><div className="team-match-summary"><article><span>Всего</span><strong>{matchStats.all.matches_played}</strong></article><article><span>Победы</span><strong>{matchStats.all.matches_won}</strong></article><article><span>Поражения</span><strong>{matchStats.all.matches_lost}</strong></article><article><span>Winrate</span><strong>{matchStats.all.match_win_rate === null ? "—" : `${matchStats.all.match_win_rate.toFixed(1)}%`}</strong></article></div><div className="team-match-breakdown"><span>BO1: <b>{matchStats.by_format.bo1.matches_won}–{matchStats.by_format.bo1.matches_lost}</b></span><span>BO3: <b>{matchStats.by_format.bo3.matches_won}–{matchStats.by_format.bo3.matches_lost}</b></span><span>BO5: <b>{matchStats.by_format.bo5.matches_won}–{matchStats.by_format.bo5.matches_lost}</b></span><span>LAN: <b>{matchStats.by_context.lan.matches_won}–{matchStats.by_context.lan.matches_lost}</b></span><span>Playoff: <b>{matchStats.by_context.playoff.matches_won}–{matchStats.by_context.playoff.matches_lost}</b></span><span>Final: <b>{matchStats.by_context.final.matches_won}–{matchStats.by_context.final.matches_lost}</b></span></div></> : <div className="empty-state">Статистика матчей пока недоступна.</div>}</section>
+
+      <section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">Veto</p><h2>Map Veto Profile</h2></div><span>confidence {veto?.veto_confidence.toFixed(0)??"—"}</span></div>{!veto||veto.sample.series===0?<div className="empty-state">Исторический veto отсутствует для выбранного scope.</div>:<div className="map-pool-table"><div className="map-pool-row map-pool-row--head"><span>Карта</span><span>Pick / first</span><span>Ban / first</span><span>Performance</span><span>Сигнал</span></div>{[...veto.maps].sort((a,b)=>(b.pick.rate??0)+(b.ban.rate??0)-(a.pick.rate??0)-(a.ban.rate??0)).map(m=><div className="map-pool-row" key={m.map_name}><strong>{m.map_name}{!m.active&&<small>inactive</small>}</strong><span>{m.pick.rate?.toFixed(1)??"—"}% / {m.pick.first_pick_rate?.toFixed(1)??"—"}%</span><span>{m.ban.rate?.toFixed(1)??"—"}% / {m.ban.first_ban_rate?.toFixed(1)??"—"}%</span><span><small>Own {m.pick.win_rate?.toFixed(1)??"—"}% · Opp {m.opponent_pick.win_rate?.toFixed(1)??"—"}% · Decider {m.decider.win_rate?.toFixed(1)??"—"}%</small></span><span>{m.is_likely_permaban?"Likely permaban":`pick pref ${m.pick_preference_score?.toFixed(0)??"—"}`}</span></div>)}</div>}<p className="formula">Preference и performance отделены от Map Strength. Sample: {veto?.sample.series??0} серий.</p></section>
 
       <section className="strength-panel team-map-panel">
         <div className="section-heading"><div><p className="eyebrow">Аналитика</p><h2>Статистика по картам</h2></div></div>
@@ -371,7 +390,15 @@ function TeamPage({ id }: { id: number }) {
               <span className={`confidence-badge confidence-badge--${item.strength.confidence_level}`}>{confidenceLabels[item.strength.confidence_level]} · {item.strength.confidence_score.toFixed(2)}</span>
             </div>
             <div className="team-map-rates"><span>CT <strong>{percent(item.all.ct.win_rate)}</strong></span><span>T <strong>{percent(item.all.t.win_rate)}</strong></span><span>Раунды <strong>{item.all.rounds_won}–{item.all.rounds_lost}</strong></span></div>
-            <div className="team-map-scopes"><span>Последние 5: <b>{record(item.recent.last_5)}</b></span><span>Последние 10: <b>{record(item.recent.last_10)}</b></span><span>Последние 20: <b>{record(item.recent.last_20)}</b></span><span>Top 15: <b>{record(item.versus.top_15)}</b></span><span>Top 16–30: <b>{record(item.versus.top_16_30)}</b></span><span>Тир 2–3: <b>{record(item.versus.tier_2_3)}</b></span></div>
+            <div className="team-map-rates"><span>Plant <strong>{percent(item.all.bomb.plant_rate)}</strong></span><span>Postplant <strong>{percent(item.all.bomb.postplant_win_rate)}</strong></span><span>Retake <strong>{percent(item.all.bomb.retake_win_rate)}</strong></span></div>
+            {item.all.economy && <div className="team-map-rates"><span>Пистолетные <strong>{percent(item.all.economy.pistol.win_rate)}</strong></span><span>Конверсия <strong>{percent(item.all.economy.conversion.win_rate)}</strong></span><span>Форс-бай <strong>{percent(item.all.economy.force_buy.win_rate)}</strong></span><span>Полный закуп <strong>{percent(item.all.economy.full_buy.win_rate)}</strong></span><span>Анти-эко <strong>{percent(item.all.economy.anti_eco.win_rate)}</strong></span></div>}
+            {item.all.combat && <div className="team-map-rates"><span>Opening <strong>{percent(item.all.combat.opening.success_rate)}</strong></span><span>Conversion <strong>{percent(item.all.combat.opening.conversion_rate)}</strong></span><span>Trade rate <strong>{percent(item.all.combat.trade.trade_rate)}</strong></span><span>Clutch WR <strong>{percent(item.all.combat.clutch.win_rate)}</strong></span></div>}
+            {item.all.utility && <div className="team-map-rates"><span>Utility dmg/round <strong>{item.all.utility.utility_damage_per_round?.toFixed(2) ?? "—"}</strong></span><span>Enemies/flash <strong>{item.all.utility.enemies_flashed_per_flash?.toFixed(2) ?? "—"}</strong></span><span>Flash assists/round <strong>{item.all.utility.flash_assists_per_round?.toFixed(2) ?? "—"}</strong></span><span>Utility/round <strong>{item.all.utility.utility_per_round?.toFixed(2) ?? "—"}</strong></span></div>}
+            <div className="team-map-scopes">{[["Последние 5", item.recent.last_5], ["Последние 10", item.recent.last_10], ["Последние 20", item.recent.last_20], ["Top 15", item.versus.top_15], ["Top 16–30", item.versus.top_16_30], ["Тир 2–3", item.versus.tier_2_3]] .map(([label, scope]) => { const value = scope as TeamMapScope | null; return <span key={label as string}>{label as string}: <b>{record(value)}</b><small> Plant {percent(value?.bomb.plant_rate ?? null)} · PP {percent(value?.bomb.postplant_win_rate ?? null)} · Retake {percent(value?.bomb.retake_win_rate ?? null)}</small></span>; })}</div>
+            <div className="team-map-scopes">{[["Последние 5", item.recent.last_5], ["Последние 10", item.recent.last_10], ["Последние 20", item.recent.last_20], ["Top 15", item.versus.top_15], ["Top 16–30", item.versus.top_16_30], ["Тир 2–3", item.versus.tier_2_3]].map(([label, scope]) => { const value = scope as TeamMapScope | null; return <span key={`economy-${label as string}`}>{label as string} — экономика<small>Пистолетные {percent(value?.economy?.pistol.win_rate ?? null)} · Конверсия {percent(value?.economy?.conversion.win_rate ?? null)} · Форс {percent(value?.economy?.force_buy.win_rate ?? null)} · Полный {percent(value?.economy?.full_buy.win_rate ?? null)} · Анти-эко {percent(value?.economy?.anti_eco.win_rate ?? null)}</small></span>; })}</div>
+            <div className="team-map-rates"><span>Plants <strong>{item.all.bomb.plants} / {item.all.bomb.t_rounds_played}</strong></span><span>Postplant <strong>{item.all.bomb.postplant_wins}–{item.all.bomb.postplant_losses}</strong> · explosions {item.all.bomb.explosions}</span><span>Retake <strong>{item.all.bomb.retake_wins}–{item.all.bomb.retake_losses}</strong> · defuses {item.all.bomb.defuses}</span></div>
+            {item.all.economy && <div className="team-map-rates"><span>Эко <strong>{percent(item.all.economy.eco.win_rate)}</strong></span><span>Полный против полного <strong>{percent(item.all.economy.full_buy_vs_full_buy.win_rate)}</strong></span><span>Камбэк во втором раунде <strong>{percent(item.all.economy.second_round_comeback.win_rate)}</strong></span><span>Сохранения <strong>{item.all.economy.save.status === "not_parsed" ? "нет надёжных данных" : item.all.economy.save.rounds}</strong></span></div>}
+            {item.all.combat && <div className="team-map-rates"><span>Recovery <strong>{percent(item.all.combat.opening.recovery_rate)}</strong></span><span>CT opening <strong>{item.all.combat.opening.ct_kills}–{item.all.combat.opening.ct_deaths}</strong></span><span>T opening <strong>{item.all.combat.opening.t_kills}–{item.all.combat.opening.t_deaths}</strong></span><span>1vX <strong>{Object.values(item.all.combat.clutch.breakdown).reduce((sum, value) => sum + value.wins, 0)}/{Object.values(item.all.combat.clutch.breakdown).reduce((sum, value) => sum + value.attempts, 0)}</strong></span></div>}
             <small>{item.all.maps_played} карт · Последняя: {item.all.last_match_date ? new Date(item.all.last_match_date).toLocaleDateString("ru-RU") : "дата неизвестна"} · Выборка: {item.all.sample_size_label} · Свежесть: {item.all.freshness_label}</small>
             {item.strength.factors.length > 0 && <div className="map-strength-factors"><b>Из чего сложилась оценка</b>{item.strength.factors.map((factor) => <div key={factor.code}><span>{factor.label}</span><strong>{factor.score === null ? "—" : factor.score.toFixed(2)}</strong><em>{factor.impact >= 0 ? "+" : ""}{factor.impact.toFixed(2)}</em><small>{factor.explanation}</small></div>)}</div>}
             {item.strength.warnings.map((warning) => <p className="map-warning" key={warning}>{mapWarningLabels[warning] ?? warning}</p>)}
@@ -417,8 +444,8 @@ function TeamPage({ id }: { id: number }) {
           <div className="section-heading"><div><p className="eyebrow">Расчёт силы</p><h2>{strength.calculation}</h2></div></div>
           {strength.factors.map((factor) => (
             <div className="team-factor" key={factor.code}>
-              <span className={`team-factor__value team-factor__value--${factor.kind}`}>{factor.value > 0 && factor.kind !== "base" ? "+" : ""}{factor.value.toFixed(2)}</span>
-              <div><strong>{factor.label}</strong><p>{factor.explanation}</p>{factor.players.length > 0 && <small>{factor.players.join(", ")}</small>}</div>
+              <span className={`team-factor__value team-factor__value--${factor.kind}`}>{factor.impact > 0 ? "+" : ""}{factor.impact.toFixed(2)}</span>
+              <div><strong>{factor.label}: {factor.available ? factor.normalized_score?.toFixed(1) : "нет данных"}</strong><p>{factor.reason}</p><small>Эффективный вес {(factor.effective_weight * 100).toFixed(1)}% · выборка {factor.sample_size ?? "—"} · надёжность {factor.confidence === null ? "—" : `${(factor.confidence * 100).toFixed(0)}%`}</small></div>
             </div>
           ))}
           {strength.notes.length > 0 && <ul className="strength-notes">{strength.notes.map((note) => <li key={note}>{note}</li>)}</ul>}

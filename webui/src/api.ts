@@ -15,13 +15,13 @@ import type {
   DemoTournamentOption,
   DemoRankReclassifyResponse,
   DemoMapResult, DemoMapResultPatch, DemoMapOption,
-  DemoRoundsResponse, DemoSideStatsResponse,
+  DemoRoundsResponse, DemoSideStatsResponse, DemoBombStatsResponse, DemoEconomyStatsResponse, DemoCombatStatsResponse, DemoUtilityStatsResponse,
   TeamMapsResponse,
   TeamMapDetail,
   CurrentRosterComparison,
   TeamMapComparisonResponse,
   TeamH2HComparison,
-  MatchBackfillResult, MatchEnvironment, MatchFormat, MatchListResponse, MatchResolution, MatchSeries, MatchStage, TeamMatchStats,
+  MatchBackfillResult, MatchEnvironment, MatchFormat, MatchListResponse, MatchResolution, MatchSeries, MatchStage, TeamMatchStats, TeamVetoProfile, VetoAction, VetoComparison, CalculatedVeto,
 } from "./types";
 
 
@@ -73,6 +73,21 @@ export function getDemoSideStats(id: number): Promise<DemoSideStatsResponse> {
   return request<DemoSideStatsResponse>(`/api/v1/demos/${id}/side-stats`);
 }
 
+export function getDemoBombStats(id: number): Promise<DemoBombStatsResponse> {
+  return request<DemoBombStatsResponse>(`/api/v1/demos/${id}/bomb-stats`);
+}
+
+export function getDemoEconomyStats(id: number): Promise<DemoEconomyStatsResponse> {
+  return request<DemoEconomyStatsResponse>(`/api/v1/demos/${id}/economy-stats`);
+}
+
+export function getDemoCombatStats(id: number): Promise<DemoCombatStatsResponse> {
+  return request<DemoCombatStatsResponse>(`/api/v1/demos/${id}/combat-stats`);
+}
+export function getDemoUtilityStats(id: number): Promise<DemoUtilityStatsResponse> {
+  return request<DemoUtilityStatsResponse>(`/api/v1/demos/${id}/utility-stats`);
+}
+
 export function recalculateDemoSideStats(id: number): Promise<DemoSideStatsResponse> {
   return request<DemoSideStatsResponse>(`/api/v1/demos/${id}/recalculate-side-stats`, { method: "POST" });
 }
@@ -110,8 +125,9 @@ export function getTeamH2H(teamAId: number, teamBId: number, recentLimit = 10): 
   return request<TeamH2HComparison>(`/api/v1/analysis/compare/teams/${teamAId}/${teamBId}/h2h?recent_limit=${recentLimit}`);
 }
 
-export function getMatches(resolutionStatus?: MatchResolution): Promise<MatchListResponse> {
-  return request<MatchListResponse>(`/api/v1/matches${resolutionStatus ? `?resolution_status=${resolutionStatus}` : ""}`);
+export function getMatches(resolutionStatus?: MatchResolution,vetoFilter?:"expected_missing"|"has_veto"): Promise<MatchListResponse> {
+  const query=new URLSearchParams();if(resolutionStatus)query.set("resolution_status",resolutionStatus);if(vetoFilter)query.set("veto_filter",vetoFilter);
+  return request<MatchListResponse>(`/api/v1/matches${query.size?`?${query}`:""}`);
 }
 export function backfillMatches(): Promise<MatchBackfillResult> { return request<MatchBackfillResult>("/api/v1/matches/backfill", { method: "POST" }); }
 export function getMatch(id: number): Promise<MatchSeries> { return request<MatchSeries>(`/api/v1/matches/${id}`); }
@@ -130,6 +146,11 @@ export function splitMatchSeries(id: number, demoFileIds?: number[]): Promise<Ma
 export function getTeamMatchStats(id: number, level: "organization" | "current_roster"): Promise<TeamMatchStats> {
   return request<TeamMatchStats>(`/api/v1/analysis/teams/${id}/matches?aggregation_level=${level}`);
 }
+export function getTeamVeto(id:number,level:"organization"|"current_roster"="organization"):Promise<TeamVetoProfile>{return request(`/api/v1/analysis/teams/${id}/veto?aggregation_level=${level}`)}
+export function compareTeamVeto(a:number,b:number,level:"organization"|"current_roster"="current_roster"):Promise<VetoComparison>{return request(`/api/v1/analysis/compare/teams/${a}/${b}/veto?aggregation_level=${level}`)}
+export function getCalculatedVeto(a:number,b:number):Promise<CalculatedVeto>{return request(`/api/v1/analysis/calculated-veto?team_a_id=${a}&team_b_id=${b}&format=bo3`)}
+export function updateMatchVeto(id:number,actions:VetoAction[],status:MatchSeries["veto_data_status"]):Promise<MatchSeries>{return request(`/api/v1/matches/${id}/veto`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({actions,status})})}
+export function updateMatchVetoText(id:number,text:string,status:MatchSeries["veto_data_status"]):Promise<MatchSeries>{return request(`/api/v1/matches/${id}/veto`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,status})})}
 
 export function compareTeamMaps(
   a: number, b: number,
@@ -205,11 +226,13 @@ export function uploadDemoFiles(
   eventType: "online" | "lan",
   matchDate: string,
   files: File[],
+  parseAfterUpload = false,
 ): Promise<DemoUploadResponse> {
   const body = new FormData();
   body.append("tournament_name", tournamentName);
   body.append("event_type", eventType);
   body.append("match_date", matchDate);
+  body.append("parse_after_upload", String(parseAfterUpload));
   files.forEach((file) => body.append("files", file));
   return request<DemoUploadResponse>("/api/v1/demos/upload", {
     method: "POST",

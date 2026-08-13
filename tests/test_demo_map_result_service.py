@@ -68,6 +68,7 @@ def test_compact_cs2_team_suffix_is_an_exact_alias():
     ("Team Liquid", "Liquid"),
     ("Lynn Vision Gaming", "Lynn Vision"),
     ("DENDELE", "DENDELE CS"),
+    ("DENDELE", "Sharks"),
 ])
 def test_known_demo_team_aliases(demo_name, team_name):
     assert normalize_team_name(demo_name) == normalize_team_name(team_name)

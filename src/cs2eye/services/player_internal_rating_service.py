@@ -108,6 +108,9 @@ async def recalculate_player_internal_ratings(
         INTERNAL_RATING_VERSION if ratings.overall.rounds_count else None
     )
     player.internal_rating_updated_at = datetime.now(UTC)
+    # Keep the persisted compatibility score in sync with the V2 inputs.
+    from cs2eye.services.player_service import calculate_player_strength_for_player
+    player.player_strength, player.strength_breakdown = calculate_player_strength_for_player(player)
     if commit:
         await session.commit()
     return ratings

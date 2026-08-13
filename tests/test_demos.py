@@ -205,6 +205,28 @@ async def test_bad_file_does_not_block_good_file(demo_client: httpx.AsyncClient)
     assert body["created_count"] == 1
 
 
+async def test_upload_auto_parse_queues_only_successfully_stored_files(
+    demo_client: httpx.AsyncClient, monkeypatch,
+) -> None:
+    queued: list[int] = []
+    monkeypatch.setattr(
+        "cs2eye.api.routers.demos.demo_parse_job_manager.start_for_files",
+        lambda ids, replace_existing=True: (
+            queued.extend(ids) or type("Job", (), {"job_id": "upload-job", "status": "queued"})()
+        ),
+    )
+    response = await demo_client.post(
+        "/api/v1/demos/upload",
+        data={"tournament_name":"IEM Cologne","event_type":"online","match_date":"2026-07-28","parse_after_upload":"true"},
+        files=[("files",("good.dem",b"good","application/octet-stream")),
+               ("files",("bad.txt",b"bad","text/plain"))],
+    )
+    body=response.json()
+    successful=[item["id"] for item in body["files"] if item["status"]!="failed"]
+    assert queued == successful
+    assert body["parse_job_id"] == "upload-job"
+
+
 async def test_list_filters_tournament_and_year(demo_client: httpx.AsyncClient) -> None:
     await upload(demo_client, [("a.dem", b"a")], day="2026-07-28")
     await upload(demo_client, [("b.dem", b"b")], day="2025-07-28")

@@ -36,10 +36,12 @@ async def session() -> AsyncIterator[AsyncSession]:
 
 def test_strength_is_bounded_and_explained() -> None:
     strength, breakdown = calculate_player_strength(Decimal("7.2367"))
-    assert strength == 72
+    assert strength == 70
     assert breakdown is not None
-    assert breakdown["factors"][0]["impact"] == 22
-    assert calculate_player_strength(Decimal("12"))[0] == 100
+    assert breakdown["model_version"] == "v2.1"
+    assert breakdown["factors"][0]["available"] is False
+    assert breakdown["factors"][1]["key"] == "bo3_rating"
+    assert calculate_player_strength(Decimal("12"))[0] == 82
     assert calculate_player_strength(None) == (None, None)
 
 
@@ -62,6 +64,7 @@ async def test_player_refresh_updates_same_row_without_duplicates(
     assert await session.scalar(select(func.count(Player.id))) == 1
     saved = (await session.execute(select(Player))).scalar_one()
     assert saved.first_name == "Danil"
-    assert saved.player_strength == 72
+    assert saved.player_strength == 70
+    assert saved.strength_breakdown["model_version"] == "v2.1"
     assert saved.bo3_rating == Decimal("7.2367")
     assert saved.stats_synced_at is not None
