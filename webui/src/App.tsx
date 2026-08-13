@@ -54,6 +54,18 @@ type ActionState =
     }
   | { kind: "error"; message: string };
 
+function joinedAtLabel(value: string | null): string {
+  if (!value) return "Дата присоединения неизвестна";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Дата присоединения неизвестна";
+  return `В команде с ${date.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  })}`;
+}
+
 
 function RosterGroup({
   label,
@@ -79,7 +91,10 @@ function RosterGroup({
             {participant.image_url && (
               <img alt="" src={participant.image_url} />
             )}
-            <span>{participant.nickname}</span>
+            <span className="roster-member__text">
+              <strong>{participant.nickname}</strong>
+              <small>{joinedAtLabel(participant.joined_at)}</small>
+            </span>
           </a>
         ))}
       </div>
@@ -222,7 +237,7 @@ function PlayerPage({ id }: { id: number }) {
         <article className="metric-card"><span>Последнее обновление</span><strong className="metric-date">{formatDate(player.stats_synced_at)}</strong></article>
       </section>
       {player.igl&&<section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">In-game leadership</p><h2>IGL Strength breakdown</h2></div></div><LeadershipFactors value={player.igl}/><p className="formula">Actual {player.igl.actual_performance?.toFixed(1)??"—"} vs expected {player.igl.expected_performance?.toFixed(1)??"—"}; residual {player.igl.management_residual?.toFixed(1)??"—"}. Корреляция, не доказательство причинности.</p></section>}
-      <section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">Win probability impact</p><h2>Round Swing</h2></div><span>model v1</span></div>{player.round_swing.status==="complete"?<><div className="team-map-rates"><span>Swing score <strong>{player.round_swing.score?.toFixed(1)??"—"}</strong><small>50 = reference average</small></span><span>Swing / round <strong>{player.round_swing.adjusted_per_round?.toFixed(2)??"—"}</strong><small>raw {player.round_swing.raw_per_round?.toFixed(2)} п.п. · confidence {((player.round_swing.confidence??0)*100).toFixed(0)}%</small></span><span>CT / T <strong>{player.round_swing.ct?.toFixed(2)??"—"} / {player.round_swing.t?.toFixed(2)??"—"}</strong><small>{player.round_swing.rounds} rounds</small></span></div><details><summary>Context breakdown</summary><div className="team-map-rates">{(["opening","trade","clutch","postplant","retake"] as const).map(key=><span key={key}>{key}<strong>{player.round_swing[key]?.toFixed(2)??"—"}</strong></span>)}</div></details></>:<div className="empty-state">Round Swing: {player.round_swing.status.replaceAll("_"," ")}</div>}</section>
+      <section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">Win probability impact</p><h2>Round Swing</h2></div><span>model {player.round_swing.model?.round_swing_model_version??"—"}</span></div>{player.round_swing.overall?<><div className="team-map-rates"><span>Swing score <strong>{player.round_swing.score?.toFixed(1)??"—"}</strong><small>50 = historical reference median</small></span><span>Swing / round <strong>{player.round_swing.adjusted_per_round?.toFixed(2)??"—"}</strong><small>raw {player.round_swing.raw_per_round?.toFixed(2)} п.п. · confidence {((player.round_swing.confidence??0)*100).toFixed(0)}%</small></span><span>CT / T <strong>{player.round_swing.ct?.toFixed(2)??"—"} / {player.round_swing.t?.toFixed(2)??"—"}</strong><small>{player.round_swing.rounds} rounds</small></span></div><details><summary>Context breakdown</summary><div className="team-map-rates">{(["opening","trade","clutch","postplant","retake"] as const).map(key=><span key={key}>{key}<strong>{player.round_swing[key]?.toFixed(2)??"—"}</strong></span>)}</div></details><details><summary>Maps / opponent rank / recent</summary><div className="map-pool-table"><div className="map-pool-row map-pool-row--head"><span>Scope</span><span>Score</span><span>Adjusted / round</span><span>Rounds</span><span>Confidence</span></div>{Object.entries({...player.round_swing.maps,...player.round_swing.rank_scopes,...player.round_swing.recent}).map(([name,value])=><div className="map-pool-row" key={name}><strong>{name.replaceAll('_',' ')}</strong><span>{value?.score?.toFixed(1)??"—"}</span><span>{value?.adjusted_per_round?.toFixed(2)??"—"}</span><span>{value?.rounds??"—"}</span><span>{value?.confidence===undefined?"—":`${(value.confidence*100).toFixed(0)}%`}</span></div>)}</div></details></>:<div className="empty-state">Round Swing: {player.round_swing.status.replaceAll("_"," ")}</div>}</section>
       <section className="strength-panel">
         <div className="section-heading"><div><p className="eyebrow">Combat</p><h2>Opening / Trades / Clutches</h2></div></div>
         {player.combat.overall ? <div className="team-map-rates"><span>Opening K/D <strong>{player.combat.overall.opening_kills}–{player.combat.overall.opening_deaths}</strong><small>{player.combat.overall.opening_success_rate === null ? "Нет выборки" : `${Number(player.combat.overall.opening_success_rate).toFixed(1)}%`}</small></span><span>Trades <strong>{player.combat.overall.trade_kills}</strong><small>Смертей разменяно: {player.combat.overall.deaths_traded}</small></span><span>Clutches <strong>{player.combat.overall.clutch_wins}/{player.combat.overall.clutch_opportunities}</strong><small>1v1 {player.combat.overall.clutch_1v1_wins}/{player.combat.overall.clutch_1v1_attempts} · 1v2 {player.combat.overall.clutch_1v2_wins}/{player.combat.overall.clutch_1v2_attempts} · 1v3 {player.combat.overall.clutch_1v3_wins}/{player.combat.overall.clutch_1v3_attempts}</small></span></div> : <div className="empty-state">Нужен повторный парсинг demo для combat analytics.</div>}
@@ -243,9 +258,6 @@ function PlayerPage({ id }: { id: number }) {
 const roleLabels: Record<string, string> = {
   igl: "IGL",
   awper: "AWPer",
-  entry_frag: "Entry frag",
-  lurk: "Lurk",
-  anchor_support: "Anchor / Support",
   rifler: "Rifler",
 };
 
@@ -415,11 +427,15 @@ function TeamPage({ id }: { id: number }) {
             {activePlayers.map((player) => (
               <div className="team-player-card" key={player.id}>
                 {player.image_url ? <img src={player.image_url} alt="" /> : <span>{player.nickname.slice(0, 2)}</span>}
-                <div><a href={`/players/${player.id}`}><strong>{player.nickname}</strong></a><small>{player.role ? roleLabels[player.role] : "Роль не назначена"}</small></div>
+                <div>
+                  <a href={`/players/${player.id}`}><strong>{player.nickname}</strong></a>
+                  <small>{player.role ? roleLabels[player.role] ?? "Роль не назначена" : "Роль не назначена"}</small>
+                  <small className="joined-at">{joinedAtLabel(player.joined_at)}</small>
+                </div>
                 <label className="role-picker">
                   <span>Роль</span>
                   <select
-                    value={player.role ?? ""}
+                    value={player.role && roleLabels[player.role] ? player.role : ""}
                     disabled={savingPlayerId === player.id}
                     onChange={(event) => void changeRole(
                       player.id,
@@ -437,7 +453,7 @@ function TeamPage({ id }: { id: number }) {
             ))}
           </div>
           {roleError && <div className="empty-state empty-state--error">{roleError}</div>}
-          <div className="coach-list"><small>Тренер</small>{coaches.length ? coaches.map((coach) => <a href={`/players/${coach.id}`} key={coach.id}>{coach.nickname}</a>) : <span>не указан</span>}</div>
+          <div className="coach-list"><small>Тренер</small>{coaches.length ? coaches.map((coach) => <span className="coach-member" key={coach.id}><a href={`/players/${coach.id}`}>{coach.nickname}</a><small>{joinedAtLabel(coach.joined_at)}</small></span>) : <span>не указан</span>}</div>
         </article>
 
         <article className="strength-panel team-factors-panel">

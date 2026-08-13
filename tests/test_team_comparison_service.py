@@ -256,7 +256,7 @@ async def test_compare_api_contract(session: AsyncSession) -> None:
     payload = response.json()
     assert payload["team_a"]["strength"]["team_strength_score"] is not None
     assert [item["role"] for item in payload["role_comparisons"]] == [
-        "igl", "awper", "entry_frag", "lurk", "anchor_support", "rifler",
+        "igl", "awper", "rifler",
     ]
     assert same.status_code == 400
     assert same.json()["detail"] == "Выберите две разные команды."

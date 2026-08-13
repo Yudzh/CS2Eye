@@ -16,17 +16,11 @@ from cs2eye.services.top_teams_service import get_team_with_roster
 ROLE_ORDER = [
     "igl",
     "awper",
-    "entry_frag",
-    "lurk",
-    "anchor_support",
     "rifler",
 ]
 ROLE_LABELS = {
     "igl": "IGL",
     "awper": "AWPer",
-    "entry_frag": "Entry Frag",
-    "lurk": "Lurk",
-    "anchor_support": "Anchor / Support",
     "rifler": "Rifler",
 }
 ADVANTAGE_THRESHOLD = 5.0

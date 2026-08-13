@@ -130,8 +130,8 @@ class RoundWinProbabilityModel:
         return output
 
     @classmethod
-    def train(cls, examples: Sequence[TrainingExample], *, epochs: int = 8,
-              learning_rate: float = .10, l2: float = .01) -> tuple["RoundWinProbabilityModel", dict]:
+    def train(cls, examples: Sequence[TrainingExample], *, epochs: int = 80,
+              learning_rate: float = .08, l2: float = .01) -> tuple["RoundWinProbabilityModel", dict]:
         import numpy as np
         if len(examples) < 2 or len({item.t_won for item in examples}) < 2:
             raise ValueError("Training requires at least two examples and both outcomes.")
@@ -194,3 +194,10 @@ def robust_swing_score(value: float, distribution: Sequence[float]) -> float | N
     scale = max(median(deviations) * 1.4826, 1e-6)
     z = min(3.0, max(-3.0, (value - center) / scale))
     return round(50 + z * (50 / 3), 2)
+
+
+def robust_swing_score_from_reference(value: float, reference: dict | None) -> float | None:
+    if not reference or reference.get("method") != "median_mad_clipped_z": return None
+    scale = max(float(reference.get("robust_scale", 0)), 1e-6)
+    z = min(3.0, max(-3.0, (value-float(reference["median"]))/scale))
+    return round(50 + z*(50/3), 2)

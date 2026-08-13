@@ -481,6 +481,11 @@ class DemoParseService:
             ))
             await self.session.flush()
             await self._replace_swing_source_events(demo.id, parsed_demo)
+            # Parsing is independent from model availability: no model records
+            # model_not_trained, while an active model calculates immediately.
+            from cs2eye.services.round_swing_service import recalculate_demo_swing
+            await self.session.flush()
+            await recalculate_demo_swing(self.session, demo.id)
             await resolve_demo_rosters(self.session, demo.id, replace_existing=replace_existing)
             await recalculate_demo_affected_aggregates(self.session, demo.id)
             # A series cannot be identified until both organizations are linked.

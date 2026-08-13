@@ -2,6 +2,14 @@ from cs2eye.analytics.round_swing.core import (
     RoundState, RoundWinProbabilityModel, TrainingExample, attribution_v1,
     calibration_metrics, robust_swing_score, temporal_group_split,
 )
+from datetime import date
+from types import SimpleNamespace
+
+import pytest
+
+from cs2eye.services.round_swing_service import (
+    assemble_training_examples, build_training_examples, compose_roster_swing_profile,
+)
 
 def state(t=5, ct=5, bomb="not_planted", time=90, et=20000, ec=20000):
     return RoundState("mirage", t, ct, bomb, et, ec, time)
@@ -47,3 +55,68 @@ def test_metrics_and_robust_normalization():
     metrics=calibration_metrics([.1,.7,.9],[0,1,1])
     assert set(metrics)>={"brier_score","log_loss","calibration_error"}
     assert robust_swing_score(0,[ -2,-1,0,1,2])==50
+
+def dataset_fixture(round_count=2):
+    rows=[];kills=[];bombs=[]
+    for index in range(round_count):
+        rid=index+1
+        rnd=SimpleNamespace(id=rid,started_at_tick=1000,ended_at_tick=2000,duration_seconds=100,
+            team_a_side="T",team_b_side="CT",team_a_equipment_value=20000,
+            team_b_equipment_value=19000,winner_side="T" if index%2==0 else "CT")
+        result=SimpleNamespace(map_name="mirage")
+        demo=SimpleNamespace(id=rid,match_id=10+index,match_date=date(2026,1,index+1))
+        kill=SimpleNamespace(id=rid,round_id=rid,tick=1500,attacker_side="T",victim_side="CT",
+            is_teamkill=False,is_suicide=False,is_opening_kill=True,is_trade_kill=False)
+        rows.append((rnd,result,demo));kills.append(kill)
+    return rows,kills,bombs
+
+def test_bulk_and_reference_dataset_semantics_are_identical():
+    rows,kills,bombs=dataset_fixture(3)
+    bulk=assemble_training_examples(rows,kills,bombs)
+    reference=[]
+    for row in rows:
+        reference.extend(assemble_training_examples([row],[k for k in kills if k.round_id==row[0].id],[]))
+    assert bulk == reference
+
+def test_match_and_standalone_demo_id_namespaces_do_not_collide():
+    rows,kills,bombs=dataset_fixture(2)
+    rows[0][2].match_id=2
+    rows[1][2].match_id=None
+    rows[1][2].id=2
+    examples=assemble_training_examples(rows,kills,bombs)
+    assert {item.match_key for item in examples} == {"match:2","demo:2"}
+
+@pytest.mark.asyncio
+async def test_dataset_builder_query_count_is_bounded_not_per_round():
+    rows,kills,bombs=dataset_fixture(25)
+    class Result:
+        def __init__(self,value):self.value=value
+        def all(self):return self.value
+        def scalars(self):return self
+        def __iter__(self):return iter(self.value)
+    class Session:
+        def __init__(self):self.calls=0
+        async def execute(self,_query):
+            values=(rows,kills,bombs)[self.calls];self.calls+=1;return Result(values)
+    session=Session()
+    examples=await build_training_examples(session)
+    assert session.calls == 3
+    assert len(examples) == 50
+
+def test_roster_profile_uses_selected_map_scope_and_own_reliability():
+    players=[
+        {"player_id":1,"overall":{"adjusted_per_round":2,"score":70,"rounds":200,"confidence":.8,"ct":1,"t":3,"opening":4,"clutch":5},
+         "maps":{"nuke":{"adjusted_per_round":4,"score":85,"rounds":40,"confidence":.3,"ct":3,"t":5,"opening":6,"clutch":7}}},
+        {"player_id":2,"overall":{"adjusted_per_round":0,"score":50,"rounds":200,"confidence":.8,"ct":0,"t":0,"opening":1,"clutch":2},
+         "maps":{}},
+    ]
+    overall=compose_roster_swing_profile(players)
+    nuke=compose_roster_swing_profile(players,"nuke")
+    assert overall["avg_swing"]==1 and overall["sample"]=={"players":2,"rounds":400}
+    assert nuke["avg_swing"]==4 and nuke["sample"]=={"players":1,"rounds":40}
+    assert nuke["confidence"]==.3 and nuke["status"]=="low_confidence"
+
+def test_missing_map_scope_is_unavailable_not_zero():
+    profile=compose_roster_swing_profile([{"player_id":1,"overall":None,"maps":{}}],"mirage")
+    assert profile["status"]=="not_calculated"
+    assert "avg_swing" not in profile

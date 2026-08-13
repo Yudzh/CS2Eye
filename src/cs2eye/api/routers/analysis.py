@@ -30,8 +30,60 @@ from cs2eye.services.team_h2h_service import (
 from cs2eye.services.veto_service import VetoError, VetoService, comparison as veto_comparison
 from cs2eye.services.calculated_veto_service import CalculatedVetoService
 from cs2eye.services.leadership_service import LeadershipService
+from cs2eye.services.matchup_service import MatchupService
+from cs2eye.services.win_probability_service import (
+    activate_win_probability,
+    backtest_win_probability,
+    predict_win_probability,
+    save_prediction,
+    train_win_probability,
+    win_probability_status,
+)
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
+
+@router.get("/matchup")
+async def matchup_score(
+    team_a_id:int, team_b_id:int,
+    format:str=Query("bo3",pattern="^(bo1|bo3|bo5)$"),
+    analysis_mode:str=Query("pre_veto",pattern="^(pre_veto|post_veto)$"),
+    as_of:date|None=None, series_id:int|None=None,
+    session:AsyncSession=Depends(get_db_session),
+)->dict:
+    try:return await MatchupService(session).calculate(team_a_id,team_b_id,format,analysis_mode,as_of,series_id)
+    except ValueError as error:raise HTTPException(422,str(error)) from error
+
+@router.get("/win-probability")
+async def win_probability(team_a_id:int,team_b_id:int,format:str=Query("bo3",pattern="^(bo1|bo3|bo5)$"),analysis_mode:str=Query("pre_veto",pattern="^(pre_veto|post_veto)$"),as_of:date|None=None,series_id:int|None=None,session:AsyncSession=Depends(get_db_session))->dict:
+    try:return await predict_win_probability(session,a=team_a_id,b=team_b_id,format=format,mode=analysis_mode,as_of=as_of,series_id=series_id)
+    except ValueError as error:raise HTTPException(422,str(error)) from error
+
+class PredictionRequest(BaseModel):
+    team_a_id:int;team_b_id:int;format:str="bo3";analysis_mode:str="pre_veto";as_of:date|None=None;series_id:int|None=None
+
+@router.post("/predictions")
+async def create_prediction(body:PredictionRequest,session:AsyncSession=Depends(get_db_session))->dict:
+    try:
+        result=await save_prediction(session,a=body.team_a_id,b=body.team_b_id,format=body.format,mode=body.analysis_mode,as_of=body.as_of,series_id=body.series_id);await session.commit();return result
+    except ValueError as error:raise HTTPException(422,str(error)) from error
+
+@router.post("/win-probability/train")
+async def train_probability(mode:str="pre_veto",session:AsyncSession=Depends(get_db_session)):
+    result=await train_win_probability(session,mode);await session.commit();return result
+
+@router.post("/win-probability/activate/{artifact_id}")
+async def activate_probability(artifact_id:int,force:bool=False,session:AsyncSession=Depends(get_db_session)):
+    try:result=await activate_win_probability(session,artifact_id,force);await session.commit();return result
+    except ValueError as error:raise HTTPException(404,str(error)) from error
+
+@router.post("/win-probability/backtest")
+async def backtest_probability(mode:str=Query("pre_veto",pattern="^(pre_veto|post_veto)$"),artifact_id:int|None=None,session:AsyncSession=Depends(get_db_session)):
+    try:return await backtest_win_probability(session,mode,artifact_id)
+    except ValueError as error:raise HTTPException(422,str(error)) from error
+
+@router.get("/win-probability/status")
+async def probability_status(session:AsyncSession=Depends(get_db_session)):
+    return await win_probability_status(session)
 
 @router.get("/teams/{team_id}/leadership")
 async def team_leadership(team_id:int,session:AsyncSession=Depends(get_db_session))->dict:

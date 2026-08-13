@@ -184,6 +184,55 @@ def test_incomplete_bo3_transfers_are_ignored() -> None:
     ) is None
 
 
+def test_membership_date_falls_back_to_bo3_squad_transfer() -> None:
+    participant = Bo3TeamParticipant(
+        id=18290,
+        slug="blamef",
+        nickname="blameF",
+        player_transfers=[Bo3PlayerTransfer(
+            player_id=18290,
+            team_from_id=794,
+            team_to_id=786,
+            action_date=date(2026, 1, 9),
+            action_type=1,
+        )],
+    )
+
+    assert TopTeamsService._joined_at_from_bo3(
+        756,
+        participant,
+    ) == datetime(2026, 1, 9, tzinfo=UTC)
+
+
+def test_membership_date_matches_latest_bo3_squad_transfer() -> None:
+    participant = Bo3TeamParticipant(
+        id=18189,
+        slug="faven",
+        nickname="faveN",
+        player_transfers=[
+            Bo3PlayerTransfer(
+                player_id=18189,
+                team_from_id=674,
+                team_to_id=756,
+                action_date=date(2025, 12, 27),
+                action_type=1,
+            ),
+            Bo3PlayerTransfer(
+                player_id=18189,
+                team_from_id=495,
+                team_to_id=495,
+                action_date=date(2026, 2, 4),
+                action_type=1,
+            ),
+        ],
+    )
+
+    assert TopTeamsService._joined_at_from_bo3(
+        756,
+        participant,
+    ) == datetime(2026, 2, 4, tzinfo=UTC)
+
+
 async def test_team_details_fall_back_to_ranking_player() -> None:
     response = make_response(1)
     source = FakeRankingSource(response)

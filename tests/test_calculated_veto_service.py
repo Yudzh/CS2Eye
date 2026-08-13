@@ -1,3 +1,4 @@
+from cs2eye.analytics.calculated_veto_config import CALCULATED_VETO_MODEL_VERSION
 from cs2eye.services.calculated_veto_service import MapSignals, blend_signals, calculate_map_pair, simulate
 
 def sig(strength=50, maps=10, recent=50, **kw):
@@ -75,3 +76,27 @@ def test_actual_veto_is_not_part_of_simulation_mutation():
 def test_inactive_pool_is_service_loader_responsibility():
     # Pure simulator receives the already-filtered active pool and preserves that boundary.
     rows=map_rows();assert all(a["map"] in {x["map"] for x in rows} for a in simulate(rows,"team_a")["actions"])
+
+def test_round_swing_changes_existing_tactical_factor():
+    low=sig(combat={"trade":{"trade_rate":50}},swing={"avg_score":25})
+    high=sig(combat={"trade":{"trade_rate":50}},swing={"avg_score":75})
+    opponent=sig(combat={"trade":{"trade_rate":50}},swing={"avg_score":50})
+    low_factor=next(x for x in score(low,opponent)["team_a"]["matchup_factors"] if x["key"]=="economy_combat_matchup")
+    high_factor=next(x for x in score(high,opponent)["team_a"]["matchup_factors"] if x["key"]=="economy_combat_matchup")
+    assert high_factor["score"] > low_factor["score"]
+    assert "Round Swing" in high_factor["reason"]
+
+def test_missing_swing_renormalizes_without_zero_penalty():
+    own=sig(combat={"trade":{"trade_rate":60}})
+    opponent=sig(combat={"trade":{"trade_rate":50}})
+    factor=next(x for x in score(own,opponent)["team_a"]["matchup_factors"] if x["key"]=="economy_combat_matchup")
+    assert factor["score"] is not None
+    assert "fallback" in factor["reason"]
+
+def test_swing_does_not_create_extra_top_level_factor():
+    factors=score(sig(swing={"avg_score":70}),sig(swing={"avg_score":50}))["team_a"]["matchup_factors"]
+    assert [item["key"] for item in factors].count("economy_combat_matchup")==1
+    assert not any(item["key"]=="round_swing" for item in factors)
+
+def test_tactical_matchup_model_version_is_v1_1():
+    assert CALCULATED_VETO_MODEL_VERSION=="v1.1"

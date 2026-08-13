@@ -1,14 +1,14 @@
 import type { TeamComparison } from "../types";
+import { Term } from "./InfoTip";
 
 const labels: Record<string, string> = {
-  igl: "IGL", awper: "AWPer", entry_frag: "Entry Frag",
-  lurk: "Lurk", anchor_support: "Anchor / Support", rifler: "Rifler",
+  igl: "IGL", awper: "AWPer", rifler: "Rifler",
 };
 
 export function RoleComparisonTable({ comparison }: { comparison: TeamComparison }) {
   return (
     <section className="role-comparison">
-      <div className="section-heading"><div><p className="eyebrow">Роли</p><h2>Сравнение игроков</h2></div></div>
+      <div className="section-heading"><div><p className="eyebrow">Роли</p><h2><Term tip="Сопоставление игроков одинаковых назначенных ролей по их итоговой силе. Неназначенные роли не сравниваются.">Сравнение игроков</Term></h2></div></div>
       <div className="role-table">
         <div className="role-row role-row--head"><span>Роль</span><span>{comparison.team_a.name}</span><span>{comparison.team_b.name}</span><span>Преимущество</span></div>
         {comparison.role_comparisons.map((role) => (

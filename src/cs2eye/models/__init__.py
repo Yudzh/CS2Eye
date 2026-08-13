@@ -31,6 +31,7 @@ from cs2eye.models.team import (
     TeamRosterMember,
     TeamRankingSnapshot,
 )
+from cs2eye.models.prediction import MatchPrediction,WinProbabilityModelArtifact
 
 
 __all__ = [
@@ -64,4 +65,5 @@ __all__ = [
     "TeamRoster",
     "TeamRosterMember",
     "TeamRankingSnapshot",
+    "MatchPrediction","WinProbabilityModelArtifact",
 ]

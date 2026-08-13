@@ -29,7 +29,7 @@ from cs2eye.services.team_comparison_service import (
     TeamNotFoundError,
 )
 from cs2eye.services.leadership_service import LeadershipService
-from cs2eye.services.round_swing_service import roster_swing_profile
+from cs2eye.services.round_swing_service import active_model, compose_roster_swing_profile, player_round_swing
 from cs2eye.models.team import Player, Team, TeamParticipantMembership, TeamRoster, TeamRosterMember
 
 
@@ -84,7 +84,11 @@ async def get_teams(
                     image_url=player.image_url,
                     country_code=player.country_code,
                     country_name=player.country_name,
-                    participant_type=participant_type,
+                    participant_type=membership.participant_type,
+                    role=membership.role,
+                    is_active=membership.is_active,
+                    joined_at=membership.joined_at,
+                    left_at=membership.left_at,
                     player_strength=player.player_strength,
                     bo3_rating=player.bo3_rating,
                     bo3_avg_rating=player.bo3_rating,
@@ -99,7 +103,7 @@ async def get_teams(
                     internal_rating_top16_30_maps_count=player.internal_rating_top16_30_maps_count,
                     internal_rating_top16_30_rounds_count=player.internal_rating_top16_30_rounds_count,
                 )
-                for player, participant_type
+                for player, membership
                 in rosters.get(team.id, [])
             ],
         )
@@ -160,6 +164,16 @@ async def compare_teams(
             leadership=leadership,
         )
 
+    swing_players_a=[{"player_id":player.id,**await player_round_swing(session,player.id)} for player in comparison.team_a.roster]
+    swing_players_b=[{"player_id":player.id,**await player_round_swing(session,player.id)} for player in comparison.team_b.roster]
+    swing_a=compose_roster_swing_profile(swing_players_a);swing_b=compose_roster_swing_profile(swing_players_b)
+    swing_maps=sorted({name for item in [*swing_players_a,*swing_players_b] for name in item.get("maps",{})})
+    swing_model=await active_model(session)
+    swing_comparison={"scope":"current_roster","current_roster":True,"team_a":swing_a,"team_b":swing_b,
+        "overall":{"team_a":swing_a,"team_b":swing_b},
+        "per_map":{name:{"team_a":compose_roster_swing_profile(swing_players_a,name),"team_b":compose_roster_swing_profile(swing_players_b,name)} for name in swing_maps},
+        "round_win_model_version":swing_model.model_version if swing_model else None,
+        "round_swing_model_version":"v1","trained_at":swing_model.trained_at if swing_model else None}
     return TeamComparisonResponse(
         team_a=side_response(comparison.team_a,leadership_a),
         team_b=side_response(comparison.team_b,leadership_b),
@@ -176,12 +190,7 @@ async def compare_teams(
             for role in comparison.role_comparisons
         ],
         summary_notes=comparison.summary_notes,
-        round_swing_comparison={
-            "scope":"current_roster",
-            "team_a":await roster_swing_profile(session,[player.id for player in comparison.team_a.roster]),
-            "team_b":await roster_swing_profile(session,[player.id for player in comparison.team_b.roster]),
-            "per_map":{},
-        },
+        round_swing_comparison=swing_comparison,
     )
 
 

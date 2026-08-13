@@ -75,20 +75,25 @@ class TopTeamsService:
     @classmethod
     def _joined_at_from_bo3(
         cls,
-        team_id: int,
+        _team_id: int,
         participant: Bo3TeamParticipant,
     ) -> datetime | None:
-        transfers = [
+        # Match BO3's Squad widget exactly: "Time On Team" is based on the
+        # latest TRANSFER event in player_transfers.  BO3 does not additionally
+        # filter that event by team_to_id in the page component.
+        squad_transfers = [
             transfer
             for transfer in participant.player_transfers
-            if transfer.team_to_id == team_id
-            and transfer.team_from_id != team_id
+            if transfer.action_type == 1
             and transfer.action_date is not None
         ]
-        if not transfers:
+        if not squad_transfers:
             return None
         return cls._transfer_datetime(
-            max(transfers, key=lambda transfer: transfer.action_date),
+            max(
+                squad_transfers,
+                key=lambda transfer: transfer.action_date,
+            ),
         )
 
     @classmethod
@@ -480,8 +485,10 @@ class TopTeamsService:
                         joined_at = self._joined_at_from_bo3(
                             team.bo3_id, participant,
                         )
-                        if joined_at is not None:
-                            membership.joined_at = joined_at
+                        # Always replace cached membership time with the value
+                        # currently shown by BO3's Squad data; stale dates must
+                        # not survive a later source correction.
+                        membership.joined_at = joined_at
                 main_players = [
                     players_by_bo3_id[participant.id]
                     for participant in detail.players
@@ -496,11 +503,14 @@ class TopTeamsService:
                         and membership.joined_at is not None
                     ]
                     active_from = max(joined_dates) if len(joined_dates) == 5 else None
-                    await set_current_roster(
+                    current_roster = await set_current_roster(
                         self._session, team.id, main_players, source="team_import",
                         active_from=active_from,
                         active_from_source="source_date" if active_from else "unknown",
                     )
+                    if active_from is None:
+                        current_roster.active_from = None
+                        current_roster.active_from_source = "unknown"
                 snapshot = (
                     await self._session.execute(
                         select(TeamRankingSnapshot).where(
@@ -598,12 +608,12 @@ async def list_ranked_teams(
 
 async def list_active_rosters(
     session: AsyncSession,
-) -> dict[int, list[tuple[Player, str]]]:
+) -> dict[int, list[tuple[Player, TeamParticipantMembership]]]:
     result = await session.execute(
         select(
             TeamParticipantMembership.team_id,
             Player,
-            TeamParticipantMembership.participant_type,
+            TeamParticipantMembership,
         )
         .join(
             Player,
@@ -617,10 +627,13 @@ async def list_active_rosters(
             Player.nickname.asc(),
         )
     )
-    rosters: dict[int, list[tuple[Player, str]]] = {}
-    for team_id, player, participant_type in result.all():
+    rosters: dict[
+        int,
+        list[tuple[Player, TeamParticipantMembership]],
+    ] = {}
+    for team_id, player, membership in result.all():
         rosters.setdefault(team_id, []).append(
-            (player, participant_type),
+            (player, membership),
         )
     return rosters
 

@@ -36,9 +36,6 @@ class TeamParticipantResponse(BaseModel):
 TeamRole = Literal[
     "igl",
     "awper",
-    "entry_frag",
-    "lurk",
-    "anchor_support",
     "rifler",
 ]
 

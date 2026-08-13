@@ -14,7 +14,8 @@ from cs2eye.analytics.calculated_veto_config import (
 from cs2eye.analytics.scoring.core import FactorInput, sample_reliability, score_factors
 from cs2eye.models.demo import TeamMapAggregate
 from cs2eye.models.match import MapPoolEntry
-from cs2eye.models.team import Team
+from cs2eye.models.team import Team, TeamRosterMember
+from cs2eye.services.round_swing_service import compose_roster_swing_profile, player_round_swing
 from cs2eye.services.team_h2h_service import TeamH2HService
 from cs2eye.services.team_map_strength_service import calculate_map_strength, scope_performance
 from cs2eye.services.veto_service import VALID_MAPS, VetoService
@@ -44,6 +45,7 @@ class MapSignals:
     ct: float | None = None; t: float | None = None
     postplant: float | None = None; retake: float | None = None
     economy: dict | None = None; combat: dict | None = None; utility: dict | None = None
+    swing: dict | None = None
     pick_preference: float | None = None; ban_preference: float | None = None
     recent_pick_preference: float | None = None; veto_series: int = 0
     h2h_score: float | None = None; h2h_maps: int = 0; roster_share: float = 0
@@ -62,6 +64,7 @@ def blend_signals(org:MapSignals,roster:MapSignals|None)->MapSignals:
     result.economy=roster.economy if share>=.5 and roster.economy else org.economy
     result.combat=roster.combat if share>=.5 and roster.combat else org.combat
     result.utility=roster.utility if share>=.5 and roster.utility else org.utility
+    result.swing=roster.swing or org.swing
     return result
 
 def factors_payload(result)->list[dict]: return [{**f.__dict__,"score":f.normalized_score} for f in result.factors]
@@ -72,11 +75,32 @@ def calculate_map_pair(a:MapSignals,b:MapSignals)->dict:
     side_a=avg([cross(a.t,b.ct),cross(a.ct,b.t)]); side_b=avg([cross(b.t,a.ct),cross(b.ct,a.t)])
     bomb_a=avg([cross(a.postplant,b.retake),cross(a.retake,b.postplant)]); bomb_b=avg([cross(b.postplant,a.retake),cross(b.retake,a.postplant)])
     def composite(x:MapSignals,y:MapSignals)->float|None:
+        def weighted(items:list[tuple[float|None,float]])->float|None:
+            present=[(value,weight) for value,weight in items if value is not None]
+            return sum(value*weight for value,weight in present)/sum(weight for _,weight in present) if present else None
         economy=avg([nested(x.economy,"full_buy_vs_full_buy","win_rate"),nested(x.economy,"force_buy","win_rate"),nested(x.economy,"anti_eco","win_rate"),nested(x.economy,"pistol","win_rate"),nested(x.economy,"conversion","win_rate")])
-        combat=avg([nested(x.combat,"opening","success_rate"),nested(x.combat,"opening","conversion_rate"),nested(x.combat,"opening","recovery_rate"),nested(x.combat,"trade","trade_rate"),nested(x.combat,"clutch","win_rate")])
-        enemy=avg([nested(y.economy,"full_buy_vs_full_buy","win_rate"),nested(y.combat,"opening","success_rate"),nested(y.combat,"trade","trade_rate")])
+        # V1.1 keeps trade rate as coordination evidence, while Round Swing takes over
+        # most of the duplicated kill/opening/clutch impact inside this existing factor.
+        combat=weighted([
+            (nested(x.swing,"avg_score"),.45),
+            (nested(x.combat,"opening","success_rate"),.12),
+            (nested(x.combat,"opening","conversion_rate"),.08),
+            (nested(x.combat,"trade","trade_rate"),.20),
+            (nested(x.combat,"clutch","win_rate"),.05),
+        ])
+        enemy=avg([nested(y.economy,"full_buy_vs_full_buy","win_rate"),nested(y.swing,"avg_score"),nested(y.combat,"trade","trade_rate")])
         return cross(avg([economy,combat]),enemy)
     ec_a,ec_b=composite(a,b),composite(b,a)
+    def economy_only(x:MapSignals,y:MapSignals)->float|None:
+        own=avg([nested(x.economy,"full_buy_vs_full_buy","win_rate"),nested(x.economy,"force_buy","win_rate"),nested(x.economy,"anti_eco","win_rate"),nested(x.economy,"pistol","win_rate"),nested(x.economy,"conversion","win_rate")])
+        opp=avg([nested(y.economy,"full_buy_vs_full_buy","win_rate"),nested(y.economy,"force_buy","win_rate"),nested(y.economy,"anti_eco","win_rate"),nested(y.economy,"pistol","win_rate"),nested(y.economy,"conversion","win_rate")])
+        return cross(own,opp)
+    def combat_only(x:MapSignals,y:MapSignals)->float|None:
+        own=avg([nested(x.swing,"avg_score"),nested(x.combat,"opening","success_rate"),nested(x.combat,"opening","recovery_rate"),nested(x.combat,"clutch","win_rate")])
+        opp=avg([nested(y.swing,"avg_score"),nested(y.combat,"opening","success_rate"),nested(y.combat,"opening","recovery_rate"),nested(y.combat,"clutch","win_rate")])
+        return cross(own,opp)
+    def trading_only(x:MapSignals,y:MapSignals)->float|None:
+        return cross(nested(x.combat,"trade","trade_rate"),nested(y.combat,"trade","trade_rate"))
     def utility(x:MapSignals,y:MapSignals)->float|None:
         # Rate-like utility fields are compared relatively; damage is normalized around 8 dmg/round.
         own=avg([nested(x.utility,"enemies_flashed_per_flash"),nested(x.utility,"flash_assists_per_round"),nested(x.utility,"utility_damage_per_round")])
@@ -85,7 +109,10 @@ def calculate_map_pair(a:MapSignals,b:MapSignals)->dict:
     util_a,util_b=utility(a,b),utility(b,a)
     def side(x:MapSignals,relative:float|None,side_score,bomb,ec,util):
         form=avg([x.recent,x.top15,x.top16_30])
-        inputs=[FactorInput("own_map_quality","Own map quality",x.strength,x.strength,MATCHUP_WEIGHTS["own_map_quality"],x.maps,x.strength_confidence/100,"Existing Map Strength with reliability"),FactorInput("relative_advantage","Relative advantage",relative,relative,MATCHUP_WEIGHTS["relative_advantage"],reason="Normalized own minus opponent Map Strength"),FactorInput("recent_roster_form","Recent/current-roster form",form,form,MATCHUP_WEIGHTS["recent_roster_form"],x.maps,reason=f"Recent scopes and roster blend; roster share {x.roster_share:.2f}"),FactorInput("side_matchup","CT/T cross-matchup",side_score,side_score,MATCHUP_WEIGHTS["side_matchup"],reason="T vs opponent CT and CT vs opponent T"),FactorInput("bomb_matchup","Postplant/retake cross-matchup",bomb,bomb,MATCHUP_WEIGHTS["bomb_matchup"],reason="Postplant vs opponent retake, and reverse"),FactorInput("economy_combat_matchup","Economy/combat matchup",ec,ec,MATCHUP_WEIGHTS["economy_combat_matchup"]),FactorInput("utility_teamplay_matchup","Utility/teamplay matchup",util,util,MATCHUP_WEIGHTS["utility_teamplay_matchup"])]
+        swing_reason=("Round Swing, reduced raw opening/clutch, trade coordination and economy; "
+                      f"roster Swing {nested(x.swing,'avg_score'):.1f}" if nested(x.swing,"avg_score") is not None
+                      else "Economy/combat fallback; Round Swing unavailable and receives no zero penalty")
+        inputs=[FactorInput("own_map_quality","Own map quality",x.strength,x.strength,MATCHUP_WEIGHTS["own_map_quality"],x.maps,x.strength_confidence/100,"Existing Map Strength with reliability"),FactorInput("relative_advantage","Relative advantage",relative,relative,MATCHUP_WEIGHTS["relative_advantage"],reason="Normalized own minus opponent Map Strength"),FactorInput("recent_roster_form","Recent/current-roster form",form,form,MATCHUP_WEIGHTS["recent_roster_form"],x.maps,reason=f"Recent scopes and roster blend; roster share {x.roster_share:.2f}"),FactorInput("side_matchup","CT/T cross-matchup",side_score,side_score,MATCHUP_WEIGHTS["side_matchup"],reason="T vs opponent CT and CT vs opponent T"),FactorInput("bomb_matchup","Postplant/retake cross-matchup",bomb,bomb,MATCHUP_WEIGHTS["bomb_matchup"],reason="Postplant vs opponent retake, and reverse"),FactorInput("economy_combat_matchup","Economy/combat matchup",ec,ec,MATCHUP_WEIGHTS["economy_combat_matchup"],reason=swing_reason),FactorInput("utility_teamplay_matchup","Utility/teamplay matchup",util,util,MATCHUP_WEIGHTS["utility_teamplay_matchup"])]
         metric_coverage=sum(i.normalized_score is not None for i in inputs)/len(inputs)
         reliability=clamp((x.strength_confidence*.45+x.freshness*.2+min(100,x.maps*8)*.2+metric_coverage*100*.15)/100)
         result=score_factors(inputs,reliability)
@@ -101,9 +128,11 @@ def calculate_map_pair(a:MapSignals,b:MapSignals)->dict:
         confidence=clamp((x.strength_confidence/100*.55+min(1,x.maps/10)*.25+vreliability*.20))
         return score_factors(pick_inputs,confidence),score_factors(ban_inputs,confidence),confidence
     pa,ba,ca=actions(a,ma,ra,b);pb,bb,cb=actions(b,mb,rb,a)
-    def payload(matchup,mbreak,pick,ban,conf):return {"matchup_map_score":round(matchup,2),"calculated_pick_score":pick.final_score,"calculated_ban_score":ban.final_score,"matchup_confidence":mbreak.reliability,"pick_confidence":pick.reliability,"ban_confidence":ban.reliability,"matchup_factors":factors_payload(mbreak),"pick_factors":factors_payload(pick),"ban_factors":factors_payload(ban)}
+    def payload(matchup,mbreak,pick,ban,conf,signals):return {"matchup_map_score":round(matchup,2),"calculated_pick_score":pick.final_score,"calculated_ban_score":ban.final_score,"matchup_confidence":mbreak.reliability,"pick_confidence":pick.reliability,"ban_confidence":ban.reliability,"matchup_factors":factors_payload(mbreak),"pick_factors":factors_payload(pick),"ban_factors":factors_payload(ban),"roster_form":{"recent":signals.recent,"roster_share":signals.roster_share,"maps":signals.maps,"freshness":signals.freshness}}
     collision=max(pa.final_score*bb.final_score/100,pb.final_score*ba.final_score/100)
-    return {"team_a":payload(ma,mab,pa,ba,ca),"team_b":payload(mb,mbb,pb,bb,cb),"collision_score":round(collision,2),"collision":"high" if collision>=60 else "medium" if collision>=35 else "low"}
+    tactical_a={"side":side_a,"bomb":bomb_a,"combat_swing":combat_only(a,b),"economy":economy_only(a,b),"utility":util_a,"trading":trading_only(a,b),"swing_profile":a.swing}
+    tactical_b={"side":side_b,"bomb":bomb_b,"combat_swing":combat_only(b,a),"economy":economy_only(b,a),"utility":util_b,"trading":trading_only(b,a),"swing_profile":b.swing}
+    return {"team_a":{**payload(ma,mab,pa,ba,ca,a),"tactical_components":tactical_a},"team_b":{**payload(mb,mbb,pb,bb,cb,b),"tactical_components":tactical_b},"collision_score":round(collision,2),"collision":"high" if collision>=60 else "medium" if collision>=35 else "low"}
 
 def simulate(maps:list[dict],first_side:str)->dict:
     remaining={m["map"]:m for m in maps}; other={"team_a":"team_b","team_b":"team_a"}; second=other[first_side]; actions=[]
@@ -127,6 +156,15 @@ class CalculatedVetoService:
         signals=[]
         for idx,team_id in enumerate((a_id,b_id)):
             org=await self._load(team_id,"organization",None); roster=await self._load(team_id,"roster",teams[idx].current_roster_id)
+            if teams[idx].current_roster_id:
+                player_ids=list((await self.session.execute(select(TeamRosterMember.player_id).where(
+                    TeamRosterMember.roster_id==teams[idx].current_roster_id,
+                    TeamRosterMember.player_id.is_not(None)))).scalars())
+                swing_players=[{"player_id":player_id,**await player_round_swing(self.session,player_id)} for player_id in player_ids]
+                for map_name,value in roster.items():
+                    profile=compose_roster_swing_profile(swing_players,map_name)
+                    if profile.get("status") not in {"not_calculated"}:
+                        value.swing=profile
             vp={m["map_name"]:m for m in veto_profiles[idx]["maps"]};vr={m["map_name"]:m for m in veto_recent[idx]["maps"]}
             horg={m.map_name:m for m in h2h.organizations.maps};hcur={m.map_name:m for m in h2h.current_rosters.maps}
             combined={}

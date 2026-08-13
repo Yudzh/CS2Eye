@@ -1,8 +1,8 @@
 import type { TeamComparisonSide as ComparisonSide } from "../types";
+import { Term } from "./InfoTip";
 
 const roleLabels: Record<string, string> = {
-  igl: "IGL", awper: "AWPer", entry_frag: "Entry Frag",
-  lurk: "Lurk", anchor_support: "Anchor / Support", rifler: "Rifler",
+  igl: "IGL", awper: "AWPer", rifler: "Rifler",
 };
 
 function formatDate(value: string | null) {
@@ -24,10 +24,10 @@ export function TeamComparisonSide({ side }: { side: ComparisonSide }) {
         </div>
       </header>
       <div className="compare-metrics">
-        <span><small>Место</small><strong>#{side.current_rank ?? "—"}</strong></span>
-        <span><small>Очки</small><strong>{side.current_points === null ? "—" : Number(side.current_points).toFixed(1)}</strong></span>
-        <span><small>Сила</small><strong>{side.strength.team_strength_score.toFixed(2)}<i>/100</i></strong></span>
-        <span><small>В выбранной паре</small><strong>{side.relative_strength_percent === null ? "—" : `${side.relative_strength_percent.toFixed(2)}%`}</strong></span>
+        <span><small><Term tip="Текущее место команды в сохранённом рейтинге.">Место</Term></small><strong>#{side.current_rank ?? "—"}</strong></span>
+        <span><small><Term tip="Количество рейтинговых очков в актуальном сохранённом срезе.">Очки</Term></small><strong>{side.current_points === null ? "—" : Number(side.current_points).toFixed(1)}</strong></span>
+        <span><small><Term tip="Комплексная оценка текущей команды от 0 до 100: качество игроков, результаты, форма и стабильность состава.">Сила команды</Term></small><strong>{side.strength.team_strength_score.toFixed(2)}<i>/100</i></strong></span>
+        <span><small><Term tip="Доля силы одной команды в сумме сил выбранной пары. Это не вероятность победы.">В выбранной паре</Term></small><strong>{side.relative_strength_percent === null ? "—" : `${side.relative_strength_percent.toFixed(2)}%`}</strong></span>
       </div>
       <p className="compare-disclaimer">Относительная сила в выбранной паре — не вероятность победы.</p>
       <dl className="compare-meta">
@@ -41,9 +41,9 @@ export function TeamComparisonSide({ side }: { side: ComparisonSide }) {
         {side.roster.map((player) => (
           <a className="compare-player" href={`/players/${player.id}`} key={player.id}>
             {player.image_url ? <img src={player.image_url} alt="" /> : <span>{player.nickname.slice(0, 2)}</span>}
-            <div><strong>{player.nickname}</strong><small>{player.role ? roleLabels[player.role] : "Роль не назначена"}</small></div>
+            <div><strong>{player.nickname}</strong><small>{player.role ? roleLabels[player.role] ?? "Роль не назначена" : "Роль не назначена"}</small></div>
             <b>{player.player_strength === null ? "—" : player.player_strength}<small>/100</small></b>
-            <em>Avg BO3.gg: {player.bo3_avg_rating === null ? "—" : Number(player.bo3_avg_rating).toFixed(2)}</em>
+            <em>Средний рейтинг BO3.gg: {player.bo3_avg_rating === null ? "—" : Number(player.bo3_avg_rating).toFixed(2)}</em>
             {player.strength_is_fallback && <mark>В расчёте использовано базовое значение 50</mark>}
           </a>
         ))}
@@ -52,7 +52,7 @@ export function TeamComparisonSide({ side }: { side: ComparisonSide }) {
       <section className="compare-strength-details">
         <h3>Расшифровка силы</h3>
         <p className="formula">{side.strength.calculation}</p>
-        <div className="strength-totals"><span>Средняя: {side.strength.base_player_score.toFixed(2)}</span><span>Бонусы: +{side.strength.roster_bonus.toFixed(2)}</span><span>Штрафы: −{side.strength.roster_penalty.toFixed(2)}</span></div>
+        <div className="strength-totals"><span><Term tip="Средняя сила игроков активного состава до командных поправок.">Средняя</Term>: {side.strength.base_player_score.toFixed(2)}</span><span><Term tip="Положительные поправки модели к базовой силе состава.">Бонусы</Term>: +{side.strength.roster_bonus.toFixed(2)}</span><span><Term tip="Отрицательные поправки за неполные или ненадёжные данные и состав.">Штрафы</Term>: −{side.strength.roster_penalty.toFixed(2)}</span></div>
         {side.strength.factors.map((factor) => <div className="compare-factor" key={factor.code}><b>{factor.value > 0 ? "+" : ""}{factor.value.toFixed(2)}</b><span><strong>{factor.label}</strong><small>{factor.explanation}</small></span></div>)}
       </section>
     </article>

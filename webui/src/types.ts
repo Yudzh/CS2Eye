@@ -255,6 +255,17 @@ export interface VetoComparison {team_a:TeamVetoProfile;team_b:TeamVetoProfile;m
 export interface CalculatedVetoFactor {key:string;label:string;raw_value:unknown;score:number|null;normalized_score:number|null;weight:number;effective_weight:number;impact:number;sample_size:number|null;confidence:number|null;reason:string|null;available:boolean}
 export interface CalculatedVetoSide {matchup_map_score:number;calculated_pick_score:number;calculated_ban_score:number;matchup_confidence:number;pick_confidence:number;ban_confidence:number;matchup_factors:CalculatedVetoFactor[];pick_factors:CalculatedVetoFactor[];ban_factors:CalculatedVetoFactor[]}
 export interface CalculatedVeto {calculated_veto_model_version:string;score_semantics:"analytical_score_0_100_not_probability";format:"bo3";veto_format_assumption:string;first_actor_known:boolean;team_a:{id:number;name:string};team_b:{id:number;name:string};maps:Array<{map:string;active:boolean;team_a:CalculatedVetoSide;team_b:CalculatedVetoSide;collision_score:number;collision:"low"|"medium"|"high"}>;scenarios:Array<{first_actor:"team_a"|"team_b";actions:Array<{order:number;team:"team_a"|"team_b"|null;action:"ban"|"pick"|"decider";map:string;effective_action_score:number|null}>}>}
+export interface MatchupFactor {key:string;label:string;score:number|null;weight:number;effective_weight:number;impact:number;confidence:number|null;sample:number|null;reason:string|null;available:boolean}
+export interface MatchupScore {model_version:string;score_semantics:"analytical_score_0_100_not_probability";analysis_mode:"pre_veto"|"post_veto";format:"bo1"|"bo3"|"bo5";as_of:string;historical_policy:string;team_a:{id:number;name:string;score:number;advantage:number};team_b:{id:number;name:string;score:number;advantage:number};raw_score:number;reliability:number;confidence_level:"low"|"medium"|"high";advantage:{team_id:number|null;team_name:string|null;level:"neutral"|"slight"|"moderate"|"strong"};factors:MatchupFactor[];maps:Array<{map:string;map_matchup_score:number;team_b_score:number;playability_weight:number;role:string;confidence:number;contribution:number}>;tactical:Record<string,unknown>&{score:number|null};veto:{basis:string;series_id:number|null;calculated_veto_model_version?:string};limitations:string[]}
+export interface WinProbability {
+  model_version:string|null;feature_schema_version?:string;trained_at?:string;
+  prediction_status:"available"|"insufficient_data"|"model_not_trained";
+  team_a:{id:number;name?:string|null;probability:number|null};
+  team_b:{id:number;name?:string|null;probability:number|null};
+  confidence:number;
+  basis?:{analysis_mode:"pre_veto"|"post_veto";veto:"calculated_veto"|"actual_veto";matchup_score:number};
+  limitations:string[];
+}
 export interface MatchListResponse { total: number; items: MatchSeries[] }
 export interface MatchStatLine { matches_played: number; matches_won: number; matches_lost: number; match_win_rate: number | null }
 export interface TeamMatchStats { team_id: number; aggregation_level: "organization" | "current_roster"; roster_id: number | null; all: MatchStatLine; by_format: Record<"bo1" | "bo3" | "bo5", MatchStatLine>; by_context: Record<"lan" | "online" | "playoff" | "elimination" | "final", MatchStatLine> }
@@ -356,10 +367,10 @@ export interface TeamComparison {
   };
   role_comparisons: TeamRoleComparison[];
   summary_notes: string[];
-  round_swing_comparison: {scope:string;team_a:RosterSwingProfile;team_b:RosterSwingProfile;per_map:Record<string,unknown>};
+  round_swing_comparison: {scope:string;current_roster:boolean;team_a:RosterSwingProfile;team_b:RosterSwingProfile;overall:{team_a:RosterSwingProfile;team_b:RosterSwingProfile};per_map:Record<string,{team_a:RosterSwingProfile;team_b:RosterSwingProfile}>;round_win_model_version:string|null;round_swing_model_version:string;trained_at:string|null};
 }
 
-export interface RosterSwingProfile {status:string;avg_swing?:number;top2_swing?:number;bottom2_swing?:number;ct_swing?:number|null;t_swing?:number|null;opening_swing?:number|null;clutch_swing?:number|null;confidence:number;sample:{players:number;rounds:number}}
+export interface RosterSwingProfile {status:string;source:string;avg_swing?:number;top2_swing?:number;bottom2_swing?:number;ct_swing?:number|null;t_swing?:number|null;opening_swing?:number|null;clutch_swing?:number|null;confidence:number;sample:{players:number;rounds:number}}
 
 
 export interface TeamParticipant {
@@ -452,8 +463,10 @@ export interface Player {
   teams: PlayerTeam[];
   combat: { overall: Record<string, number | null> | null; recent_10: Record<string, number | null> | null; top_15: Record<string, number | null> | null; top_16_30: Record<string, number | null> | null; maps: Record<string, Record<string, number | null> | null> };
   utility: { overall: UtilityStats | null; recent_5: UtilityStats | null; recent_10: UtilityStats | null; recent_20: UtilityStats | null; top_15: UtilityStats | null; top_16_30: UtilityStats | null; maps: Record<string, UtilityStats | null> };
-  round_swing: {status:string;score?:number;raw_per_round?:number;adjusted_per_round?:number;confidence?:number;rounds?:number;ct?:number|null;t?:number|null;opening?:number|null;trade?:number|null;clutch?:number|null;postplant?:number|null;retake?:number|null};
+  round_swing: SwingScope & {status:string;overall:SwingScope|null;maps:Record<string,SwingScope|null>;rank_scopes:Record<string,SwingScope|null>;recent:Record<string,SwingScope|null>;model?:{round_win_model_version:string|null;round_swing_model_version:string;trained_at:string|null}};
 }
+
+export interface SwingScope {score?:number|null;raw_per_round?:number;adjusted_per_round?:number;confidence?:number;rounds?:number;ct?:number|null;t?:number|null;opening?:number|null;trade?:number|null;clutch?:number|null;postplant?:number|null;retake?:number|null;total_swing?:number;positive_swing?:number;negative_swing?:number}
 
 
 export interface RankingRun {

@@ -27,9 +27,9 @@ NORMALIZATION_RULES = {
 }
 
 PLAYER_WEIGHTS = {
-    "internal_rating": .25, "bo3_rating": .20, "round_swing": .15,
+    "internal_rating": .25, "bo3_rating": .20, "round_swing": .10,
     "top15_performance": .15, "top16_30_performance": .10,
-    "recent_form": .10, "role_performance": .05,
+    "recent_form": .15, "role_performance": .05,
 }
 TEAM_WEIGHTS = {
     "roster_quality": .45, "team_performance": .20,
