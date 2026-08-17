@@ -77,6 +77,12 @@ def test_inactive_pool_is_service_loader_responsibility():
     # Pure simulator receives the already-filtered active pool and preserves that boundary.
     rows=map_rows();assert all(a["map"] in {x["map"] for x in rows} for a in simulate(rows,"team_a")["actions"])
 
+def test_default_active_pool_matches_premier_season_five():
+    from cs2eye.services.calculated_veto_service import DEFAULT_ACTIVE_POOL
+    assert DEFAULT_ACTIVE_POOL == {
+        "ancient", "anubis", "cache", "dust2", "inferno", "mirage", "nuke",
+    }
+
 def test_round_swing_changes_existing_tactical_factor():
     low=sig(combat={"trade":{"trade_rate":50}},swing={"avg_score":25})
     high=sig(combat={"trade":{"trade_rate":50}},swing={"avg_score":75})

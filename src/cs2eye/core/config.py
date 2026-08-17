@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     demo_storage_root: str = "/app/storage"
     demo_max_file_size_bytes: int = 2_147_483_648
     demo_archive_max_depth: int = 5
+    demo_delete_after_successful_parse: bool = False
     max_ranking_snapshot_age_days: int = 14
 
     model_config = SettingsConfigDict(

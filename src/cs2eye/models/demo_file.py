@@ -26,6 +26,7 @@ class DemoFile(Base):
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     file_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     match_id: Mapped[int | None] = mapped_column(
         ForeignKey("matches.id", ondelete="SET NULL"), index=True,
     )

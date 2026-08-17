@@ -52,6 +52,25 @@ async def test_split_demo_part_one_tied_score_is_partial(monkeypatch):
     assert [issue.code for issue in result.issues] == ["incomplete_split_demo"]
 
 
+@pytest.mark.asyncio
+async def test_short_fragment_score_is_partial(monkeypatch):
+    async def resolved(_session, names):
+        return [SimpleNamespace(
+            team_id=i, raw_name=name, normalized_name=name.lower(),
+            resolution_status="matched",
+        ) for i, name in enumerate(names, 1)]
+
+    monkeypatch.setattr(
+        "cs2eye.services.demo_map_result_service.resolve_demo_teams", resolved,
+    )
+    result = await normalize_parsed_map_result(None, ParsedMapResult(
+        raw_map_name="de_ancient", team_a_name="Falcons", team_a_score=3,
+        team_b_name="Astralis", team_b_score=0, parser_rounds_count=3,
+    ))
+    assert result.metadata_status == "partial"
+    assert [issue.code for issue in result.issues] == ["incomplete_final_score"]
+
+
 def test_compact_cs2_team_suffix_is_an_exact_alias():
     assert "wildcard" in team_name_aliases("WILDCARDcs2")
 
@@ -65,8 +84,14 @@ def test_compact_cs2_team_suffix_is_an_exact_alias():
     ("Team Spirit", "Spirit"),
     ("Team Falcons", "Falcons"),
     ("BetBoom Team", "BetBoom"),
+    ("BB Team", "BetBoom"),
+    ("Ninjas In Pyjamas eStar", "NIP"),
+    ("Ninjas In Pyjamas eStar", "Ninjas In Pyjamas"),
+    ("9z Globant", "9z"),
+    ("MIBR.LOS", "MIBR"),
     ("Team Liquid", "Liquid"),
     ("Lynn Vision Gaming", "Lynn Vision"),
+    ("PVISION", "PARIVISION"),
     ("DENDELE", "DENDELE CS"),
     ("DENDELE", "Sharks"),
 ])

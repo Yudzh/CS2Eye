@@ -105,12 +105,56 @@ async def test_split_demo_parts_count_as_one_logical_map(match_db) -> None:
     async with match_db() as session:
         service = MatchService(session)
         proposed = await service.create_manual([1, 2, 3], format="bo3", resolution_status="needs_review")
-        assert len(proposed.maps) == 3
+        assert [(item.demo_file_id, item.map_number) for item in proposed.maps] == [(1, 1), (2, 2)]
         fixed = await service.auto_group_demo(1)
         await session.commit()
         assert [(item.demo_file_id, item.map_number) for item in fixed.maps] == [(1, 1), (2, 2)]
         assert fixed.match.resolution_status == "resolved"
         assert (await session.get(DemoFile, 3)).match_id is None
+
+
+async def test_resolved_series_rejects_duplicate_map(match_db) -> None:
+    await add_map(match_db, 1, 13, 7, filename="first.dem")
+    await add_map(match_db, 2, 13, 6, filename="second.dem")
+    async with match_db() as session:
+        second = (await session.execute(select(DemoMapResult).where(
+            DemoMapResult.demo_file_id == 2,
+        ))).scalar_one()
+        second.map_name = "mirage"
+        await session.commit()
+    with pytest.raises(MatchValidationError, match="одну карту дважды"):
+        await manual(match_db, [1, 2], "bo3")
+
+
+async def test_auto_group_ignores_short_fragment_and_reunites_real_maps(match_db) -> None:
+    await add_map(match_db, 1, 13, 7, filename="falcons-vs-astralis-map1.dem")
+    await add_map(match_db, 2, 13, 11, filename="falcons-vs-astralis-map2.dem")
+    await add_map(match_db, 3, 3, 0, filename="falcons-vs-astralis-fragment.dem")
+    async with match_db() as session:
+        results = list((await session.execute(select(DemoMapResult).order_by(
+            DemoMapResult.demo_file_id,
+        ))).scalars())
+        results[0].map_name = results[2].map_name = "ancient"
+        results[1].map_name = "dust2"
+        await session.commit()
+    async with match_db() as session:
+        first = await MatchService(session).create_manual(
+            [1, 3], format="bo3", environment="lan",
+            resolution_status="needs_review",
+        )
+        first.match.resolution_status = "resolved"
+        await MatchService(session).recalculate(first.match.id)
+        await session.commit()
+    second = await manual(match_db, [2], "bo3")
+    async with match_db() as session:
+        fixed = await MatchService(session).auto_group_demo(1)
+        await session.commit()
+        assert [(item.demo_file_id, item.map_name) for item in fixed.maps] == [
+            (1, "ancient"), (2, "dust2"),
+        ]
+        assert (fixed.match.team_a_maps_won, fixed.match.team_b_maps_won) == (2, 0)
+        assert (await session.get(DemoFile, 3)).match_id is None
+        assert await session.get(type(second.match), second.match.id) is None
 
 
 async def test_manual_reorder_and_split(match_db) -> None:

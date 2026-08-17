@@ -75,9 +75,15 @@ def merge_player_stats(parts: list[list[ParsedDemoPlayerStat]]) -> list[ParsedDe
 
 
 class DemoParseService:
-    def __init__(self, session: AsyncSession, storage_root: str | Path) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        storage_root: str | Path,
+        delete_after_successful_parse: bool = False,
+    ) -> None:
         self.session = session
         self.storage_root = Path(storage_root)
+        self.delete_after_successful_parse = delete_after_successful_parse
         self.parser = Demoparser2Adapter()
 
     async def parse_many(
@@ -109,9 +115,19 @@ class DemoParseService:
                 )
             )
         ).scalars().all()
+        statuses = dict((await self.session.execute(select(
+            DemoParseRun.demo_file_id, DemoParseRun.status,
+        ).where(DemoParseRun.demo_file_id.in_([demo.id for demo in demos])))).all())
+        intentionally_deleted = {
+            demo.id for demo in demos
+            if demo.source_deleted_at is not None
+            and not (self.storage_root / demo.storage_path).is_file()
+            and statuses.get(demo.id) == "success"
+        }
         missing = [
             demo for demo in demos
-            if not (self.storage_root / demo.storage_path).is_file()
+            if demo.id not in intentionally_deleted
+            and not (self.storage_root / demo.storage_path).is_file()
         ]
         if missing:
             examples = ", ".join(
@@ -124,7 +140,7 @@ class DemoParseService:
                 "Массовый парсинг не запущен, существующие результаты сохранены."
             )
         return await self._parse_demos(
-            demos, replace_existing,
+            [demo for demo in demos if demo.id not in intentionally_deleted], replace_existing,
             tournament_name="Все турниры", year=0,
             progress_callback=progress_callback,
         )
@@ -168,6 +184,19 @@ class DemoParseService:
                 result = DemoParseFileResult(
                     demo_file_id=demo_id, filename=f"demo:{demo_id}",
                     status="failed", error="Demo file disappeared during parsing.",
+                )
+                results.append(result)
+                if progress_callback is not None:
+                    await progress_callback(len(results), len(demo_ids), result)
+                continue
+            if (
+                demo.source_deleted_at is not None
+                and not (self.storage_root / demo.storage_path).is_file()
+            ):
+                result = DemoParseFileResult(
+                    demo_file_id=demo.id, filename=demo.original_filename,
+                    status="skipped",
+                    diagnostics=["source_demo_deleted_reupload_required"],
                 )
                 results.append(result)
                 if progress_callback is not None:
@@ -224,7 +253,9 @@ class DemoParseService:
                     tick=event.tick, event_kind=event.event_kind, bombsite=event.bombsite))
 
     async def parse_one(
-        self, demo: DemoFile, replace_existing: bool,
+        self,
+        demo: DemoFile,
+        replace_existing: bool,
     ) -> tuple[DemoParseFileResult, set[int]]:
         # rollback() expires ORM state even when expire_on_commit=False. Keep
         # scalar diagnostics outside the ORM object so the error handler never
@@ -232,6 +263,14 @@ class DemoParseService:
         # actual parser/database exception.
         demo_id = demo.id
         demo_filename = demo.original_filename
+        if (
+            demo.source_deleted_at is not None
+            and not (self.storage_root / demo.storage_path).is_file()
+        ):
+            return DemoParseFileResult(
+                demo_file_id=demo_id, filename=demo_filename, status="failed",
+                error="source_demo_deleted_reupload_required",
+            ), set()
         run = (
             await self.session.execute(select(DemoParseRun).where(
                 DemoParseRun.demo_file_id == demo_id,

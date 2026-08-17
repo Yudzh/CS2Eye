@@ -117,6 +117,11 @@ function GroupedDiagnostics({ files }: { files: DemoParseResponse["files"] }) {
   })}</>;
 }
 
+function ParseOutcome({ result }: { result: DemoParseResponse }) {
+  const unlinked = result.files.flatMap((file) => file.unlinked_players);
+  return <><div className="parse-summary"><span>Обработано: {result.parsed_count}</span><span>Пропущено: {result.skipped_count}</span><span>Ошибок: {result.failed_count}</span><span>Найдено игроков: {result.files.reduce((sum, file) => sum + file.players_found, 0)}</span><span>Связано: {result.files.reduce((sum, file) => sum + file.players_linked, 0)}</span><span>Не связано: {result.files.reduce((sum, file) => sum + file.players_unlinked, 0)}</span></div>{result.files.filter((file) => file.status === "failed").map((file) => <div className="notice notice--error" key={`error-${file.demo_file_id}`}><strong>{file.filename}</strong><div>{file.error || "Неизвестная ошибка парсинга."}</div></div>)}<GroupedDiagnostics files={result.files} />{unlinked.length > 0 && <div className="unlinked-players"><strong>Нераспознанные игроки</strong>{unlinked.map((player, index) => <span key={`${player.demo_filename}-${player.steam_id}-${index}`}>{player.nickname} · {player.steam_id || "Steam ID нет"} · {player.team_name || "команда не указана"} · {player.demo_filename}</span>)}</div>}</>;
+}
+
 export function DemosPage() {
   const today = new Date().toISOString().slice(0, 10);
   const [tournament, setTournament] = useState("");
@@ -127,6 +132,7 @@ export function DemosPage() {
   const [uploadResult, setUploadResult] = useState<DemoUploadResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [parseAfterUpload, setParseAfterUpload] = useState(false);
+  const [deleteAfterSuccessfulParse, setDeleteAfterSuccessfulParse] = useState(false);
   const [filterTournament, setFilterTournament] = useState("");
   const [tournaments, setTournaments] = useState<DemoTournamentOption[]>([]);
   const [year, setYear] = useState(new Date().getFullYear());
@@ -166,8 +172,12 @@ export function DemosPage() {
     setUploading(true);
     setUploadError(null);
     setUploadResult(null);
+    setParseResult(null);
     try {
-      const result = await uploadDemoFiles(tournament, eventType, matchDate, files, parseAfterUpload);
+      const result = await uploadDemoFiles(
+        tournament, eventType, matchDate, files, parseAfterUpload,
+        deleteAfterSuccessfulParse,
+      );
       setUploadResult(result);
       if (result.parse_job_id) {
         let job = await getParseAllDemoJob(result.parse_job_id);
@@ -177,6 +187,8 @@ export function DemosPage() {
           job = await getParseAllDemoJob(result.parse_job_id);
           setParseJob(job);
         }
+        if (job.status === "failed") throw new Error(job.error || "Парсинг после загрузки завершился с ошибкой.");
+        if (job.result) setParseResult(job.result);
       }
       try {
         setTournaments(await getDemoTournaments());
@@ -371,11 +383,13 @@ export function DemosPage() {
             <label>Дата матчей<input required type="date" value={matchDate} onChange={(event) => setMatchDate(event.target.value)} /></label>
             <label>Demo-файлы или архивы<input required multiple accept=".dem,.zip,.rar" type="file" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
             <label className="checkbox-label"><input type="checkbox" checked={parseAfterUpload} onChange={(event) => setParseAfterUpload(event.target.checked)} />Сразу парсить успешно загруженные демки</label>
+            <label className="checkbox-label"><input type="checkbox" checked={deleteAfterSuccessfulParse} disabled={!parseAfterUpload} onChange={(event) => setDeleteAfterSuccessfulParse(event.target.checked)} />Удалять demo-файлы после успешного парсинга</label>
             {files.length > 0 && <ul className="selected-files">{files.map((file) => <li key={`${file.name}-${file.size}`}>{file.name}<small>{formatSize(file.size)}</small></li>)}</ul>}
             <button className="button button--primary" disabled={uploading || files.length === 0} type="submit">{uploading ? "Загружаю…" : "Загрузить"}</button>
           </form>
           {uploadError && <div className="notice notice--error">{uploadError}</div>}
           {uploadResult && <div className="demo-results">{uploadResult.files.map((file, index) => <div className={`demo-result demo-result--${file.status}`} key={`${file.filename}-${index}`}><div><strong>{file.filename}</strong><small>{file.error || (file.file_size_bytes !== null ? formatSize(file.file_size_bytes) : "")}</small></div><span>{statusLabels[file.status]}</span></div>)}</div>}
+          {uploadResult?.parse_job_id && parseResult && <ParseOutcome result={parseResult} />}
         </section>
 
         <section className="demo-panel">
@@ -396,7 +410,7 @@ export function DemosPage() {
             </div>
             {parsingMode !== null && parseJob && <div className="demo-parse-progress"><div><strong>{parseJob.processed_files}/{parseJob.total_files || "?"} файлов</strong><span>Успешно: {parseJob.parsed_count} · Пропущено: {parseJob.skipped_count} · Ошибок: {parseJob.failed_count}</span></div><progress max={parseJob.total_files || 1} value={parseJob.processed_files} />{parseJob.current_filename && <small>{parseJob.current_filename}</small>}</div>}
             {reclassifyMessage && <div className="notice">{reclassifyMessage}</div>}
-            {parseResult && <><div className="parse-summary"><span>Обработано: {parseResult.parsed_count}</span><span>Пропущено: {parseResult.skipped_count}</span><span>Ошибок: {parseResult.failed_count}</span><span>Найдено игроков: {parseResult.files.reduce((sum, file) => sum + file.players_found, 0)}</span><span>Связано: {parseResult.files.reduce((sum, file) => sum + file.players_linked, 0)}</span><span>Не связано: {parseResult.files.reduce((sum, file) => sum + file.players_unlinked, 0)}</span></div>{parseResult.files.filter((file) => file.status === "failed").map((file) => <div className="notice notice--error" key={`error-${file.demo_file_id}`}><strong>{file.filename}</strong><div>{file.error || "Неизвестная ошибка парсинга."}</div></div>)}<GroupedDiagnostics files={parseResult.files} />{parseResult.files.flatMap((file) => file.unlinked_players).length > 0 && <div className="unlinked-players"><strong>Нераспознанные игроки</strong>{parseResult.files.flatMap((file) => file.unlinked_players).map((player, index) => <span key={`${player.demo_filename}-${player.steam_id}-${index}`}>{player.nickname} · {player.steam_id || "Steam ID нет"} · {player.team_name || "команда не указана"} · {player.demo_filename}</span>)}</div>}</>}
+            {parseResult && <ParseOutcome result={parseResult} />}
             {playerStats && <div className="opponent-classification">
               <strong>{playerStats.filename}</strong>
               <label>Источник рейтинга<select value={rankSourceFilter} onChange={(event) => setRankSourceFilter(event.target.value)}><option value="all">Все источники</option><option value="historical_snapshot">Исторический рейтинг</option><option value="current_fallback">Текущий fallback</option><option value="unknown">Не определено</option></select></label>
@@ -447,7 +461,7 @@ export function DemosPage() {
               <button className="button" onClick={() => setRoundsOpen(!roundsOpen)}>{roundsOpen ? "Скрыть раунды" : `Раунды (${rounds.total})`}</button>
               {roundsOpen && <><div className="round-filters">{[["all", "Все"], ["regulation", "Основное время"], ["overtime", "Overtime"], ["CT", "Победа CT"], ["T", "Победа T"]].map(([value, label]) => <button className={`button ${roundFilter === value ? "button--primary" : ""}`} key={value} onClick={() => void changeRoundFilter(value)}>{label}</button>)}</div><div className="rounds-table"><div className="rounds-table__head"><span>№</span><span>Половина</span><span>Стороны</span><span>Победитель</span><span>Причина</span><span>Счёт</span><span>Длительность</span></div>{rounds.items.map((round) => <div key={round.round_number}><span>{round.round_number}</span><span>{round.half === "first_half" ? "1-я" : round.half === "second_half" ? "2-я" : "OT"}</span><span>{mapResult?.team_a.name} {round.team_a_side} / {mapResult?.team_b.name} {round.team_b_side}</span><span>{round.winner_team_name || "—"}</span><span>{reasonLabels[round.end_reason] || reasonLabels.unknown}</span><span>{round.team_a_score_after ?? "—"}:{round.team_b_score_after ?? "—"}</span><span>{round.duration_seconds === null ? "—" : `${Math.round(Number(round.duration_seconds))} сек`}</span></div>)}</div></>}
             </section>}
-            {listResult.dates.length === 0 ? <div className="empty-state">Демок не найдено.</div> : listResult.dates.map((group) => <section key={group.match_date}><h4>{new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeZone: "UTC" }).format(new Date(`${group.match_date}T00:00:00Z`))}</h4>{group.files.map((file) => <div className="stored-demo" key={file.id}><strong>{file.filename}</strong>{file.map_name ? <><span>{file.map_name[0].toUpperCase() + file.map_name.slice(1)} · {file.team_a_name || "—"} {file.team_a_score ?? "—"}:{file.team_b_score ?? "—"} {file.team_b_name || "—"}</span><span>Победитель: {file.winner_team_name || "—"} · {file.metadata_status ? metadataLabels[file.metadata_status] : ""}</span><span>{file.round_data_status ? roundStatusLabels[file.round_data_status] : "CT/T данные: ещё не разобраны"}</span></> : <span>Результат ещё не определён</span>}<span>{formatSize(file.file_size_bytes)} · {parseStatusLabels[file.parse_status]}</span><div className="stored-demo__action"><code>{file.sha256.slice(0, 12)}…</code>{file.parse_status === "success" && <><button className="button" disabled={parsingFileId === file.id} onClick={() => void showPlayerStats(file.id)}>Результат и игроки</button><button className="button" disabled={parsingFileId === file.id} onClick={() => void reclassifyOne(file.id)}>Обновить классификацию</button></>}<button className="button" disabled={parsingFileId === file.id} onClick={() => void parseOne(file.id, file.parse_status === "success")}>{parsingFileId === file.id ? "Обработка…" : file.parse_status === "success" ? "Повторить парсинг" : "Распарсить"}</button></div></div>)}</section>)}
+            {listResult.dates.length === 0 ? <div className="empty-state">Демок не найдено.</div> : listResult.dates.map((group) => <section key={group.match_date}><h4>{new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeZone: "UTC" }).format(new Date(`${group.match_date}T00:00:00Z`))}</h4>{group.files.map((file) => <div className="stored-demo" key={file.id}><strong>{file.filename}</strong>{file.map_name ? <><span>{file.map_name[0].toUpperCase() + file.map_name.slice(1)} · {file.team_a_name || "—"} {file.team_a_score ?? "—"}:{file.team_b_score ?? "—"} {file.team_b_name || "—"}</span><span>Победитель: {file.winner_team_name || "—"} · {file.metadata_status ? metadataLabels[file.metadata_status] : ""}</span><span>{file.round_data_status ? roundStatusLabels[file.round_data_status] : "CT/T данные: ещё не разобраны"}</span></> : <span>Результат ещё не определён</span>}<span>{formatSize(file.file_size_bytes)} · {parseStatusLabels[file.parse_status]}</span>{file.source_deleted_at && <span className="demo-source-deleted">Исходник удалён · данные сохранены</span>}{!file.source_available && !file.source_deleted_at && <span className="notice notice--error">Ошибка хранилища: исходный файл отсутствует</span>}<div className="stored-demo__action"><code>{file.sha256.slice(0, 12)}…</code>{file.parse_status === "success" && <><button className="button" disabled={parsingFileId === file.id} onClick={() => void showPlayerStats(file.id)}>Результат и игроки</button><button className="button" disabled={parsingFileId === file.id} onClick={() => void reclassifyOne(file.id)}>Обновить классификацию</button></>}{file.source_available ? <button className="button" disabled={parsingFileId === file.id} onClick={() => void parseOne(file.id, file.parse_status === "success")}>{parsingFileId === file.id ? "Обработка…" : file.parse_status === "success" ? "Повторить парсинг" : "Распарсить"}</button> : file.source_deleted_at ? <span>Для повторного парсинга загрузите demo заново</span> : <span>Восстановите файл в хранилище</span>}</div></div>)}</section>)}
           </div>}
         </section>
       </div>

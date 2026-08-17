@@ -37,6 +37,8 @@ class DemoListFile(BaseModel):
     sha256: str
     uploaded_at: datetime
     updated_at: datetime
+    source_deleted_at: datetime | None = None
+    source_available: bool = True
     parse_status: str = "pending"
     map_name: str | None = None
     team_a_name: str | None = None

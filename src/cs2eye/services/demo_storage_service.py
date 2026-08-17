@@ -281,40 +281,42 @@ class DemoStorageService:
             invalidated_player_ids: set[int] = set()
             invalidated_team_maps: set[tuple[int, str]] = set()
             if existing:
-                old_result = (await self.session.execute(select(DemoMapResult).where(
-                    DemoMapResult.demo_file_id == existing.id,
-                ))).scalar_one_or_none()
-                if old_result and old_result.map_name:
-                    invalidated_team_maps = {(team_id, old_result.map_name)
-                                             for team_id in (old_result.team_a_id, old_result.team_b_id)
-                                             if team_id is not None}
-                invalidated_player_ids = set((
-                    await self.session.execute(select(DemoPlayerStat.player_id).where(
+                restored_cleaned_source = existing.source_deleted_at is not None
+                if not restored_cleaned_source:
+                    old_result = (await self.session.execute(select(DemoMapResult).where(
+                        DemoMapResult.demo_file_id == existing.id,
+                    ))).scalar_one_or_none()
+                    if old_result and old_result.map_name:
+                        invalidated_team_maps = {(team_id, old_result.map_name)
+                                                 for team_id in (old_result.team_a_id, old_result.team_b_id)
+                                                 if team_id is not None}
+                    invalidated_player_ids = set((
+                        await self.session.execute(select(DemoPlayerStat.player_id).where(
+                            DemoPlayerStat.demo_file_id == existing.id,
+                            DemoPlayerStat.player_id.is_not(None),
+                        ))
+                    ).scalars().all())
+                    await self.session.execute(delete(DemoPlayerStat).where(
                         DemoPlayerStat.demo_file_id == existing.id,
-                        DemoPlayerStat.player_id.is_not(None),
                     ))
-                ).scalars().all())
-                await self.session.execute(delete(DemoPlayerStat).where(
-                    DemoPlayerStat.demo_file_id == existing.id,
-                ))
-                await self.session.execute(delete(DemoMapResult).where(
-                    DemoMapResult.demo_file_id == existing.id,
-                ))
-                await self.session.execute(delete(DemoRound).where(
-                    DemoRound.demo_file_id == existing.id,
-                ))
-                await self.session.execute(delete(DemoTeamSideStat).where(
-                    DemoTeamSideStat.demo_file_id == existing.id,
-                ))
-                await self.session.execute(delete(DemoTeamOpponentContext).where(
-                    DemoTeamOpponentContext.demo_file_id == existing.id,
-                ))
+                    await self.session.execute(delete(DemoMapResult).where(
+                        DemoMapResult.demo_file_id == existing.id,
+                    ))
+                    await self.session.execute(delete(DemoRound).where(
+                        DemoRound.demo_file_id == existing.id,
+                    ))
+                    await self.session.execute(delete(DemoTeamSideStat).where(
+                        DemoTeamSideStat.demo_file_id == existing.id,
+                    ))
+                    await self.session.execute(delete(DemoTeamOpponentContext).where(
+                        DemoTeamOpponentContext.demo_file_id == existing.id,
+                    ))
                 parse_run = (
                     await self.session.execute(select(DemoParseRun).where(
                         DemoParseRun.demo_file_id == existing.id,
                     ))
                 ).scalar_one_or_none()
-                if parse_run is not None:
+                if parse_run is not None and not restored_cleaned_source:
                     parse_run.status = "pending"
                     parse_run.error_message = None
                     parse_run.finished_at = None
@@ -322,6 +324,7 @@ class DemoStorageService:
                 existing.storage_path = relative_path.as_posix()
                 existing.file_size_bytes = size
                 existing.sha256 = sha256
+                existing.source_deleted_at = None
                 existing.updated_at = now
                 record = existing
             else:
@@ -404,6 +407,8 @@ class DemoStorageService:
                 storage_path=record.storage_path, file_size_bytes=record.file_size_bytes,
                 sha256=record.sha256, uploaded_at=record.uploaded_at,
                 updated_at=record.updated_at,
+                source_deleted_at=record.source_deleted_at,
+                source_available=(self.storage_root / record.storage_path).is_file(),
                 parse_status=parse_statuses.get(record.id, "pending"),
                 map_name=result.map_name if result else None,
                 team_a_name=result.team_a_name if result else None,

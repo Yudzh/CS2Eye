@@ -90,6 +90,11 @@ def validate_demo_map_result(
         issues.append(MetadataIssue("invalid_final_score", "invalid", "A completed map cannot have a tied score."))
     elif result.team_a_score == result.team_b_score:
         issues.append(MetadataIssue("incomplete_split_demo", "partial", "This is an incomplete part of a split demo."))
+    elif completed_map and max(result.team_a_score, result.team_b_score) < 13:
+        issues.append(MetadataIssue(
+            "incomplete_final_score", "partial",
+            "A completed MR12 map must have at least 13 rounds won.",
+        ))
     else:
         expected_name = result.team_a.raw_name if result.team_a_score > result.team_b_score else result.team_b.raw_name
         if result.winner_team_name != expected_name:

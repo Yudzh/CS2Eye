@@ -1079,4 +1079,5 @@ h2 {
 .rounds-table { overflow-x: auto; }
 .rounds-table > div { display: grid; grid-template-columns: 3rem 5rem minmax(14rem, 2fr) minmax(8rem, 1fr) minmax(9rem, 1fr) 5rem 7rem; gap: .75rem; min-width: 760px; padding: .55rem; border-bottom: 1px solid var(--border); }
 .rounds-table__head { font-weight: 700; }
+.demo-source-deleted { color: var(--muted); font-weight: 700; }
 @media (max-width: 760px) { .side-stats-grid { grid-template-columns: 1fr; } }

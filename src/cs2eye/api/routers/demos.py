@@ -128,6 +128,7 @@ async def upload_demos(
     event_type: Literal["online", "lan"] = Form(...),
     match_date: date = Form(...),
     parse_after_upload: bool = Form(False),
+    delete_after_successful_parse: bool = Form(False),
     files: list[UploadFile] = File(...),
     session: AsyncSession = Depends(get_db_session),
 ) -> DemoUploadResponse:
@@ -143,7 +144,10 @@ async def upload_demos(
         # files are valid stored demos and may be parsed if still pending.
         demo_ids = [item.id for item in result.files if item.id is not None and item.status != "failed"]
         if demo_ids:
-            job = demo_parse_job_manager.start_for_files(demo_ids, replace_existing=False)
+            job = demo_parse_job_manager.start_for_files(
+                demo_ids, replace_existing=False,
+                delete_after_successful_parse=delete_after_successful_parse,
+            )
             result.parse_job_id, result.parse_job_status = job.job_id, job.status
     return result
 
@@ -179,7 +183,10 @@ async def parse_demos(
     name = validate_tournament_name(payload.tournament_name)
     if not 2000 <= payload.year <= 2100:
         raise HTTPException(status_code=422, detail="Year must be between 2000 and 2100.")
-    return await DemoParseService(session, settings.demo_storage_root).parse_many(
+    return await DemoParseService(
+        session, settings.demo_storage_root,
+        settings.demo_delete_after_successful_parse,
+    ).parse_many(
         name, payload.year, payload.replace_existing,
     )
 
@@ -189,7 +196,10 @@ async def parse_all_demos(
     session: AsyncSession = Depends(get_db_session),
 ) -> DemoParseResponse:
     try:
-        return await DemoParseService(session, settings.demo_storage_root).parse_all()
+        return await DemoParseService(
+            session, settings.demo_storage_root,
+            settings.demo_delete_after_successful_parse,
+        ).parse_all()
     except FileNotFoundError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -273,11 +283,18 @@ async def parse_demo(
     replace_existing: bool = Query(False),
     session: AsyncSession = Depends(get_db_session),
 ) -> DemoParseFileResult:
-    result = await DemoParseService(session, settings.demo_storage_root).parse_by_id(
+    result = await DemoParseService(
+        session, settings.demo_storage_root,
+        settings.demo_delete_after_successful_parse,
+    ).parse_by_id(
         demo_file_id, replace_existing,
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Demo file not found.")
+    if result[0].error == "source_demo_deleted_reupload_required":
+        raise HTTPException(
+            status_code=409, detail="source_demo_deleted_reupload_required",
+        )
     return result[0]
 
 

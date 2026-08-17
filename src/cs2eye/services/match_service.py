@@ -98,6 +98,7 @@ class MatchService:
                 DemoMapResult.map_name.is_not(None), DemoMapResult.team_a_score.is_not(None),
                 DemoMapResult.team_b_score.is_not(None),
                 DemoMapResult.team_a_score != DemoMapResult.team_b_score,
+                or_(DemoMapResult.team_a_score >= 13, DemoMapResult.team_b_score >= 13),
             ).order_by(DemoFile.match_date, DemoFile.id)
         )).all()
         groups: dict[tuple[str, date, int, int], int] = {}
@@ -165,12 +166,27 @@ class MatchService:
             DemoMapResult, DemoMapResult.demo_file_id == DemoFile.id).where(DemoFile.id.in_(demo_file_ids)))).all()
         if len(rows) != len(demo_file_ids): raise MatchValidationError("Одна или несколько демок не найдены.")
         ordered = sorted(rows, key=lambda row: demo_file_ids.index(row[0].id))
+        ordered = self._canonical_split_maps(ordered)
         first_demo, first_result = ordered[0]
         if first_result is None or first_result.team_a_id is None or first_result.team_b_id is None:
             raise MatchValidationError("На первой карте не определены команды.")
         pair = {first_result.team_a_id, first_result.team_b_id}
         if any(result is None or {result.team_a_id, result.team_b_id} != pair for _, result in ordered):
             raise MatchValidationError("Все карты серии должны принадлежать одной паре команд.")
+        if resolution_status == "resolved":
+            if any(result.round_data_status != "complete" for _, result in ordered):
+                raise MatchValidationError(
+                    "Resolved-серия не может содержать неполный split-фрагмент demo."
+                )
+            if any(max(result.team_a_score or 0, result.team_b_score or 0) < 13 for _, result in ordered):
+                raise MatchValidationError(
+                    "Resolved-серия не может содержать незавершённую карту со счётом меньше 13."
+                )
+            map_names = [result.map_name for _, result in ordered]
+            if None in map_names or len(map_names) != len(set(map_names)):
+                raise MatchValidationError(
+                    "Resolved-серия не может содержать одну карту дважды."
+                )
         tournament = await self._tournament(first_demo)
         match = Match(tournament_id=tournament.id, match_date=first_demo.match_date,
             team_a_id=first_result.team_a_id, team_b_id=first_result.team_b_id, format=format,
@@ -239,7 +255,8 @@ class MatchService:
                     DemoMapResult.round_data_status == "complete",
                     DemoMapResult.map_name.is_not(None),
                     DemoMapResult.team_a_score.is_not(None), DemoMapResult.team_b_score.is_not(None),
-                    DemoMapResult.team_a_score != DemoMapResult.team_b_score)
+                    DemoMapResult.team_a_score != DemoMapResult.team_b_score,
+                    or_(DemoMapResult.team_a_score >= 13, DemoMapResult.team_b_score >= 13))
                 .order_by(DemoFile.id)
             )).all())
         numbered = [(self._filename_map_number(item.original_filename), item, map_result) for item, map_result in candidates]
@@ -316,6 +333,31 @@ class MatchService:
     def _filename_map_number(filename: str) -> int | None:
         match = re.search(r"(?:^|[-_. ])(?:map|m)([1-5])(?:[-_. ]|$)", filename, re.I)
         return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _split_part(filename: str) -> tuple[str, int] | None:
+        match = re.match(r"^(.*)-p([1-9])\.dem$", filename, re.IGNORECASE)
+        return (match.group(1).casefold(), int(match.group(2))) if match else None
+
+    @classmethod
+    def _canonical_split_maps(
+        cls, rows: list[tuple[DemoFile, DemoMapResult]],
+    ) -> list[tuple[DemoFile, DemoMapResult]]:
+        """Keep only the final, stitched file from each split-demo sequence."""
+        final_by_key: dict[str, tuple[int, DemoFile, DemoMapResult]] = {}
+        for demo, result in rows:
+            part = cls._split_part(demo.original_filename)
+            if part is not None:
+                current = final_by_key.get(part[0])
+                if current is None or part[1] > current[0]:
+                    final_by_key[part[0]] = (part[1], demo, result)
+        superseded = {
+            demo.id
+            for demo, _ in rows
+            if (part := cls._split_part(demo.original_filename)) is not None
+            and final_by_key[part[0]][1].id != demo.id
+        }
+        return [(demo, result) for demo, result in rows if demo.id not in superseded]
 
     async def team_stats(self, team_id: int, *, aggregation_level: Literal["organization", "current_roster"] = "organization") -> TeamMatchStats:
         team = await self.session.get(Team, team_id)

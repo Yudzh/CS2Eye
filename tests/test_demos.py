@@ -183,6 +183,48 @@ async def test_changed_content_replaces_file(
     assert (tmp_path / body["files"][0]["storage_path"]).read_bytes() == b"new"
 
 
+async def test_reupload_cleaned_source_preserves_analytics(
+    demo_client: httpx.AsyncClient, tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime
+    from sqlalchemy import select
+    from cs2eye.db.session import get_db_session
+    from cs2eye.models.demo import DemoParseRun, DemoPlayerStat
+
+    created = (await upload(demo_client, [("map.dem", b"demo")])).json()["files"][0]
+    app = demo_client._transport.app
+    override = app.dependency_overrides[get_db_session]
+    async for session in override():
+        demo = await session.get(DemoFile, created["id"])
+        demo.source_deleted_at = datetime.now(UTC)
+        run = DemoParseRun(
+            demo_file_id=demo.id, status="success",
+            parser_name="test", parser_version="1",
+        )
+        session.add(run)
+        await session.flush()
+        session.add(DemoPlayerStat(
+            demo_file_id=demo.id, parse_run_id=run.id,
+            identity_key="saved", nickname="Saved",
+            rounds_played=1, kills=1, deaths=0, assists=0, total_damage=100,
+            adr=100, kast_rounds=1, kast_percent=100, internal_rating=10,
+            internal_rating_version="v1", opponent_rank_group="unknown",
+            opponent_rank_source="unknown",
+        ))
+        (tmp_path / demo.storage_path).unlink()
+        await session.commit()
+        break
+
+    result = (await upload(demo_client, [("map.dem", b"demo")])).json()
+    assert result["replaced_count"] == 1
+    async for session in override():
+        demo = await session.get(DemoFile, created["id"])
+        assert demo.source_deleted_at is None
+        assert (await session.execute(select(DemoPlayerStat))).scalar_one().nickname == "Saved"
+        assert (await session.execute(select(DemoParseRun))).scalar_one().status == "success"
+        break
+
+
 @pytest.mark.parametrize(("filename", "content", "error"), [
     ("bad.zip", b"data", "Only .dem"),
     ("empty.dem", b"", "must not be empty"),
@@ -209,21 +251,25 @@ async def test_upload_auto_parse_queues_only_successfully_stored_files(
     demo_client: httpx.AsyncClient, monkeypatch,
 ) -> None:
     queued: list[int] = []
+    options: dict[str, bool] = {}
+    def start_for_files(ids, *, replace_existing=True, delete_after_successful_parse=None):
+        queued.extend(ids)
+        options["delete_after_successful_parse"] = delete_after_successful_parse
+        return type("Job", (), {"job_id": "upload-job", "status": "queued"})()
     monkeypatch.setattr(
         "cs2eye.api.routers.demos.demo_parse_job_manager.start_for_files",
-        lambda ids, replace_existing=True: (
-            queued.extend(ids) or type("Job", (), {"job_id": "upload-job", "status": "queued"})()
-        ),
+        start_for_files,
     )
     response = await demo_client.post(
         "/api/v1/demos/upload",
-        data={"tournament_name":"IEM Cologne","event_type":"online","match_date":"2026-07-28","parse_after_upload":"true"},
+        data={"tournament_name":"IEM Cologne","event_type":"online","match_date":"2026-07-28","parse_after_upload":"true","delete_after_successful_parse":"true"},
         files=[("files",("good.dem",b"good","application/octet-stream")),
                ("files",("bad.txt",b"bad","text/plain"))],
     )
     body=response.json()
     successful=[item["id"] for item in body["files"] if item["status"]!="failed"]
     assert queued == successful
+    assert options == {"delete_after_successful_parse": True}
     assert body["parse_job_id"] == "upload-job"
 
 

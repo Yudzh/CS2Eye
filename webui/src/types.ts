@@ -547,6 +547,8 @@ export interface DemoListFile {
   sha256: string;
   uploaded_at: string;
   updated_at: string;
+  source_deleted_at: string | null;
+  source_available: boolean;
   parse_status: "pending" | "processing" | "success" | "failed";
   map_name: string | null;
   team_a_name: string | null;

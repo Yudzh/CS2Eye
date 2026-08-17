@@ -53,12 +53,14 @@ class DemoParseJobManager:
 
     def start_for_files(
         self, demo_file_ids: list[int], *, replace_existing: bool = True,
+        delete_after_successful_parse: bool | None = None,
     ) -> DemoParseJob:
         job = DemoParseJob(job_id=str(uuid4()), total_files=len(demo_file_ids))
         self.jobs[job.job_id] = job
         task = asyncio.create_task(self._run(
             job, tournament_name=None, year=None,
             replace_existing=replace_existing, demo_file_ids=demo_file_ids,
+            delete_after_successful_parse=delete_after_successful_parse,
         ))
         self.tasks.add(task); task.add_done_callback(self.tasks.discard)
         return job
@@ -74,6 +76,7 @@ class DemoParseJobManager:
         year: int | None,
         replace_existing: bool,
         demo_file_ids: list[int] | None = None,
+        delete_after_successful_parse: bool | None = None,
     ) -> None:
         job.status = "queued"
 
@@ -93,7 +96,12 @@ class DemoParseJobManager:
             async with self.parse_lock:
                 job.status = "running"
                 async with AsyncSessionLocal() as session:
-                    service = DemoParseService(session, settings.demo_storage_root)
+                    service = DemoParseService(
+                        session, settings.demo_storage_root,
+                        settings.demo_delete_after_successful_parse
+                        if delete_after_successful_parse is None
+                        else delete_after_successful_parse,
+                    )
                     if demo_file_ids is not None:
                         result = await service.parse_ids(
                             demo_file_ids, replace_existing=replace_existing,

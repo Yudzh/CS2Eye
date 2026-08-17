@@ -536,3 +536,63 @@ async def test_parse_all_aborts_before_touching_runs_when_storage_is_missing(
 
     await db_session.refresh(run)
     assert run.status == "success"
+
+
+async def test_parse_all_skips_intentionally_deleted_success(
+    db_session, tmp_path,
+) -> None:
+    from datetime import UTC, datetime
+    demo = DemoFile(
+        tournament_name="Cup", tournament_slug="cup",
+        match_date=__import__("datetime").date(2026, 2, 1),
+        original_filename="cleaned.dem", storage_path="demos/cleaned.dem",
+        file_size_bytes=123, sha256="e" * 64,
+        source_deleted_at=datetime.now(UTC),
+    )
+    db_session.add(demo)
+    await db_session.flush()
+    db_session.add(DemoParseRun(
+        demo_file_id=demo.id, status="success",
+        parser_name="test", parser_version="1",
+    ))
+    await db_session.commit()
+
+    result = await DemoParseService(db_session, tmp_path).parse_all()
+
+    assert result.total_files == 0
+    assert result.failed_count == 0
+
+
+async def test_reparse_intentionally_deleted_source_preserves_results(
+    db_session, tmp_path,
+) -> None:
+    from datetime import UTC, datetime
+    demo = DemoFile(
+        tournament_name="Cup", tournament_slug="cup",
+        match_date=__import__("datetime").date(2026, 2, 1),
+        original_filename="cleaned.dem", storage_path="demos/cleaned.dem",
+        file_size_bytes=123, sha256="e" * 64,
+        source_deleted_at=datetime.now(UTC),
+    )
+    db_session.add(demo)
+    await db_session.flush()
+    run = DemoParseRun(
+        demo_file_id=demo.id, status="success",
+        parser_name="test", parser_version="1",
+    )
+    db_session.add(run)
+    await db_session.flush()
+    db_session.add(DemoPlayerStat(
+        demo_file_id=demo.id, parse_run_id=run.id,
+        nickname="Saved", identity_key="saved",
+        rounds_played=1, kills=1, deaths=0, assists=0, total_damage=100,
+        adr=Decimal("100"), kast_rounds=1, kast_percent=Decimal("100"),
+        internal_rating=Decimal("10"), internal_rating_version=INTERNAL_RATING_VERSION,
+        opponent_rank_group="unknown", opponent_rank_source="unknown",
+    ))
+    await db_session.commit()
+
+    result, _ = await DemoParseService(db_session, tmp_path).parse_one(demo, True)
+
+    assert result.error == "source_demo_deleted_reupload_required"
+    assert await db_session.scalar(select(func.count(DemoPlayerStat.id))) == 1

@@ -229,12 +229,14 @@ export function uploadDemoFiles(
   matchDate: string,
   files: File[],
   parseAfterUpload = false,
+  deleteAfterSuccessfulParse = false,
 ): Promise<DemoUploadResponse> {
   const body = new FormData();
   body.append("tournament_name", tournamentName);
   body.append("event_type", eventType);
   body.append("match_date", matchDate);
   body.append("parse_after_upload", String(parseAfterUpload));
+  body.append("delete_after_successful_parse", String(deleteAfterSuccessfulParse));
   files.forEach((file) => body.append("files", file));
   return request<DemoUploadResponse>("/api/v1/demos/upload", {
     method: "POST",

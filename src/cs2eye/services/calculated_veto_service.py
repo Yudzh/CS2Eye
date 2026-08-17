@@ -20,7 +20,9 @@ from cs2eye.services.team_h2h_service import TeamH2HService
 from cs2eye.services.team_map_strength_service import calculate_map_strength, scope_performance
 from cs2eye.services.veto_service import VALID_MAPS, VetoService
 
-DEFAULT_ACTIVE_POOL = {"ancient", "dust2", "inferno", "mirage", "nuke", "overpass", "train"}
+DEFAULT_ACTIVE_POOL = {
+    "ancient", "anubis", "cache", "dust2", "inferno", "mirage", "nuke",
+}
 
 def clamp(value: float) -> float: return max(0.0, min(100.0, value))
 def number(value: Any) -> float | None: return float(value) if value is not None else None
