@@ -1,5 +1,7 @@
+import pytest
+
 from cs2eye.analytics.calculated_veto_config import CALCULATED_VETO_MODEL_VERSION
-from cs2eye.services.calculated_veto_service import MapSignals, blend_signals, calculate_map_pair, simulate
+from cs2eye.services.calculated_veto_service import MapSignals, _blend_rate, action_propensity, blend_signals, bounded_probabilities, calculate_map_pair, exact_veto_tree, mix_veto_trees, simulate, veto_raw_probability
 
 def sig(strength=50, maps=10, recent=50, **kw):
     return MapSignals(strength=strength,strength_confidence=90,maps=maps,freshness=90,recent=recent,ct=50,t=50,**kw)
@@ -104,5 +106,76 @@ def test_swing_does_not_create_extra_top_level_factor():
     assert [item["key"] for item in factors].count("economy_combat_matchup")==1
     assert not any(item["key"]=="round_swing" for item in factors)
 
-def test_tactical_matchup_model_version_is_v1_1():
-    assert CALCULATED_VETO_MODEL_VERSION=="v1.1"
+def test_calculated_veto_model_version_is_v2():
+    assert CALCULATED_VETO_MODEL_VERSION=="v2.1"
+
+def test_bo3_marginals_sum_to_three_and_are_bounded():
+    probabilities=bounded_probabilities([10,.9,.8,.7,.2,.1,0],3)
+    assert all(0<=value<=1 for value in probabilities)
+    assert sum(probabilities)==pytest.approx(3)
+
+def test_uniform_inputs_produce_uniform_bo3_baseline():
+    probabilities=bounded_probabilities([1]*7,3)
+    assert probabilities==pytest.approx([3/7]*7)
+
+def test_permaban_reduces_probability_and_pick_selection_raise_it():
+    neutral=veto_raw_probability(.5,.5,.2,.2,.2,.2,.5)[0]
+    permaban=veto_raw_probability(.5,.5,.2,.2,.95,.2,.5)[0]
+    popular=veto_raw_probability(.8,.8,.6,.6,.2,.2,.5)[0]
+    assert permaban<neutral<popular
+
+def test_map_quality_cannot_dominate_veto_history():
+    strong_veto=veto_raw_probability(.8,.8,.5,.5,.1,.1,0)[0]
+    weak_veto=veto_raw_probability(.1,.1,.05,.05,.8,.8,1)[0]
+    assert strong_veto>weak_veto
+
+def test_roster_and_recent_rates_use_shrinkage():
+    org={"eligible_series":30,"selected":{"rate":40}}
+    tiny={"eligible_series":2,"selected":{"rate":100}}
+    large={"eligible_series":40,"selected":{"rate":100}}
+    tiny_value=_blend_rate(org,tiny,None,"selected.rate",3/7)
+    large_value=_blend_rate(org,large,None,"selected.rate",3/7)
+    recent_value=_blend_rate(org,None,{"eligible_series":5,"selected":{"rate":80}},"selected.rate",3/7)
+    assert .4<tiny_value<large_value<1
+    assert recent_value>.4
+
+def tree_props(opening:dict[str,float]|None=None,pick:dict[str,float]|None=None):
+    names=set("abcdefg");opening=opening or {};pick=pick or {}
+    return {side:{role:{name:(opening.get(name,1) if role=="opening_ban" else pick.get(name,1) if role=="pick" else 1) for name in names} for role in ("opening_ban","pick","closing_ban")} for side in ("team_a","team_b")}
+
+def test_exact_tree_probability_invariants():
+    result=exact_veto_tree(set("abcdefg"),tree_props(),"team_a")
+    rows=result["maps"].values()
+    assert result["branch_probability_sum"]==pytest.approx(1)
+    assert sum(x["opening_ban_probability"] for x in rows)==pytest.approx(2)
+    assert sum(x["pick_probability"] for x in result["maps"].values())==pytest.approx(2)
+    assert sum(x["closing_ban_probability"] for x in result["maps"].values())==pytest.approx(2)
+    assert sum(x["decider_probability"] for x in result["maps"].values())==pytest.approx(1)
+    assert sum(x["series_map_probability"] for x in result["maps"].values())==pytest.approx(3)
+    assert all(x["series_map_probability"]+x["any_ban_probability"]==pytest.approx(1) for x in result["maps"].values())
+
+def test_opening_ban_removes_map_from_later_roles():
+    props=tree_props(opening={"a":1e12})
+    result=exact_veto_tree(set("abcdefg"),props,"team_a")["maps"]["a"]
+    assert result["opening_ban_probability"]>.999
+    assert result["pick_probability"]+result["closing_ban_probability"]+result["decider_probability"]<.001
+
+def test_pick_propensity_only_applies_after_opening_survival():
+    picked=exact_veto_tree(set("abcdefg"),tree_props(pick={"a":1e6}),"team_a")["maps"]["a"]
+    banned=exact_veto_tree(set("abcdefg"),tree_props(opening={"a":1e9},pick={"a":1e9}),"team_a")["maps"]["a"]
+    assert picked["pick_probability"]>banned["pick_probability"]
+    assert banned["series_map_probability"]<.01
+
+def test_unknown_actor_is_equal_tree_mixture():
+    props=tree_props(opening={"a":20})
+    a=exact_veto_tree(set("abcdefg"),props,"team_a");b=exact_veto_tree(set("abcdefg"),props,"team_b")
+    mixed=mix_veto_trees([(.5,a),(.5,b)])
+    assert mixed["branch_probability_sum"]==pytest.approx(1)
+    assert sum(x["series_map_probability"] for x in mixed["maps"].values())==pytest.approx(3)
+
+def test_actor_specific_small_sample_shrinks_to_fallback():
+    org={"eligible_series":30,"opening_ban":{"rate":20},"when_first_actor":{"eligible_series":1,"opening_ban":{"rate":100}}}
+    small,_=action_propensity(org,None,None,"opening_ban","when_first_actor",.2)
+    org["when_first_actor"]={"eligible_series":30,"opening_ban":{"rate":100}}
+    large,_=action_propensity(org,None,None,"opening_ban","when_first_actor",.2)
+    assert .2<small<large<1

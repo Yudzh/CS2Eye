@@ -186,6 +186,7 @@ async def parse_demos(
     return await DemoParseService(
         session, settings.demo_storage_root,
         settings.demo_delete_after_successful_parse,
+        parse_concurrency=settings.demo_parse_concurrency,
     ).parse_many(
         name, payload.year, payload.replace_existing,
     )
@@ -199,6 +200,7 @@ async def parse_all_demos(
         return await DemoParseService(
             session, settings.demo_storage_root,
             settings.demo_delete_after_successful_parse,
+            parse_concurrency=settings.demo_parse_concurrency,
         ).parse_all()
     except FileNotFoundError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

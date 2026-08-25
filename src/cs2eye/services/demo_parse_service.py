@@ -2,9 +2,11 @@ import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from dataclasses import replace
+from multiprocessing import get_context
 from pathlib import Path
 
 from sqlalchemy import delete, extract, select
@@ -35,6 +37,11 @@ from cs2eye.services.demo_combat_service import replace_demo_combat
 from cs2eye.services.demo_utility_service import replace_demo_utility
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_demo_in_worker(path: str) -> ParsedDemo:
+    """Parse one demo in an isolated process so CPU work bypasses the GIL."""
+    return Demoparser2Adapter().parse(Path(path))
 
 
 def _part_number(filename: str) -> tuple[str, int] | None:
@@ -80,10 +87,12 @@ class DemoParseService:
         session: AsyncSession,
         storage_root: str | Path,
         delete_after_successful_parse: bool = False,
+        parse_concurrency: int = 4,
     ) -> None:
         self.session = session
         self.storage_root = Path(storage_root)
         self.delete_after_successful_parse = delete_after_successful_parse
+        self.parse_concurrency = max(1, parse_concurrency)
         self.parser = Demoparser2Adapter()
 
     async def parse_many(
@@ -176,6 +185,44 @@ class DemoParseService:
         # Keep plain IDs and explicitly reload each row in async context so a
         # failed file cannot make the next iteration perform implicit IO.
         demo_ids = [demo.id for demo in demos]
+        successful_ids: set[int] = set()
+        if demo_ids and not replace_existing:
+            successful_ids = set((await self.session.execute(select(
+                DemoParseRun.demo_file_id,
+            ).where(
+                DemoParseRun.demo_file_id.in_(demo_ids),
+                DemoParseRun.status == "success",
+            ))).scalars())
+        parse_semaphore = asyncio.Semaphore(self.parse_concurrency)
+        # Spawn avoids inheriting asyncpg connections from the API process.
+        process_pool = ProcessPoolExecutor(
+            max_workers=self.parse_concurrency,
+            mp_context=get_context("spawn"),
+        ) if type(self.parser) is Demoparser2Adapter else None
+
+        async def parse_file(storage_path: str) -> ParsedDemo | list[ParsedDemoPlayerStat]:
+            async with parse_semaphore:
+                path = self.storage_root / storage_path
+                if process_pool is not None:
+                    return await asyncio.get_running_loop().run_in_executor(
+                        process_pool, _parse_demo_in_worker, str(path),
+                    )
+                return await asyncio.to_thread(
+                    self.parser.parse, path,
+                )
+
+        # Parsing the demo is CPU-heavy and independent for each file. Start it
+        # eagerly with a bounded concurrency, then persist results in input order:
+        # AsyncSession itself must never be used by concurrent tasks.
+        parse_tasks = {
+            demo.id: asyncio.create_task(parse_file(demo.storage_path))
+            for demo in demos
+            if demo.id not in successful_ids
+            if not (
+                demo.source_deleted_at is not None
+                and not (self.storage_root / demo.storage_path).is_file()
+            )
+        }
         if progress_callback is not None:
             await progress_callback(0, len(demo_ids), None)
         for demo_id in demo_ids:
@@ -202,11 +249,18 @@ class DemoParseService:
                 if progress_callback is not None:
                     await progress_callback(len(results), len(demo_ids), result)
                 continue
-            result, player_ids = await self.parse_one(demo, replace_existing)
+            result, player_ids = await self.parse_one(
+                demo, replace_existing, parse_tasks=parse_tasks,
+            )
             results.append(result)
             affected.update(player_ids)
             if progress_callback is not None:
                 await progress_callback(len(results), len(demo_ids), result)
+        # Retrieve every exception before shutting down to avoid orphan task
+        # warnings when a demo row disappeared while its parser was running.
+        await asyncio.gather(*parse_tasks.values(), return_exceptions=True)
+        if process_pool is not None:
+            process_pool.shutdown()
         recalculated = await recalculate_players_internal_rating(self.session, affected)
         return DemoParseResponse(
             tournament_name=tournament_name, year=year, total_files=len(demo_ids),
@@ -256,6 +310,8 @@ class DemoParseService:
         self,
         demo: DemoFile,
         replace_existing: bool,
+        *,
+        parse_tasks: dict[int, asyncio.Task[ParsedDemo | list[ParsedDemoPlayerStat]]] | None = None,
     ) -> tuple[DemoParseFileResult, set[int]]:
         # rollback() expires ORM state even when expire_on_commit=False. Keep
         # scalar diagnostics outside the ORM object so the error handler never
@@ -297,7 +353,8 @@ class DemoParseService:
         run.error_message = None
         await self.session.commit()
         try:
-            parsed_demo = await asyncio.to_thread(
+            task = parse_tasks.get(demo_id) if parse_tasks is not None else None
+            parsed_demo = await task if task is not None else await asyncio.to_thread(
                 self.parser.parse, self.storage_root / demo.storage_path,
             )
             merged_previous_parts: list[DemoFile] = []
@@ -317,10 +374,15 @@ class DemoParseService:
                 is_final_part = bool(split_parts) and part[1] == split_parts[-1][0]
                 if is_final_part and part[1] > 1:
                     merged_previous_parts = [candidate for number, candidate in split_parts if number < part[1]]
-                    previous = [
-                        await asyncio.to_thread(self.parser.parse, self.storage_root / candidate.storage_path)
-                        for candidate in merged_previous_parts
-                    ]
+                    previous = []
+                    for candidate in merged_previous_parts:
+                        previous_task = parse_tasks.get(candidate.id) if parse_tasks is not None else None
+                        previous.append(
+                            await previous_task if previous_task is not None
+                            else await asyncio.to_thread(
+                                self.parser.parse, self.storage_root / candidate.storage_path,
+                            )
+                        )
                     parsed_demo = ParsedDemo(
                         map_result=parsed_demo.map_result,
                         player_stats=merge_player_stats([*[item.player_stats for item in previous], parsed_demo.player_stats]),

@@ -513,6 +513,43 @@ async def test_batch_reloads_next_demo_after_previous_rollback(db_session, tmp_p
     assert [item.error for item in result.files] == ["first demo failed", None]
 
 
+async def test_batch_parses_files_concurrently(db_session, tmp_path) -> None:
+    import threading
+
+    demos = [DemoFile(
+        tournament_name="Cup", tournament_slug="cup",
+        match_date=__import__("datetime").date(2026, 3, day),
+        original_filename=f"parallel-{day}.dem", storage_path=f"parallel-{day}.dem",
+        file_size_bytes=1, sha256=str(day) * 64,
+    ) for day in (1, 2)]
+    db_session.add_all(demos)
+    await db_session.commit()
+    service = DemoParseService(db_session, tmp_path, parse_concurrency=2)
+    both_started = threading.Barrier(2, timeout=2)
+
+    class ConcurrentParser:
+        parser_name = "test"
+        parser_version = "1"
+
+        def parse(self, path):
+            both_started.wait()
+            identity = path.stem[-1]
+            return [ParsedDemoPlayerStat(
+                steam_id=identity, nickname=f"Player {identity}", team_name="Team",
+                rounds_played=10, kills=10, deaths=5, assists=2,
+                total_damage=800, adr=Decimal("80"), kast_rounds=7,
+                kast_percent=Decimal("70"), internal_rating=Decimal("7"),
+            )]
+
+    service.parser = ConcurrentParser()
+    result = await service._parse_demos(
+        demos, False, tournament_name="Cup", year=2026,
+    )
+
+    assert result.parsed_count == 2
+    assert result.failed_count == 0
+
+
 async def test_parse_all_aborts_before_touching_runs_when_storage_is_missing(
     db_session, tmp_path,
 ) -> None:

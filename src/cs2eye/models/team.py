@@ -18,7 +18,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from cs2eye.db.base import Base
 
@@ -167,6 +167,47 @@ class Player(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class AnalystFactorPlayer(Base):
+    __tablename__ = "analyst_factor_players"
+
+    analyst_factor_id: Mapped[int] = mapped_column(
+        ForeignKey("analyst_factors.id", ondelete="CASCADE"), primary_key=True,
+    )
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("players.id", ondelete="CASCADE"), primary_key=True, index=True,
+    )
+
+
+class AnalystFactor(Base):
+    __tablename__ = "analyst_factors"
+    __table_args__ = (
+        CheckConstraint("factor_type IN ('positive','negative')", name="ck_analyst_factors_type"),
+        CheckConstraint("environment IN ('lan','online','any')", name="ck_analyst_factors_environment"),
+        CheckConstraint(
+            "category IS NULL OR category IN ('overall','ct_defense','t_attack','tactics','veto','form','communication','roles','individual','teamplay','mental','coach','roster','other')",
+            name="ck_analyst_factors_category",
+        ),
+        Index("ix_analyst_factors_team_active", "team_id", "is_active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
+    coach_id: Mapped[int | None] = mapped_column(ForeignKey("players.id", ondelete="SET NULL"), index=True)
+    factor_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str | None] = mapped_column(String(32), index=True)
+    map_name: Mapped[str | None] = mapped_column(String(32), index=True)
+    environment: Mapped[str] = mapped_column(String(16), nullable=False, default="any", server_default="any", index=True)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    players: Mapped[list[Player]] = relationship(secondary="analyst_factor_players", lazy="selectin")
+    coach: Mapped[Player | None] = relationship(foreign_keys=[coach_id], lazy="selectin")
 
 
 class TeamParticipantMembership(Base):

@@ -9,6 +9,8 @@ from cs2eye.api.routers.meta import router as meta_router
 from cs2eye.api.routers.analysis import router as analysis_router
 from cs2eye.api.routers.matches import router as matches_router
 from cs2eye.api.routers.round_swing_admin import router as round_swing_admin_router
+from cs2eye.api.routers.tournaments import router as tournaments_router
+from cs2eye.api.routers.analyst_factors import router as analyst_factors_router
 
 
 api_router = APIRouter(
@@ -32,4 +34,6 @@ api_router.include_router(
 api_router.include_router(meta_router)
 api_router.include_router(analysis_router)
 api_router.include_router(matches_router)
+api_router.include_router(tournaments_router)
 api_router.include_router(round_swing_admin_router)
+api_router.include_router(analyst_factors_router)

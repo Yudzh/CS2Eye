@@ -29,6 +29,9 @@ class MatchMap:
     winner_team_id: int | None
     map_role: str
     picked_by_team_id: int | None
+    parse_status: str = "pending"
+    source_deleted_at: str | None = None
+    source_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -125,21 +128,27 @@ class MatchService:
         tournament = await self.session.get(Tournament, match.tournament_id) if match.tournament_id else None
         team_a = await self.session.get(Team, match.team_a_id) if match.team_a_id else None
         team_b = await self.session.get(Team, match.team_b_id) if match.team_b_id else None
+        from cs2eye.models.demo import DemoParseRun
         rows = (await self.session.execute(
-            select(DemoFile, DemoMapResult).join(DemoMapResult, DemoMapResult.demo_file_id == DemoFile.id)
+            select(DemoFile, DemoMapResult, DemoParseRun).join(DemoMapResult, DemoMapResult.demo_file_id == DemoFile.id)
+            .outerjoin(DemoParseRun, DemoParseRun.demo_file_id == DemoFile.id)
             .where(DemoFile.match_id == match_id).order_by(DemoFile.map_number, DemoFile.id)
         )).all()
-        maps = [self._map(match, demo, result) for demo, result in rows]
+        maps = [self._map(match, demo, result, run) for demo, result, run in rows]
         return MatchView(match, tournament, team_a, team_b, maps)
 
     @staticmethod
-    def _map(match: Match, demo: DemoFile, result: DemoMapResult) -> MatchMap:
+    def _map(match: Match, demo: DemoFile, result: DemoMapResult, run=None) -> MatchMap:
         normal = result.team_a_id == match.team_a_id and result.team_b_id == match.team_b_id
         reverse = result.team_b_id == match.team_a_id and result.team_a_id == match.team_b_id
         score_a = result.team_a_score if normal else result.team_b_score if reverse else None
         score_b = result.team_b_score if normal else result.team_a_score if reverse else None
         winner = match.team_a_id if score_a is not None and score_b is not None and score_a > score_b else match.team_b_id if score_a is not None and score_b is not None and score_b > score_a else None
-        return MatchMap(demo.id, demo.map_number or 0, result.map_name, score_a, score_b, winner, demo.map_role, demo.picked_by_team_id)
+        from pathlib import Path
+        from cs2eye.core.config import settings
+        return MatchMap(demo.id, demo.map_number or 0, result.map_name, score_a, score_b, winner, demo.map_role, demo.picked_by_team_id,
+                        run.status if run else "pending", demo.source_deleted_at.isoformat() if demo.source_deleted_at else None,
+                        (Path(settings.demo_storage_root) / demo.storage_path).is_file())
 
     async def recalculate(self, match_id: int) -> MatchView:
         view = await self.get(match_id); match = view.match
@@ -207,11 +216,27 @@ class MatchService:
     async def update(self, match_id: int, **changes: object) -> MatchView:
         match = await self.session.get(Match, match_id)
         if match is None: raise MatchNotFoundError("Матч не найден.")
-        allowed = {"format", "stage", "environment", "is_playoff", "is_elimination", "resolution_status"}
+        scoring_changed = any(
+            key in changes and changes[key] is not None and changes[key] != getattr(match, key)
+            for key in ("format", "resolution_status")
+        )
+        allowed = {"tournament_id", "format", "stage", "environment", "is_playoff", "is_elimination", "resolution_status",
+                   "round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id"}
+        if "next_match_id" in changes and changes["next_match_id"] is not None:
+            target = await self.session.get(Match, changes["next_match_id"])
+            if target is None or target.id == match.id or target.tournament_id != match.tournament_id:
+                raise MatchValidationError("Следующий матч должен существовать в том же турнире.")
+        if "tournament_id" in changes and changes["tournament_id"] is not None:
+            if await self.session.get(Tournament, changes["tournament_id"]) is None:
+                raise MatchValidationError("Турнир не найден.")
+        nullable_layout = {"round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id"}
         for key, value in changes.items():
-            if key in allowed and value is not None: setattr(match, key, value)
+            if key in allowed and (value is not None or key in nullable_layout): setattr(match, key, value)
         if match.stage in {"round_of_32", "round_of_16", "quarterfinal", "semifinal", "final"}: match.is_playoff = True
-        await self.session.flush(); return await self.recalculate(match_id)
+        await self.session.flush()
+        if scoring_changed:
+            return await self.recalculate(match_id)
+        return await self.get(match_id)
 
     async def reorder(self, match_id: int, demo_file_ids: list[int]) -> MatchView:
         demos = list((await self.session.execute(select(DemoFile).where(DemoFile.match_id == match_id))).scalars().all())

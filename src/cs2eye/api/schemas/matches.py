@@ -13,6 +13,7 @@ MatchResolution = Literal["resolved", "needs_review", "unresolved"]
 class TournamentResponse(BaseModel):
     id: int; name: str; year: int; tier: str | None
     environment: MatchEnvironment; start_date: date | None; end_date: date | None
+    structure_type: Literal["single_elimination", "double_elimination", "swiss", "groups", "groups_playoff", "mixed", "unknown"] = "unknown"
 
 
 class MatchTeamResponse(BaseModel):
@@ -28,6 +29,9 @@ class MatchMapResponse(BaseModel):
     winner_team_id: int | None; demo_file_id: int
     map_role: Literal["team_pick", "opponent_pick", "decider", "unknown"] = "unknown"
     picked_by_team_id: int | None = None
+    parse_status: str = "pending"
+    source_deleted_at: str | None = None
+    source_available: bool = False
 
 class MatchVetoActionResponse(BaseModel):
     id: int; order_index: int; team_id: int | None; team_name: str | None
@@ -44,6 +48,9 @@ class MatchResponse(BaseModel):
     veto_data_status: Literal["not_available", "complete", "partial", "needs_review", "invalid"]
     veto_expected: bool
     veto: list[MatchVetoActionResponse]
+    round_number: int | None = None; round_label: str | None = None
+    group_name: str | None = None; bracket_section: Literal["main", "upper", "lower", "group", "swiss"] | None = None
+    bracket_position: int | None = None; next_match_id: int | None = None
 
 
 class MatchListResponse(BaseModel):
@@ -60,6 +67,11 @@ class MatchPatchRequest(BaseModel):
     format: MatchFormat | None = None; stage: MatchStage | None = None
     environment: MatchEnvironment | None = None; resolution_status: MatchResolution | None = None
     is_playoff: bool | None = None; is_elimination: bool | None = None
+    tournament_id: int | None = None
+    round_number: int | None = Field(None, ge=1); round_label: str | None = Field(None, max_length=160)
+    group_name: str | None = Field(None, max_length=160)
+    bracket_section: Literal["main", "upper", "lower", "group", "swiss"] | None = None
+    bracket_position: int | None = Field(None, ge=1); next_match_id: int | None = None
 
 
 class MatchReorderRequest(BaseModel):

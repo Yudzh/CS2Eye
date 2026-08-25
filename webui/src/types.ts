@@ -51,7 +51,13 @@ export interface TeamStrength {
 export interface TeamDetail extends Team {
   strength: TeamStrength;
   leadership: Leadership;
+  analyst_factors: AnalystFactor[];
 }
+export type AnalystFactorType = "positive" | "negative";
+export type AnalystEnvironment = "lan" | "online" | "any";
+export type AnalystCategory = "overall"|"ct_defense"|"t_attack"|"tactics"|"veto"|"form"|"communication"|"roles"|"individual"|"teamplay"|"mental"|"coach"|"roster"|"other";
+export interface AnalystFactor {id:number;team_id:number;team_name:string;factor_type:AnalystFactorType;text:string;category:AnalystCategory|null;map_name:string|null;environment:AnalystEnvironment;players:Array<{id:number;nickname:string}>;coach:{id:number;nickname:string}|null;valid_from:string|null;valid_until:string|null;is_active:boolean;status:"active"|"expired"|"inactive"|"scheduled";created_at:string;updated_at:string}
+export interface AnalystFactorPayload {team_id:number;factor_type:AnalystFactorType;text:string;category:AnalystCategory|null;map_name:string|null;environment:AnalystEnvironment;player_ids:number[];coach_id:number|null;valid_from:string|null;valid_until:string|null;is_active:boolean}
 export interface LeadershipFactor {key:string;label:string;raw_value:unknown;normalized_score:number|null;weight:number;effective_weight:number;impact:number;sample_size:number|null;confidence:number|null;reason:string|null;available:boolean}
 export interface LeadershipScore {score:number;raw_score:number;reliability:number;model_version:string;management_residual:number|null;actual_performance:number|null;expected_performance:number|null;sample:{maps:number;available_factors:number;total_factors:number};factors:LeadershipFactor[]}
 export interface Leadership {management_context:{roster_id:number|null;period_started_at:string|null;role_history_status:string};igl:(LeadershipScore&{player_id:number;name:string;player_strength:number|null;captain_strength:number|null;period:{started_at:string|null;ended_at:string|null;source:string}})|null;coach:(LeadershipScore&{id:number;name:string;roster_attribution_factor:number;tenure:{started_at:string|null;ended_at:string|null;source:string}})|null}
@@ -237,24 +243,28 @@ export type MatchFormat = "bo1" | "bo3" | "bo5" | "unknown";
 export type MatchStage = "group" | "swiss" | "round_of_32" | "round_of_16" | "quarterfinal" | "semifinal" | "final" | "unknown";
 export type MatchEnvironment = "lan" | "online" | "unknown";
 export type MatchResolution = "resolved" | "needs_review" | "unresolved";
+export type TournamentStructure = "single_elimination"|"double_elimination"|"swiss"|"groups"|"groups_playoff"|"mixed"|"unknown";
 export interface MatchSeries {
-  id: number; tournament: null | { id: number; name: string; year: number; tier: string | null; environment: MatchEnvironment; start_date: string | null; end_date: string | null };
+  id: number; tournament: null | { id: number; name: string; year: number; tier: string | null; environment: MatchEnvironment; start_date: string | null; end_date: string | null; structure_type:TournamentStructure };
   match_date: string; format: MatchFormat; stage: MatchStage; environment: MatchEnvironment;
   status: string; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean;
   team_a: { id: number | null; name: string | null }; team_b: { id: number | null; name: string | null };
   score: { team_a: number; team_b: number }; winner_team_id: number | null;
-  maps: Array<{ map_number: number; map_name: string | null; team_a_score: number | null; team_b_score: number | null; winner_team_id: number | null; demo_file_id: number; map_role: "team_pick"|"opponent_pick"|"decider"|"unknown"; picked_by_team_id:number|null }>;
+  maps: Array<{ map_number: number; map_name: string | null; team_a_score: number | null; team_b_score: number | null; winner_team_id: number | null; demo_file_id: number; map_role: "team_pick"|"opponent_pick"|"decider"|"unknown"; picked_by_team_id:number|null; parse_status:string; source_deleted_at:string|null; source_available:boolean }>;
   veto_data_status: "not_available"|"complete"|"partial"|"needs_review"|"invalid";
   veto_expected: boolean;
   veto: VetoAction[];
+  round_number:number|null;round_label:string|null;group_name:string|null;bracket_section:"main"|"upper"|"lower"|"group"|"swiss"|null;bracket_position:number|null;next_match_id:number|null;
 }
 export interface VetoAction { id?:number; order_index:number; team_id:number|null; team_name?:string|null; action:"ban"|"pick"|"decider"; map_name:string; source?:string; source_external_id?:string|null }
-export interface VetoMap { map_name:string; active:boolean; eligible_series:number; veto_appearances:number; ban:{count:number;rate:number|null;first_ban_count:number;first_ban_rate:number|null}; pick:{count:number;rate:number|null;first_pick_count:number;first_pick_rate:number|null;maps:number;wins:number;losses:number;win_rate:number|null}; opponent_pick:{maps:number;wins:number;losses:number;win_rate:number|null}; decider:{maps:number;wins:number;losses:number;win_rate:number|null}; is_likely_permaban:boolean;permaban_confidence:number;pick_preference_score:number|null }
+export interface VetoActionRate {count:number;rate:number|null}
+export interface VetoActorScope {eligible_series:number;opening_ban:VetoActionRate;pick:VetoActionRate;closing_ban:VetoActionRate}
+export interface VetoMap { map_name:string; active:boolean; eligible_series:number; veto_appearances:number; selected:VetoActionRate;opening_ban:VetoActionRate;closing_ban:VetoActionRate;when_first_actor:VetoActorScope;when_second_actor:VetoActorScope; ban:{count:number;rate:number|null;first_ban_count:number;first_ban_rate:number|null}; pick:{count:number;rate:number|null;first_pick_count:number;first_pick_rate:number|null;maps:number;wins:number;losses:number;win_rate:number|null}; opponent_pick:{count:number;rate:number|null;maps:number;wins:number;losses:number;win_rate:number|null}; decider:{count:number;rate:number|null;maps:number;wins:number;losses:number;win_rate:number|null}; is_likely_permaban:boolean;permaban_confidence:number;pick_preference_score:number|null }
 export interface TeamVetoProfile { team_id:number;team_name:string;aggregation_level:"organization"|"current_roster";roster_id:number|null;sample:{series:number;complete_series:number};veto_confidence:number;denominator:string;maps:VetoMap[] }
 export interface VetoComparison {team_a:TeamVetoProfile;team_b:TeamVetoProfile;maps:Array<{map_name:string;team_a:VetoMap;team_b:VetoMap;collision:"unknown"|"low"|"medium"|"high";availability:"unknown"|"likely_available"|"contested"|"likely_removed"}>;h2h:{series:number;maps:VetoMap[]}}
 export interface CalculatedVetoFactor {key:string;label:string;raw_value:unknown;score:number|null;normalized_score:number|null;weight:number;effective_weight:number;impact:number;sample_size:number|null;confidence:number|null;reason:string|null;available:boolean}
 export interface CalculatedVetoSide {matchup_map_score:number;calculated_pick_score:number;calculated_ban_score:number;matchup_confidence:number;pick_confidence:number;ban_confidence:number;matchup_factors:CalculatedVetoFactor[];pick_factors:CalculatedVetoFactor[];ban_factors:CalculatedVetoFactor[]}
-export interface CalculatedVeto {calculated_veto_model_version:string;score_semantics:"analytical_score_0_100_not_probability";format:"bo3";veto_format_assumption:string;first_actor_known:boolean;team_a:{id:number;name:string};team_b:{id:number;name:string};maps:Array<{map:string;active:boolean;team_a:CalculatedVetoSide;team_b:CalculatedVetoSide;collision_score:number;collision:"low"|"medium"|"high"}>;scenarios:Array<{first_actor:"team_a"|"team_b";actions:Array<{order:number;team:"team_a"|"team_b"|null;action:"ban"|"pick"|"decider";map:string;effective_action_score:number|null}>}>}
+export interface CalculatedVeto {calculated_veto_model_version:string;method:"exact_conditional_veto_tree";probability_semantics:"heuristic_estimate_not_calibrated";format:"bo3";first_actor:"team_a"|"team_b"|null;first_actor_assumption:"unknown_equal_50_50"|null;pool_size:number;expected_selected_maps:number;branch_probability_sum:number;team_a:{id:number;name:string};team_b:{id:number;name:string};opening_bans:{team_a:Array<{map:string;probability:number}>;team_b:Array<{map:string;probability:number}>};maps:Array<{map:string;active:boolean;rank:number;opening_ban_probability:number;opening_ban_survival_probability:number;pick_probability:number;pick_by_team_a_probability:number;pick_by_team_b_probability:number;closing_ban_probability:number;decider_probability:number;any_ban_probability:number;series_map_probability:number;confidence:number;components:{historical_selection:number;pick_pressure:number;ban_survival:number;map_matchup_quality:number};team_a_history:{selected_rate:number;pick_rate:number;ban_rate:number};team_b_history:{selected_rate:number;pick_rate:number;ban_rate:number};history_samples:{team_a:{organization:number;current_roster:number;recent:number};team_b:{organization:number;current_roster:number;recent:number}};team_a:CalculatedVetoSide;team_b:CalculatedVetoSide;collision_score:number;collision:"low"|"medium"|"high"}>}
 export interface MatchupFactor {key:string;label:string;score:number|null;weight:number;effective_weight:number;impact:number;confidence:number|null;sample:number|null;reason:string|null;available:boolean}
 export interface MatchupScore {model_version:string;score_semantics:"analytical_score_0_100_not_probability";analysis_mode:"pre_veto"|"post_veto";format:"bo1"|"bo3"|"bo5";as_of:string;historical_policy:string;team_a:{id:number;name:string;score:number;advantage:number};team_b:{id:number;name:string;score:number;advantage:number};raw_score:number;reliability:number;confidence_level:"low"|"medium"|"high";advantage:{team_id:number|null;team_name:string|null;level:"neutral"|"slight"|"moderate"|"strong"};factors:MatchupFactor[];maps:Array<{map:string;map_matchup_score:number;team_b_score:number;playability_weight:number;role:string;confidence:number;contribution:number}>;tactical:Record<string,unknown>&{score:number|null};veto:{basis:string;series_id:number|null;calculated_veto_model_version?:string};limitations:string[]}
 export interface WinProbability {
@@ -270,6 +280,11 @@ export interface MatchListResponse { total: number; items: MatchSeries[] }
 export interface MatchStatLine { matches_played: number; matches_won: number; matches_lost: number; match_win_rate: number | null }
 export interface TeamMatchStats { team_id: number; aggregation_level: "organization" | "current_roster"; roster_id: number | null; all: MatchStatLine; by_format: Record<"bo1" | "bo3" | "bo5", MatchStatLine>; by_context: Record<"lan" | "online" | "playoff" | "elimination" | "final", MatchStatLine> }
 export interface MatchBackfillResult { candidate_groups: number; processed_groups: number; resolved_matches: number; needs_review_matches: number; unresolved_matches: number; failed_groups: number; errors: string[] }
+export interface TournamentSummary {series_count:number;map_count:number;parsed_maps:number;review_series:number;missing_veto_series:number}
+export interface TournamentListItem {id:number;name:string;year:number;tier:string|null;environment:MatchEnvironment;start_date:string|null;end_date:string|null;structure_type:TournamentStructure;summary:TournamentSummary}
+export interface TournamentListResponse {total:number;items:TournamentListItem[]}
+export interface TournamentProblem {match_id:number;code:string;message:string}
+export interface TournamentView {tournament:Omit<TournamentListItem,"summary">;summary:TournamentSummary;matches:MatchSeries[];stages:string[];bracket_links:Array<{from_match_id:number;to_match_id:number;source:"manual"|"inferred"}>;problems:TournamentProblem[]}
 
 export interface TeamMapComparisonSide {
   maps_played: number; maps_won: number; maps_lost: number; map_win_rate: number | null;
@@ -368,6 +383,7 @@ export interface TeamComparison {
   role_comparisons: TeamRoleComparison[];
   summary_notes: string[];
   round_swing_comparison: {scope:string;current_roster:boolean;team_a:RosterSwingProfile;team_b:RosterSwingProfile;overall:{team_a:RosterSwingProfile;team_b:RosterSwingProfile};per_map:Record<string,{team_a:RosterSwingProfile;team_b:RosterSwingProfile}>;round_win_model_version:string|null;round_swing_model_version:string;trained_at:string|null};
+  analyst_context:{team_a:{relevant:AnalystFactor[];all_active:AnalystFactor[]};team_b:{relevant:AnalystFactor[];all_active:AnalystFactor[]}};
 }
 
 export interface RosterSwingProfile {status:string;source:string;avg_swing?:number;top2_swing?:number;bottom2_swing?:number;ct_swing?:number|null;t_swing?:number|null;opening_swing?:number|null;clutch_swing?:number|null;confidence:number;sample:{players:number;rounds:number}}

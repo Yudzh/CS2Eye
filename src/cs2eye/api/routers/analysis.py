@@ -102,9 +102,13 @@ async def compare_veto(team_a_id:int,team_b_id:int,aggregation_level:str=Query("
     except VetoError as error:raise HTTPException(404,str(error)) from error
 
 @router.get("/calculated-veto")
-async def calculated_veto(team_a_id:int,team_b_id:int,format:str=Query("bo3"),first_actor:str|None=Query(None),session:AsyncSession=Depends(get_db_session))->dict:
-    try:return await CalculatedVetoService(session).calculate(team_a_id,team_b_id,format,first_actor)
+async def calculated_veto(team_a_id:int,team_b_id:int,format:str=Query("bo3"),first_actor:str|None=Query(None),debug:bool=Query(False),session:AsyncSession=Depends(get_db_session))->dict:
+    try:return await CalculatedVetoService(session).calculate(team_a_id,team_b_id,format,first_actor,debug=debug)
     except ValueError as error:raise HTTPException(422,str(error)) from error
+
+@router.get("/calculated-veto/backtest-summary")
+async def calculated_veto_backtest_summary(session:AsyncSession=Depends(get_db_session))->dict:
+    return await CalculatedVetoService(session).backtest_summary()
 
 @router.get("/calculated-veto/backtest/{match_id}")
 async def calculated_veto_backtest(match_id:int,session:AsyncSession=Depends(get_db_session))->dict:

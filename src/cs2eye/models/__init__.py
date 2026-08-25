@@ -23,6 +23,8 @@ from cs2eye.models.demo import (
     TeamMapAggregate,
 )
 from cs2eye.models.team import (
+    AnalystFactor,
+    AnalystFactorPlayer,
     Player,
     RankingImportRun,
     Team,
@@ -59,6 +61,8 @@ __all__ = [
     "DemoTeamRoster",
     "TeamMapAggregate",
     "Player",
+    "AnalystFactor",
+    "AnalystFactorPlayer",
     "RankingImportRun",
     "Team",
     "TeamParticipantMembership",

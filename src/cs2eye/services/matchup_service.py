@@ -43,11 +43,8 @@ def relevant_map_weights(calculated: dict, format: str, actual: list[MatchVetoAc
             role="team_a_pick" if action.action=="pick" and action.team_id==calculated["team_a"]["id"] else "team_b_pick" if action.action=="pick" else "decider" if action.action=="decider" else "ban"
             raw[action.map_name]=(.02 if role=="ban" else 1.0,role)
     elif format=="bo3":
-        for scenario in calculated["scenarios"]:
-            for action in scenario["actions"]:
-                role="decider" if action["action"]=="decider" else "team_a_pick" if action["action"]=="pick" and action["team"]=="team_a" else "team_b_pick" if action["action"]=="pick" else "ban"
-                value={"team_a_pick":.4,"team_b_pick":.4,"decider":.2,"ban":.01}[role]/len(calculated["scenarios"])
-                old=raw.get(action["map"],(0,role));raw[action["map"]]=(old[0]+value,role if old[1]=="ban" else old[1])
+        for item in calculated["maps"]:
+            raw[item["map"]]=(item["series_map_probability"],"probability")
     else:
         playable=sorted(((name,max(1.0,100-(item["team_a"]["calculated_ban_score"]+item["team_b"]["calculated_ban_score"])/2)) for name,item in maps.items()),key=lambda pair:pair[1],reverse=True)
         count=1 if format=="bo1" else min(5,len(playable))

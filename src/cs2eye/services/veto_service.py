@@ -126,11 +126,16 @@ class VetoService:
             action = roles.get(normalize_map(result.map_name or "")); demo.picked_by_team_id = action.team_id if action and action.action == "pick" else None
             demo.map_role = "decider" if action and action.action == "decider" else "team_pick" if action and action.action == "pick" else "unknown"
 
-    async def profile(self, team_id: int, *, aggregation_level: str = "organization", recent: int | None = None, rank_scope: str | None = None, context: str | None = None, opponent_id: int | None = None) -> dict:
+    async def profile(self, team_id: int, *, aggregation_level: str = "organization", recent: int | None = None, rank_scope: str | None = None, context: str | None = None, opponent_id: int | None = None, as_of: date | datetime | None = None, exclude_match_id: int | None = None, veto_format: str | None = None) -> dict:
         team = await self.session.get(Team, team_id)
         if not team: raise VetoError("Команда не найдена.")
         q = select(Match).where(or_(Match.team_a_id == team_id, Match.team_b_id == team_id), Match.veto_data_status.in_(("complete", "partial"))).order_by(Match.match_date.desc(), Match.id.desc())
         matches = list((await self.session.execute(q)).scalars())
+        # Conservative same-day policy: only strictly earlier dates are known.
+        cutoff=as_of.date() if isinstance(as_of,datetime) else as_of
+        if cutoff is not None: matches = [m for m in matches if m.match_date < cutoff]
+        if exclude_match_id is not None: matches = [m for m in matches if m.id != exclude_match_id]
+        if veto_format is not None:matches=[m for m in matches if m.format==veto_format]
         if opponent_id: matches = [m for m in matches if opponent_id in {m.team_a_id, m.team_b_id}]
         if context: matches = [m for m in matches if (context == m.environment or context == m.stage or context == "playoff" and m.is_playoff or context == "elimination" and m.is_elimination)]
         if aggregation_level == "current_roster":
@@ -138,21 +143,46 @@ class VetoService:
         if rank_scope: matches = [m for m in matches if await self._rank_ok(m, team_id, rank_scope)]
         if recent: matches = matches[:recent]
         entries = list((await self.session.execute(select(MapPoolEntry))).scalars()); active = {e.map_name for e in entries if e.is_active}
-        maps = sorted(VALID_MAPS | {a.map_name for m in matches for a in await self.actions(m.id)})
+        actions_by_match={m.id:await self.actions(m.id) for m in matches}
+        maps = sorted(VALID_MAPS | {a.map_name for m in matches for a in actions_by_match[m.id]})
         breakdown = []
         for map_name in maps:
-            eligible = [m for m in matches if not m.map_pool_version or not entries or any(e.version == m.map_pool_version and e.map_name == map_name for e in entries)]
-            acts = [(m, a, await self.actions(m.id)) for m in eligible for a in await self.actions(m.id) if a.map_name == map_name]
+            eligible = [m for m in matches if (
+                not entries
+                or m.map_pool_version is None
+                or any(e.version == m.map_pool_version and e.map_name == map_name for e in entries)
+            )]
+            acts = [(m, a, actions_by_match[m.id]) for m in eligible for a in actions_by_match[m.id] if a.map_name == map_name]
             bans = [(m,a,all_a) for m,a,all_a in acts if a.action == "ban" and a.team_id == team_id]; picks = [(m,a,all_a) for m,a,all_a in acts if a.action == "pick" and a.team_id == team_id]
-            first_bans = [x for x in bans if x[1].order_index == min(a.order_index for a in x[2] if a.team_id == team_id)]
+            opponent_picks = [(m,a,all_a) for m,a,all_a in acts if a.action == "pick" and a.team_id != team_id]
+            deciders = [(m,a,all_a) for m,a,all_a in acts if a.action == "decider"]
+            selected = picks + opponent_picks + deciders
+            first_bans = [x for x in bans if x[1].order_index == min(a.order_index for a in x[2] if a.team_id == team_id and a.action == "ban")]
+            closing_bans = [x for x in bans if x not in first_bans]
             first_picks = [x for x in picks if x[1].order_index == min(a.order_index for a in x[2] if a.team_id == team_id and a.action == "pick")]
+            def actor_role(match:Match)->str|None:
+                first=next((a for a in actions_by_match[match.id] if a.team_id is not None),None)
+                if not first:return None
+                return "when_first_actor" if first.team_id==team_id else "when_second_actor"
+            actor_scopes={}
+            for scope in ("when_first_actor","when_second_actor"):
+                scoped=[m for m in eligible if actor_role(m)==scope]
+                scoped_ids={m.id for m in scoped}
+                actor_scopes[scope]={"eligible_series":len(scoped),"opening_ban":{"count":sum(m.id in scoped_ids for m,_,_ in first_bans),"rate":rate(sum(m.id in scoped_ids for m,_,_ in first_bans),len(scoped))},"pick":{"count":sum(m.id in scoped_ids for m,_,_ in picks),"rate":rate(sum(m.id in scoped_ids for m,_,_ in picks),len(scoped))},"closing_ban":{"count":sum(m.id in scoped_ids for m,_,_ in closing_bans),"rate":rate(sum(m.id in scoped_ids for m,_,_ in closing_bans),len(scoped))}}
             perf = await self._performance(eligible, team_id, map_name)
-            n, freshness = len(eligible), (1 if not eligible else exp(-max(0, (date.today()-eligible[0].match_date).days)/180))
+            reference_date=cutoff or date.today()
+            n, freshness = len(eligible), (1 if not eligible else exp(-max(0, (reference_date-eligible[0].match_date).days)/180))
             ban_rate, pick_rate = rate(len(bans), n), rate(len(picks), n)
             permaban = min(100.0, (0.65*(rate(len(first_bans), n) or 0)+0.35*(ban_rate or 0))*min(1,n/8)*freshness)
             preference = min(100.0, (0.65*(pick_rate or 0)+0.35*(rate(len(first_picks), n) or 0))*freshness)
-            breakdown.append({"map_name": map_name, "active": map_name in active if entries else True, "eligible_series": n, "veto_appearances": len(acts), "ban":{"count":len(bans),"rate":ban_rate,"first_ban_count":len(first_bans),"first_ban_rate":rate(len(first_bans),n)}, "pick":{"count":len(picks),"rate":pick_rate,"first_pick_count":len(first_picks),"first_pick_rate":rate(len(first_picks),n), **perf["own"]}, "opponent_pick":perf["opponent"], "decider":perf["decider"], "is_likely_permaban":n>=5 and permaban>=60, "permaban_confidence":round(permaban,2), "pick_preference_score":round(preference,2) if n else None})
-        complete = sum(m.veto_data_status == "complete" for m in matches); confidence = min(100, len(matches)*8) * .45 + freshness*100*.3 + (complete/len(matches)*100 if matches else 0)*.25
+            breakdown.append({"map_name": map_name, "active": map_name in active if entries else True, "eligible_series": n, "veto_appearances": len(acts), "selected":{"count":len(selected),"rate":rate(len(selected),n)}, "opening_ban":{"count":len(first_bans),"rate":rate(len(first_bans),n)}, "closing_ban":{"count":len(closing_bans),"rate":rate(len(closing_bans),n)}, **actor_scopes, "ban":{"count":len(bans),"rate":ban_rate,"first_ban_count":len(first_bans),"first_ban_rate":rate(len(first_bans),n)}, "pick":{"count":len(picks),"rate":pick_rate,"first_pick_count":len(first_picks),"first_pick_rate":rate(len(first_picks),n), **perf["own"]}, "opponent_pick":{"count":len(opponent_picks),"rate":rate(len(opponent_picks),n),**perf["opponent"]}, "decider":{"count":len(deciders),"rate":rate(len(deciders),n),**perf["decider"]}, "is_likely_permaban":n>=5 and permaban>=60, "permaban_confidence":round(permaban,2), "pick_preference_score":round(preference,2) if n else None})
+        complete = sum(m.veto_data_status == "complete" for m in matches)
+        usable = sum(bool(actions_by_match[m.id]) for m in matches)
+        profile_freshness = 0 if not matches else exp(-max(0, ((cutoff or date.today()) - matches[0].match_date).days) / 180)
+        confidence = (min(100, len(matches) * 8) * .35
+                      + profile_freshness * 100 * .25
+                      + (complete / len(matches) * 100 if matches else 0) * .2
+                      + (usable / len(matches) * 100 if matches else 0) * .2)
         return {"team_id":team.id,"team_name":team.name,"aggregation_level":aggregation_level,"roster_id":team.current_roster_id if aggregation_level=="current_roster" else None,"sample":{"series":len(matches),"complete_series":complete},"veto_confidence":round(confidence,2) if matches else 0,"denominator":"eligible series with complete/partial veto and map in the series map-pool version; when version is unknown, every valid-veto series", "maps":breakdown}
 
     async def _uses_roster(self, match_id:int, team_id:int, roster_id:int)->bool:

@@ -101,6 +101,7 @@ class DemoParseJobManager:
                         settings.demo_delete_after_successful_parse
                         if delete_after_successful_parse is None
                         else delete_after_successful_parse,
+                        parse_concurrency=settings.demo_parse_concurrency,
                     )
                     if demo_file_ids is not None:
                         result = await service.parse_ids(

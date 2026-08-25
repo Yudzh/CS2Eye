@@ -14,6 +14,7 @@ class Tournament(Base):
     __table_args__ = (
         UniqueConstraint("name", "year", name="uq_tournaments_name_year"),
         CheckConstraint("environment IN ('lan','online','unknown')", name="ck_tournaments_environment"),
+        CheckConstraint("structure_type IN ('single_elimination','double_elimination','swiss','groups','groups_playoff','mixed','unknown')", name="ck_tournaments_structure_type"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -23,6 +24,7 @@ class Tournament(Base):
     environment: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown", server_default="unknown")
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
+    structure_type: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown", server_default="unknown")
 
 
 class Match(Base):
@@ -37,6 +39,7 @@ class Match(Base):
         CheckConstraint("status IN ('scheduled','in_progress','completed','unknown')", name="ck_matches_status"),
         CheckConstraint("resolution_status IN ('resolved','needs_review','unresolved')", name="ck_matches_resolution_status"),
         CheckConstraint("veto_data_status IN ('not_available','complete','partial','needs_review','invalid')", name="ck_matches_veto_data_status"),
+        CheckConstraint("bracket_section IN ('main','upper','lower','group','swiss') OR bracket_section IS NULL", name="ck_matches_bracket_section"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
@@ -59,6 +62,12 @@ class Match(Base):
     veto_source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     map_pool_version: Mapped[str | None] = mapped_column(String(64))
     resolution_status: Mapped[str] = mapped_column(String(24), nullable=False, default="unresolved", server_default="unresolved")
+    round_number: Mapped[int | None] = mapped_column(Integer)
+    round_label: Mapped[str | None] = mapped_column(String(160))
+    group_name: Mapped[str | None] = mapped_column(String(160))
+    bracket_section: Mapped[str | None] = mapped_column(String(16))
+    bracket_position: Mapped[int | None] = mapped_column(Integer)
+    next_match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

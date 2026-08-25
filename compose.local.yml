@@ -35,6 +35,7 @@ services:
       DEMO_MAX_FILE_SIZE_BYTES: ${DEMO_MAX_FILE_SIZE_BYTES:-2147483648}
       DEMO_ARCHIVE_MAX_DEPTH: ${DEMO_ARCHIVE_MAX_DEPTH:-5}
       DEMO_DELETE_AFTER_SUCCESSFUL_PARSE: ${DEMO_DELETE_AFTER_SUCCESSFUL_PARSE:-false}
+      DEMO_PARSE_CONCURRENCY: ${DEMO_PARSE_CONCURRENCY:-4}
       MAX_RANKING_SNAPSHOT_AGE_DAYS: ${MAX_RANKING_SNAPSHOT_AGE_DAYS:-14}
       BO3_API_BASE_URL: ${BO3_API_BASE_URL:-https://api.bo3.gg/api/v2}
       BO3_SITE_BASE_URL: ${BO3_SITE_BASE_URL:-https://bo3.gg}
@@ -71,7 +72,7 @@ services:
       - ./src:/app/src
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini:ro
-      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD10/demos}:/app/storage
+      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD17/demos}:/app/storage
     depends_on:
       db:
         condition: service_healthy

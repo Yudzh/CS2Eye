@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,8 @@ from cs2eye.services.team_comparison_service import (
 from cs2eye.services.leadership_service import LeadershipService
 from cs2eye.services.round_swing_service import active_model, compose_roster_swing_profile, player_round_swing
 from cs2eye.models.team import Player, Team, TeamParticipantMembership, TeamRoster, TeamRosterMember
+from cs2eye.services.analyst_context_service import AnalystContextService
+from cs2eye.api.routers.analyst_factors import response as analyst_factor_response
 
 
 router = APIRouter(
@@ -115,6 +117,8 @@ async def get_teams(
 async def compare_teams(
     team_a_id: int,
     team_b_id: int,
+    environment: str | None = None,
+    maps: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_db_session),
 ) -> TeamComparisonResponse:
     try:
@@ -174,6 +178,12 @@ async def compare_teams(
         "per_map":{name:{"team_a":compose_roster_swing_profile(swing_players_a,name),"team_b":compose_roster_swing_profile(swing_players_b,name)} for name in swing_maps},
         "round_win_model_version":swing_model.model_version if swing_model else None,
         "round_swing_model_version":"v1","trained_at":swing_model.trained_at if swing_model else None}
+    context_service = AnalystContextService(session)
+    relevant_a, all_a = await context_service.relevant(team_a_id, maps=maps, environment=environment)
+    relevant_b, all_b = await context_service.relevant(team_b_id, maps=maps, environment=environment)
+    async def context_side(relevant, all_active):
+        return {"relevant": [await analyst_factor_response(session, item) for item in relevant],
+                "all_active": [await analyst_factor_response(session, item) for item in all_active]}
     return TeamComparisonResponse(
         team_a=side_response(comparison.team_a,leadership_a),
         team_b=side_response(comparison.team_b,leadership_b),
@@ -191,6 +201,7 @@ async def compare_teams(
         ],
         summary_notes=comparison.summary_notes,
         round_swing_comparison=swing_comparison,
+        analyst_context={"team_a": await context_side(relevant_a, all_a), "team_b": await context_side(relevant_b, all_b)},
     )
 
 
@@ -236,6 +247,7 @@ async def get_team(
         roster,
         performance=await load_team_performance(session, team.id, team.current_roster_id),
     )
+    analyst_factors = await AnalystContextService(session).list(team_id=team_id)
     return TeamDetailResponse(
         **TeamListItem.model_validate(team).model_dump(exclude={"roster"}),
         roster=participants,
@@ -244,6 +256,7 @@ async def get_team(
             from_attributes=True,
         ),
         leadership=await LeadershipService(session).team(team_id),
+        analyst_factors=[await analyst_factor_response(session, item) for item in analyst_factors],
     )
 
 

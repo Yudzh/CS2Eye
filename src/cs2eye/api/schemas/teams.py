@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from cs2eye.api.schemas.analyst_factors import AnalystFactorResponse
 
 
 class TeamParticipantResponse(BaseModel):
@@ -112,6 +113,7 @@ class TeamListItem(BaseModel):
 class TeamDetailResponse(TeamListItem):
     strength: TeamStrengthResponse
     leadership: dict | None = None
+    analyst_factors: list[AnalystFactorResponse] = Field(default_factory=list)
 
 
 class TeamComparisonPlayerResponse(BaseModel):
@@ -176,6 +178,7 @@ class TeamRankingComparisonResponse(BaseModel):
 class TeamComparisonResponse(BaseModel):
     team_a: TeamComparisonSideResponse
     team_b: TeamComparisonSideResponse
+    analyst_context: dict = Field(default_factory=dict)
     strength_advantage_team_id: int | None
     strength_advantage_team_name: str | None
     strength_advantage_diff: float

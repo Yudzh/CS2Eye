@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     demo_max_file_size_bytes: int = 2_147_483_648
     demo_archive_max_depth: int = 5
     demo_delete_after_successful_parse: bool = False
+    demo_parse_concurrency: int = 4
     max_ranking_snapshot_age_days: int = 14
 
     model_config = SettingsConfigDict(

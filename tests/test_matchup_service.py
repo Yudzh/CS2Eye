@@ -10,9 +10,9 @@ from cs2eye.services.matchup_service import MatchupService
 
 def calculated(a=65,b=35):
     def side(score):return {"matchup_map_score":score,"calculated_pick_score":score,"calculated_ban_score":100-score,"matchup_confidence":.8,"tactical_components":{"side":score,"bomb":score,"combat_swing":score,"economy":score,"utility":score,"trading":score}}
-    maps=[{"map":name,"team_a":side(a if index<4 else b),"team_b":side(100-(a if index<4 else b))} for index,name in enumerate(("ancient","dust2","inferno","mirage","nuke","overpass","train"))]
-    actions=[{"action":"ban","team":"team_a","map":"nuke"},{"action":"ban","team":"team_b","map":"train"},{"action":"pick","team":"team_a","map":"ancient"},{"action":"pick","team":"team_b","map":"dust2"},{"action":"ban","team":"team_a","map":"overpass"},{"action":"ban","team":"team_b","map":"mirage"},{"action":"decider","team":None,"map":"inferno"}]
-    return {"team_a":{"id":1},"team_b":{"id":2},"maps":maps,"scenarios":[{"actions":actions}]}
+    probabilities=(.7,.6,.5,.4,.35,.25,.2)
+    maps=[{"map":name,"series_map_probability":probabilities[index],"team_a":side(a if index<4 else b),"team_b":side(100-(a if index<4 else b))} for index,name in enumerate(("ancient","dust2","inferno","mirage","nuke","overpass","train"))]
+    return {"team_a":{"id":1},"team_b":{"id":2},"maps":maps}
 
 
 def test_matchup_weights_sum_to_one():
@@ -36,10 +36,10 @@ def test_missing_factor_is_reweighted_not_zero():
     assert result.final_score==60 and sum(x.effective_weight for x in result.factors)==1
 
 
-def test_bo3_uses_picks_and_decider_and_bans_are_tiny():
+def test_bo3_uses_series_map_probabilities():
     weights=relevant_map_weights(calculated(),"bo3")
-    assert weights["ancient"][1]=="team_a_pick" and weights["dust2"][1]=="team_b_pick"
-    assert weights["inferno"][1]=="decider" and weights["nuke"][0]<weights["ancient"][0]
+    assert all(role=="probability" for _,role in weights.values())
+    assert weights["ancient"][0]>weights["nuke"][0]
 
 
 def test_bo1_and_bo5_use_different_pool_sizes():
