@@ -1,6 +1,7 @@
 from cs2eye.models.demo import DemoMapResult
 from cs2eye.services.demo_round_service import (
     ParsedRound, bomb_data_status, normalize_end_reason, normalize_rounds, round_data_status,
+    stitch_split_rounds,
 )
 
 
@@ -27,6 +28,18 @@ def mr12_rounds(a_wins=13, b_wins=9):
             raw_scores_after={"Spirit": score_a, "NAVI": score_b},
         ))
     return parsed
+
+
+def test_stitch_split_rounds_stops_at_authoritative_final_score():
+    parts = [[
+        ParsedRound(index, "T" if winner == "Spirit" else "CT", "Spirit", "NAVI")
+        for index, winner in enumerate(
+            ["Spirit", "NAVI", "Spirit", "NAVI", "NAVI"], 1
+        )
+    ]]
+    stitched = stitch_split_rounds(parts, "Spirit", "NAVI", 2, 2)
+    assert len(stitched) == 4
+    assert stitched[-1].raw_scores_after == {"Spirit": 2, "NAVI": 2}
 
 
 def test_mr12_rounds_have_sides_halves_scores_and_complete_status():

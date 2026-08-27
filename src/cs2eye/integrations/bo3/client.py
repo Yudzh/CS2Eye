@@ -175,7 +175,7 @@ class Bo3Client:
 
     async def fetch_team(
         self,
-        team_id: int,
+        team_id: int | None,
         slug: str,
     ) -> Bo3TeamResponse:
         url = (
@@ -222,7 +222,7 @@ class Bo3Client:
                 f"format for {slug}."
             ) from exc
 
-        if result.id != team_id or result.slug != slug:
+        if (team_id is not None and result.id != team_id) or result.slug != slug:
             raise Bo3RankingError(
                 f"BO3.gg returned a different team for {slug}."
             )

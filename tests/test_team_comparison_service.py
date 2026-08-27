@@ -16,7 +16,6 @@ from cs2eye.db.session import get_db_session
 from cs2eye.main import create_app
 from cs2eye.models.team import Player, Team, TeamParticipantMembership
 from cs2eye.services.team_comparison_service import (
-    InactiveTeamError,
     SameTeamComparisonError,
     TeamComparisonService,
 )
@@ -140,11 +139,11 @@ async def test_same_team_is_rejected(session: AsyncSession) -> None:
         await TeamComparisonService(session).compare(1, 1)
 
 
-async def test_inactive_team_is_rejected(session: AsyncSession) -> None:
+async def test_inactive_team_can_be_compared(session: AsyncSession) -> None:
     await add_team(session, 1, "Team A")
     await add_team(session, 2, "Old Team", active=False)
-    with pytest.raises(InactiveTeamError, match="активный Top-30"):
-        await TeamComparisonService(session).compare(1, 2)
+    result = await TeamComparisonService(session).compare(1, 2)
+    assert result.team_b.team.name == "Old Team"
 
 
 async def test_only_current_players_take_part(session: AsyncSession) -> None:

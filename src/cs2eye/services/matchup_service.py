@@ -13,6 +13,7 @@ from cs2eye.services.calculated_veto_service import CalculatedVetoService
 from cs2eye.services.leadership_service import LeadershipService
 from cs2eye.services.team_comparison_service import TeamComparisonService
 from cs2eye.services.team_h2h_service import TeamH2HService
+from cs2eye.services.form_context_service import FormContextService
 
 
 def clamp(value: float) -> float: return max(0.0, min(100.0, value))
@@ -112,9 +113,20 @@ class MatchupService:
         la,lb=leadership(leadership_a),leadership(leadership_b);leadership_score=cross(la,lb)
         map_conf=sum(row["confidence"]*row["playability_weight"] for row in maps) if maps else 0
         tactical_conf=map_conf*sum(item["weight"] for key,item in tactical.items() if isinstance(item,dict) and item["available"])
+        target_match=await self.session.get(Match,series_id) if series_id else None
+        form_pair=await FormContextService(self.session).compare(team_a_id,team_b_id,as_of,
+            target_match.tournament_id if target_match else None,series_id)
+        form_a,form_b=form_pair["team_a_form_context"],form_pair["team_b_form_context"]
+        def form_score(payload):
+            values=[payload.get(key) for key in ("tournament_form_score","recent_60d_adjusted_form_score","strength_of_schedule_score","performance_vs_expectation_score")]
+            present=[float(value) for value in values if value is not None]
+            return sum(present)/len(present) if present else None
+        form_context_score=cross(form_score(form_a),form_score(form_b))
+        form_conf=min(float(form_a.get("recent_60d_reliability",0)),float(form_b.get("recent_60d_reliability",0)))
         inputs=[
             FactorInput("map_veto","Карты и вето",{"mode":analysis_mode,"format":format},map_score,MATCHUP_WEIGHTS["map_veto"],len(maps),map_conf,"Релевантные карты определены фактическим или расчётным вето."),
             FactorInput("team_strength","Сила команд",None,strength_score,MATCHUP_WEIGHTS["team_strength"],confidence=strength_conf,reason="Сравнение готовых Team Strength V2 без повторного расчёта."),
+            FactorInput("form_context","Контекст формы",form_pair,form_context_score,MATCHUP_WEIGHTS["form_context"],min(form_a["recent_60d_matches_count"],form_b["recent_60d_matches_count"]),form_conf,"Турнирная форма и последние 60 дней с поправкой на силу соперников и ожидание.",form_context_score is not None),
             FactorInput("current_roster_form","Текущий состав и форма",None,roster_score,MATCHUP_WEIGHTS["current_roster_form"],confidence=roster_conf,reason="Recent 5/10/20 текущего состава плавно смешаны с историей организации через roster reliability."),
             FactorInput("tactical_matchup","Тактическое соответствие",tactical,tactical["score"],MATCHUP_WEIGHTS["tactical_matchup"],confidence=tactical_conf,reason="CT/T, bomb, contextual Swing/combat, economy, utility и trading на релевантных картах."),
             FactorInput("h2h","Личные встречи",{"scope":"current_rosters" if h2h.current_rosters.maps_played else "organizations"},h2h_score,MATCHUP_WEIGHTS["h2h"],hslice.maps_played,h2h_conf,"Текущие составы приоритетнее истории организаций.",h2h_score is not None),
@@ -131,7 +143,7 @@ class MatchupService:
             "advantage":{"team_id":winner,"team_name":names.get(winner),"level":advantage_level(score)},
             "factors":[{**factor.__dict__,"score":factor.normalized_score,"sample":factor.sample_size} for factor in result.factors],"maps":maps,"tactical":tactical,
             "veto":{"basis":"actual_veto" if actual else "calculated_veto","series_id":series_id,"calculated_veto_model_version":calculated["calculated_veto_model_version"]},
-            "limitations":[]}
+            "form_context":form_pair,"limitations":[]}
 
     async def _actual_veto(self,a:int,b:int,series_id:int|None,as_of:date)->list[MatchVetoAction]:
         if series_id is None:return []

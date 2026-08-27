@@ -1,3 +1,4 @@
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,7 @@ from cs2eye.services.round_swing_service import active_model, compose_roster_swi
 from cs2eye.models.team import Player, Team, TeamParticipantMembership, TeamRoster, TeamRosterMember
 from cs2eye.services.analyst_context_service import AnalystContextService
 from cs2eye.api.routers.analyst_factors import response as analyst_factor_response
+from cs2eye.services.form_context_service import FormContextService
 
 
 router = APIRouter(
@@ -119,6 +121,8 @@ async def compare_teams(
     team_b_id: int,
     environment: str | None = None,
     maps: list[str] = Query(default=[]),
+    as_of: date | None = None,
+    tournament_id: int | None = None,
     session: AsyncSession = Depends(get_db_session),
 ) -> TeamComparisonResponse:
     try:
@@ -184,6 +188,7 @@ async def compare_teams(
     async def context_side(relevant, all_active):
         return {"relevant": [await analyst_factor_response(session, item) for item in relevant],
                 "all_active": [await analyst_factor_response(session, item) for item in all_active]}
+    form_context = await FormContextService(session).compare(team_a_id, team_b_id, as_of, tournament_id)
     return TeamComparisonResponse(
         team_a=side_response(comparison.team_a,leadership_a),
         team_b=side_response(comparison.team_b,leadership_b),
@@ -202,12 +207,16 @@ async def compare_teams(
         summary_notes=comparison.summary_notes,
         round_swing_comparison=swing_comparison,
         analyst_context={"team_a": await context_side(relevant_a, all_a), "team_b": await context_side(relevant_b, all_b)},
+        team_a_form_context=form_context["team_a_form_context"],
+        team_b_form_context=form_context["team_b_form_context"],
     )
 
 
 @router.get("/{team_id}", response_model=TeamDetailResponse)
 async def get_team(
     team_id: int,
+    as_of: date | None = None,
+    tournament_id: int | None = None,
     session: AsyncSession = Depends(get_db_session),
 ) -> TeamDetailResponse:
     team, roster = await get_team_with_roster(session, team_id)
@@ -256,6 +265,7 @@ async def get_team(
             from_attributes=True,
         ),
         leadership=await LeadershipService(session).team(team_id),
+        form_context=await FormContextService(session).calculate(team_id, as_of, tournament_id),
         analyst_factors=[await analyst_factor_response(session, item) for item in analyst_factors],
     )
 
@@ -292,4 +302,4 @@ async def update_player_role(
 
     membership.role = payload.role
     await session.commit()
-    return await get_team(team_id, session)
+    return await get_team(team_id, session=session)

@@ -113,6 +113,7 @@ class TeamListItem(BaseModel):
 class TeamDetailResponse(TeamListItem):
     strength: TeamStrengthResponse
     leadership: dict | None = None
+    form_context: dict = Field(default_factory=dict)
     analyst_factors: list[AnalystFactorResponse] = Field(default_factory=list)
 
 
@@ -179,6 +180,8 @@ class TeamComparisonResponse(BaseModel):
     team_a: TeamComparisonSideResponse
     team_b: TeamComparisonSideResponse
     analyst_context: dict = Field(default_factory=dict)
+    team_a_form_context: dict = Field(default_factory=dict)
+    team_b_form_context: dict = Field(default_factory=dict)
     strength_advantage_team_id: int | None
     strength_advantage_team_name: str | None
     strength_advantage_diff: float

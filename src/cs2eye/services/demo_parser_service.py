@@ -291,6 +291,27 @@ def completed_rounds_count(rows: list[dict[str, Any]]) -> int:
     return len({int(row["tick"]) for row in rows if row.get("tick") is not None})
 
 
+def _grenade_type(value: object) -> tuple[str | None, str]:
+    """Normalize grenade names exposed by different CS2 game events."""
+    raw = str(value or "").strip().casefold()
+    normalized = raw.removeprefix("weapon_").removeprefix("item_")
+    aliases = {
+        "hegrenade": "he", "he_grenade": "he", "he": "he",
+        "flashbang": "flash", "flash": "flash",
+        "smokegrenade": "smoke", "smoke_grenade": "smoke", "smoke": "smoke",
+        "molotov": "fire", "incgrenade": "fire", "incendiary": "fire",
+        "incendiary_grenade": "fire", "decoy": "decoy", "decoy_grenade": "decoy",
+    }
+    return aliases.get(normalized), raw
+
+
+def _damage_grenade_type(value: object) -> tuple[str | None, str]:
+    grenade_type, raw = _grenade_type(value)
+    if raw.removeprefix("weapon_") == "inferno":
+        grenade_type = "fire"
+    return (grenade_type if grenade_type in {"he", "fire"} else None), raw
+
+
 class Demoparser2Adapter:
     parser_name = "demoparser2"
 
@@ -362,25 +383,48 @@ class Demoparser2Adapter:
 
         utility_events: list[UtilityEvent] = []
         utility_other = ["total_rounds_played", "is_warmup_period", "is_technical_timeout", "is_game_restart"]
-        grenade_aliases = {
-            "hegrenade": "he", "flashbang": "flash", "smokegrenade": "smoke",
-            "molotov": "fire", "incgrenade": "fire", "incendiary": "fire", "decoy": "decoy",
-        }
+        throws_by_type: dict[str, list[UtilityEvent]] = defaultdict(list)
         for row in _rows(parser.parse_event("grenade_thrown", player=["team_num", "team_clan_name"], other=utility_other)):
             if not is_valid_round_row(row) or bool(_value(row, "is_game_restart", default=False)):
                 continue
-            player, raw = _player(row, "user_"), str(_value(row, "weapon", default="")).casefold()
-            grenade_type = grenade_aliases.get(raw)
+            player = _player(row, "user_")
+            grenade_type, raw = _grenade_type(_value(
+                row, "weapon", "weapon_name", "grenade_type", "item", default="",
+            ))
             tick = int(_value(row, "tick", default=-1))
             ordinal = gameplay_ordinal(tick)
             if player and grenade_type and ordinal:
-                utility_events.append(UtilityEvent("throw", tick, ordinal, player, grenade_type, raw))
+                throws_by_type[grenade_type].append(
+                    UtilityEvent("throw", tick, ordinal, player, grenade_type, raw)
+                )
+
+        # Some CS2/GOTV builds do not emit grenade_thrown, while weapon_fire is
+        # still present. Use it only for grenade types missing from
+        # grenade_thrown so the same throw cannot be counted twice.
+        weapon_fire_by_type: dict[str, list[UtilityEvent]] = defaultdict(list)
+        for row in _rows(parser.parse_event("weapon_fire", player=["team_num", "team_clan_name"], other=utility_other)):
+            if not is_valid_round_row(row) or bool(_value(row, "is_game_restart", default=False)):
+                continue
+            player = _player(row, "user_")
+            grenade_type, raw = _grenade_type(_value(
+                row, "weapon", "weapon_name", "grenade_type", "item", default="",
+            ))
+            tick = int(_value(row, "tick", default=-1)); ordinal = gameplay_ordinal(tick)
+            if player and grenade_type and ordinal:
+                weapon_fire_by_type[grenade_type].append(
+                    UtilityEvent("throw", tick, ordinal, player, grenade_type, raw)
+                )
+        for grenade_type in set(throws_by_type) | set(weapon_fire_by_type):
+            utility_events.extend(
+                throws_by_type[grenade_type] or weapon_fire_by_type[grenade_type]
+            )
 
         for row in _rows(parser.parse_event("player_hurt", player=["team_num", "team_clan_name"], other=utility_other)):
             if not is_valid_round_row(row) or bool(_value(row, "is_game_restart", default=False)):
                 continue
-            raw = str(_value(row, "weapon", default="")).casefold()
-            grenade_type = "he" if raw == "hegrenade" else "fire" if raw in {"inferno", "molotov", "incgrenade", "incendiary"} else None
+            grenade_type, raw = _damage_grenade_type(
+                _value(row, "weapon", "weapon_name", default=""),
+            )
             player, target = _player(row, "attacker_"), _player(row, "user_")
             tick = int(_value(row, "tick", default=-1)); ordinal = gameplay_ordinal(tick)
             if player and target and grenade_type and ordinal:

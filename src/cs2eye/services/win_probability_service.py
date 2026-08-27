@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import UTC,date,datetime
 from decimal import Decimal
 import numpy as np
-from sqlalchemy import select,update
+from sqlalchemy import func,select,update
 from sqlalchemy.ext.asyncio import AsyncSession
 from cs2eye.analytics.win_probability import WinProbabilityModel,probability_metrics,temporal_split
 from cs2eye.analytics.win_probability_config import MIN_PREDICTION_CONFIDENCE,WIN_PROBABILITY_FEATURES,WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,WIN_PROBABILITY_MODEL_VERSION
@@ -11,7 +11,29 @@ from cs2eye.services.analytics_as_of_service import AnalyticsAsOfService
 from cs2eye.services.matchup_service import MatchupService
 from cs2eye.models.team import Team
 
-async def active_model(session):return (await session.execute(select(WinProbabilityModelArtifact).where(WinProbabilityModelArtifact.is_active.is_(True)).order_by(WinProbabilityModelArtifact.trained_at.desc()))).scalars().first()
+FEATURE_LABELS={
+    "matchup_score_centered":"Matchup Score","raw_matchup_centered":"Raw Matchup Score",
+    "matchup_reliability_advantage":"Matchup с учётом надёжности","team_strength_difference":"Team Strength",
+    "map_pool_advantage":"Map Pool","current_roster_advantage":"Форма текущего состава",
+    "tactical_advantage":"Тактическое соответствие","h2h_advantage":"Личные встречи",
+    "leadership_advantage":"Лидерство","ranking_advantage":"Рейтинг",
+    "format_bo1_strength":"Team Strength × BO1","format_bo3_strength":"Team Strength × BO3",
+    "format_bo5_strength":"Team Strength × BO5","tournament_form_advantage":"Tournament Form",
+    "recent_60d_adjusted_form_advantage":"Adjusted Form (60d)",
+    "strength_of_schedule_advantage":"Strength of Schedule",
+    "performance_vs_expectation_advantage":"Performance vs Expectation",
+}
+
+async def active_model(session):return (await session.execute(select(WinProbabilityModelArtifact).where(WinProbabilityModelArtifact.active.is_(True)).order_by(WinProbabilityModelArtifact.trained_at.desc()))).scalars().first()
+
+
+def quality_gate_passed(metrics:dict)->bool:
+    test=metrics.get("metrics",{}).get("test",{})
+    baseline_rows=[value for value in metrics.get("baselines",{}).values() if isinstance(value,dict)]
+    best_log=min((float(value["log_loss"]) for value in baseline_rows if value.get("log_loss") is not None),default=float("inf"))
+    best_brier=min((float(value["brier_score"]) for value in baseline_rows if value.get("brier_score") is not None),default=float("inf"))
+    # Preserve the existing gate: improving either proper scoring rule is enough.
+    return float(test.get("log_loss",float("inf"))) < best_log or float(test.get("brier_score",float("inf"))) < best_brier
 
 
 def _feature_vector(matchup:dict,format:str,ranking_advantage:float=0.0)->dict[str,float]:
@@ -20,6 +42,11 @@ def _feature_vector(matchup:dict,format:str,ranking_advantage:float=0.0)->dict[s
         score=(factors.get(key) or {}).get("score")
         return 0.0 if score is None else (float(score)-50.0)/50.0
     strength=centered("team_strength")
+    form=matchup.get("form_context",{})
+    form_a=form.get("team_a_form_context",{});form_b=form.get("team_b_form_context",{})
+    def form_delta(key:str)->float:
+        a,b=form_a.get(key),form_b.get(key)
+        return 0.0 if a is None or b is None else (float(a)-float(b))/100.0
     values={
         "matchup_score_centered":(float(matchup["team_a"]["score"])-50.0)/50.0,
         "raw_matchup_centered":(float(matchup["raw_score"])-50.0)/50.0,
@@ -34,11 +61,35 @@ def _feature_vector(matchup:dict,format:str,ranking_advantage:float=0.0)->dict[s
         "format_bo1_strength":strength if format=="bo1" else 0.0,
         "format_bo3_strength":strength if format=="bo3" else 0.0,
         "format_bo5_strength":strength if format=="bo5" else 0.0,
+        "tournament_form_advantage":form_delta("tournament_form_score"),
+        "recent_60d_adjusted_form_advantage":form_delta("recent_60d_adjusted_form_score"),
+        "strength_of_schedule_advantage":form_delta("strength_of_schedule_score"),
+        "performance_vs_expectation_advantage":form_delta("performance_vs_expectation_score"),
     }
     return {key:float(values[key]) for key in WIN_PROBABILITY_FEATURES}
 
 def _distribution(values):
     a=np.asarray(values,float);return {"min":float(a.min()),"p10":float(np.percentile(a,10)),"p25":float(np.percentile(a,25)),"median":float(np.median(a)),"p75":float(np.percentile(a,75)),"p90":float(np.percentile(a,90)),"max":float(a.max())} if len(a) else {}
+
+def explain_prediction(model:WinProbabilityModel,features:dict[str,float],probability:float)->dict:
+    keys=list(model.artifact["features"])
+    neutral={key:0.0 for key in keys}
+    neutral_probability=model.predict_symmetric([neutral])[0]
+    coefficients=dict(zip(keys,model.artifact.get("coefficients",[])))
+    impacts=[]
+    for key in keys:
+        without=dict(features);without[key]=0.0
+        without_probability=model.predict_symmetric([without])[0]
+        impact=(probability-without_probability)*100
+        impacts.append({"key":key,"label":FEATURE_LABELS.get(key,key.replace("_"," ").title()),
+            "feature_value":round(float(features.get(key,0)),6),"coefficient":round(float(coefficients.get(key,0)),6),
+            "impact_percentage_points":round(impact,3),"favors":"team_a" if impact>.005 else "team_b" if impact<-.005 else "neutral",
+            "counterintuitive":float(features.get(key,0))*impact < -.00001})
+    impacts.sort(key=lambda item:abs(item["impact_percentage_points"]),reverse=True)
+    return {"method":"leave_one_feature_at_neutral","neutral_probability":neutral_probability,
+        "predicted_probability":probability,"top_factors":impacts,
+        "has_counterintuitive_factors":any(item["counterintuitive"] and abs(item["impact_percentage_points"])>=.5 for item in impacts),
+        "note":"Локальная модельная атрибуция: изменение вероятности при нейтрализации одного признака; не является причинной оценкой."}
 
 async def train_win_probability(session:AsyncSession,mode:str="pre_veto")->dict:
     rows,report=await AnalyticsAsOfService(session).build_dataset(mode);train,validation,test=temporal_split(rows)
@@ -49,23 +100,26 @@ async def train_win_probability(session:AsyncSession,mode:str="pre_veto")->dict:
     for name,key in (("team_strength","team_strength_difference"),("matchup_score","matchup_score_centered")):
         bm=WinProbabilityModel.train([{k:(x.features[key] if k==key else 0) for k in WIN_PROBABILITY_FEATURES} for x in train],[x.target for x in train]);baselines.update(baseline(name,bm.predict_symmetric([{k:(x.features[key] if k==key else 0) for k in WIN_PROBABILITY_FEATURES} for x in test])))
     predictions=model.predict_symmetric([x.features for x in test]);metadata={"split":{"strategy":"70_15_15_chronological","training_series":len(train),"validation_series":len(validation),"test_series":len(test),"train_dates":[train[0].match_date.isoformat(),train[-1].match_date.isoformat()],"validation_dates":[validation[0].match_date.isoformat(),validation[-1].match_date.isoformat()],"test_dates":[test[0].match_date.isoformat(),test[-1].match_date.isoformat()]},"metrics":metrics,"baselines":baselines,"probability_distribution":_distribution(predictions),"extremes":{"below_20":sum(p<.2 for p in predictions),"above_80":sum(p>.8 for p in predictions)},"coefficients":dict(zip(WIN_PROBABILITY_FEATURES,model.artifact["coefficients"])),"coverage":report,"calibration_method":"raw_logistic","strict_historical":True}
-    row=WinProbabilityModelArtifact(model_version=WIN_PROBABILITY_MODEL_VERSION,feature_schema_version=WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,trained_at=datetime.now(UTC),training_series=len(train),validation_series=len(validation),test_series=len(test),artifact=model.artifact,metrics=metadata,dataset_report=report,is_active=False);session.add(row);await session.flush();return {"artifact_id":row.id,"activated":False,**metadata}
+    ordinal=int((await session.scalar(select(func.max(WinProbabilityModelArtifact.id)))) or 0)+1
+    model_version=f"v{ordinal}"
+    artifact={**model.artifact,"model_version":model_version}
+    passed=quality_gate_passed(metadata)
+    row=WinProbabilityModelArtifact(model_version=model_version,feature_schema_version=WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,trained_at=datetime.now(UTC),training_series=len(train),validation_series=len(validation),test_series=len(test),artifact=artifact,metrics=metadata,dataset_report=report,trained=True,quality_gate_passed=passed,active=False,forced_active=False);session.add(row);await session.flush();return {"artifact_id":row.id,"model_version":model_version,"trained":True,"quality_gate_passed":passed,"active":False,"forced_active":False,"activated":False,**metadata}
 
 async def activate_win_probability(session:AsyncSession,artifact_id:int,force:bool=False)->dict:
     row=await session.get(WinProbabilityModelArtifact,artifact_id)
     if not row:raise ValueError("Model artifact not found.")
-    test=row.metrics.get("metrics",{}).get("test",{})
-    baselines=row.metrics.get("baselines",{})
-    baseline_rows=[value for value in baselines.values() if isinstance(value,dict)]
-    best_log=min((float(value["log_loss"]) for value in baseline_rows if value.get("log_loss") is not None),default=float("inf"))
-    best_brier=min((float(value["brier_score"]) for value in baseline_rows if value.get("brier_score") is not None),default=float("inf"))
-    if not force and float(test.get("log_loss",float("inf")))>=best_log and float(test.get("brier_score",float("inf")))>=best_brier:
+    passed=bool(row.quality_gate_passed)
+    if not passed and not force:
         raise ValueError("Candidate does not outperform the best baseline on Log Loss or Brier; activation rejected.")
-    await session.execute(update(WinProbabilityModelArtifact).values(is_active=False));row.is_active=True;await session.flush();return {"artifact_id":row.id,"model_version":row.model_version,"active":True}
+    await session.execute(update(WinProbabilityModelArtifact).values(active=False,forced_active=False))
+    row.active=True;row.forced_active=not passed
+    await session.flush()
+    return {"artifact_id":row.id,"model_version":row.model_version,"trained":row.trained,"quality_gate_passed":passed,"active":True,"forced_active":row.forced_active,"model_status":"experimental" if row.forced_active else "active"}
 
 async def predict_win_probability(session:AsyncSession,a:int,b:int,format:str="bo3",mode:str="pre_veto",as_of:date|None=None,series_id:int|None=None)->dict:
     artifact=await active_model(session)
-    if not artifact:return {"prediction_status":"model_not_trained","model_version":None,"team_a":{"id":a,"probability":None},"team_b":{"id":b,"probability":None},"confidence":0,"limitations":[]}
+    if not artifact:return {"prediction_status":"model_not_trained","model_version":None,"model_status":"unavailable","quality_gate_passed":False,"team_a":{"id":a,"probability":None},"team_b":{"id":b,"probability":None},"confidence":0,"limitations":[]}
     cutoff=as_of or date.today();historical=cutoff<date.today()
     matchup=await (AnalyticsAsOfService(session).calculate(a,b,cutoff,format,mode,series_id) if historical else MatchupService(session).calculate(a,b,format,mode,cutoff,series_id))
     if historical:
@@ -75,8 +129,9 @@ async def predict_win_probability(session:AsyncSession,a:int,b:int,format:str="b
         indexed={team.id:team for team in teams};rank_a=indexed.get(a).current_rank if indexed.get(a) else None;rank_b=indexed.get(b).current_rank if indexed.get(b) else None
         rank_advantage=0.0 if rank_a is None or rank_b is None else max(-30,min(30,rank_b-rank_a))/30
         features=_feature_vector(matchup,format,rank_advantage)
-    confidence=matchup.get("reliability",0);status="insufficient_data" if confidence<MIN_PREDICTION_CONFIDENCE else "available";p=WinProbabilityModel(artifact.artifact).predict_symmetric([features])[0] if status=="available" else None
-    return {"model_version":artifact.model_version,"feature_schema_version":artifact.feature_schema_version,"trained_at":artifact.trained_at,"prediction_status":status,"team_a":{"id":a,"name":matchup.get("team_a",{}).get("name"),"probability":p},"team_b":{"id":b,"name":matchup.get("team_b",{}).get("name"),"probability":None if p is None else 1-p},"confidence":confidence,"basis":{"analysis_mode":mode,"veto":"actual_veto" if mode=="post_veto" else "calculated_veto","matchup_score":matchup["team_a"]["score"]},"features":features,"matchup":matchup,"limitations":matchup.get("limitations",[])}
+    confidence=matchup.get("reliability",0);status="insufficient_data" if confidence<MIN_PREDICTION_CONFIDENCE else "available";model=WinProbabilityModel(artifact.artifact);p=model.predict_symmetric([features])[0] if status=="available" else None
+    explanation=explain_prediction(model,features,p) if p is not None else None
+    return {"model_version":artifact.model_version,"feature_schema_version":artifact.feature_schema_version,"trained_at":artifact.trained_at,"model_status":"experimental" if artifact.forced_active else "active","quality_gate_passed":artifact.quality_gate_passed,"prediction_status":status,"team_a":{"id":a,"name":matchup.get("team_a",{}).get("name"),"probability":p},"team_b":{"id":b,"name":matchup.get("team_b",{}).get("name"),"probability":None if p is None else 1-p},"confidence":confidence,"basis":{"analysis_mode":mode,"veto":"actual_veto" if mode=="post_veto" else "calculated_veto","matchup_score":matchup["team_a"]["score"]},"features":features,"explanation":explanation,"matchup":matchup,"limitations":matchup.get("limitations",[])}
 
 async def save_prediction(session:AsyncSession,**kwargs)->dict:
     result=await predict_win_probability(session,**kwargs)
@@ -95,4 +150,6 @@ async def backtest_win_probability(session:AsyncSession,mode:str="pre_veto",arti
 async def win_probability_status(session:AsyncSession)->dict:
     active=await active_model(session)
     rows=list((await session.execute(select(WinProbabilityModelArtifact).order_by(WinProbabilityModelArtifact.trained_at.desc()))).scalars())
-    return {"active":None if active is None else {"id":active.id,"model_version":active.model_version,"feature_schema_version":active.feature_schema_version,"trained_at":active.trained_at,"metrics":active.metrics},"artifacts":[{"id":row.id,"model_version":row.model_version,"trained_at":row.trained_at,"is_active":row.is_active,"test_series":row.test_series,"metrics":row.metrics.get("metrics",{}).get("test",{})} for row in rows]}
+    def payload(row):
+        return {"id":row.id,"model_version":row.model_version,"feature_schema_version":row.feature_schema_version,"trained_at":row.trained_at,"trained":row.trained,"quality_gate_passed":row.quality_gate_passed,"active":row.active,"forced_active":row.forced_active,"model_status":"experimental" if row.forced_active else "active" if row.active else "inactive","training_series":row.training_series,"validation_series":row.validation_series,"test_series":row.test_series,"eligible_series":row.training_series+row.validation_series+row.test_series,"metrics":row.metrics.get("metrics",{}).get("test",{}),"baselines":row.metrics.get("baselines",{})}
+    return {"active":None if active is None else payload(active),"artifacts":[payload(row) for row in rows]}

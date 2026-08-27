@@ -55,6 +55,7 @@ class ParsedRound:
 
 def stitch_split_rounds(
     parts: list[list[ParsedRound]], team_a_name: str | None, team_b_name: str | None,
+    final_score_a: int | None = None, final_score_b: int | None = None,
 ) -> list[ParsedRound]:
     """Rebase independently recorded p1…pN scoreboards onto one map timeline."""
     score_a = score_b = 0
@@ -75,6 +76,12 @@ def stitch_split_rounds(
                 team_a_name or "team_a": score_a,
                 team_b_name or "team_b": score_b,
             }))
+            # Split GOTV recordings can end with one duplicate post-match
+            # round_end in the last part. The final scoreboard is authoritative;
+            # once it has been reached, later round_end events are cleanup.
+            if (final_score_a is not None and final_score_b is not None
+                    and score_a == final_score_a and score_b == final_score_b):
+                return stitched
     return stitched
 
 

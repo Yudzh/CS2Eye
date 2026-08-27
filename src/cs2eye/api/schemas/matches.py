@@ -51,6 +51,7 @@ class MatchResponse(BaseModel):
     round_number: int | None = None; round_label: str | None = None
     group_name: str | None = None; bracket_section: Literal["main", "upper", "lower", "group", "swiss"] | None = None
     bracket_position: int | None = None; next_match_id: int | None = None
+    next_match_slot: Literal["team_a", "team_b"] | None = None
 
 
 class MatchListResponse(BaseModel):
@@ -72,6 +73,7 @@ class MatchPatchRequest(BaseModel):
     group_name: str | None = Field(None, max_length=160)
     bracket_section: Literal["main", "upper", "lower", "group", "swiss"] | None = None
     bracket_position: int | None = Field(None, ge=1); next_match_id: int | None = None
+    next_match_slot: Literal["team_a", "team_b"] | None = None
 
 
 class MatchReorderRequest(BaseModel):

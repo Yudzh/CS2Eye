@@ -1,12 +1,13 @@
 MATCHUP_MODEL_VERSION = "matchup_v1"
 
 MATCHUP_WEIGHTS = {
-    "map_veto": .35,
-    "team_strength": .25,
-    "current_roster_form": .15,
-    "tactical_matchup": .10,
-    "h2h": .10,
-    "leadership_context": .05,
+    "map_veto": .30,
+    "team_strength": .23,
+    "form_context": .15,
+    "current_roster_form": .12,
+    "tactical_matchup": .08,
+    "h2h": .08,
+    "leadership_context": .04,
 }
 
 TACTICAL_WEIGHTS = {

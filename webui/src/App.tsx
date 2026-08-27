@@ -36,7 +36,11 @@ import { TeamComparePage } from "./pages/TeamComparePage";
 import { DemosPage } from "./pages/DemosPage";
 import { MatchesPage } from "./pages/MatchesPage";
 import { TournamentsPage } from "./pages/TournamentsPage";
+import { AddTournamentPage } from "./pages/AddTournamentPage";
+import { AddTournamentMatchPage } from "./pages/AddTournamentMatchPage";
+import { MLModelsPage } from "./pages/MLModelsPage";
 import { AnalystFactorsPanel } from "./components/AnalystFactorsPanel";
+import { TeamFormContextBlock } from "./components/FormContextPanel";
 
 
 type LoadState =
@@ -380,6 +384,8 @@ function TeamPage({ id }: { id: number }) {
         <article className="metric-card"><span>Исходная → итоговая</span><strong className="metric-adjustment">{strength.raw_score.toFixed(2)} → {strength.final_score.toFixed(2)}</strong></article>
       </section>
 
+      <TeamFormContextBlock context={team.form_context}/>
+
       <AnalystFactorsPanel teamId={team.id} roster={team.roster} initial={team.analyst_factors} />
 
       <section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">Standalone analytics</p><h2>Leadership</h2></div></div><div className="h2h-grid"><article className="h2h-card"><h3>IGL</h3>{team.leadership.igl?<><a href={`/players/${team.leadership.igl.player_id}`}><strong>{team.leadership.igl.name}</strong></a><div className="team-map-rates"><span>Player Strength <b>{team.leadership.igl.player_strength??"—"}</b></span><span>IGL Strength <b>{team.leadership.igl.score.toFixed(1)}</b></span><span>Captain Strength <b>{team.leadership.igl.captain_strength?.toFixed(1)??"—"}</b></span></div><LeadershipFactors value={team.leadership.igl}/></>:<p>Активная роль IGL достоверно не назначена.</p>}</article><article className="h2h-card"><h3>Coach</h3>{team.leadership.coach?<><a href={`/players/${team.leadership.coach.id}`}><strong>{team.leadership.coach.name}</strong></a><div className="team-map-rates"><span>Coach Impact <b>{team.leadership.coach.score.toFixed(1)}</b></span><span>Confidence <b>{(team.leadership.coach.reliability*100).toFixed(0)}%</b></span><span>Maps <b>{team.leadership.coach.sample.maps}</b></span></div><LeadershipFactors value={team.leadership.coach}/></>:<p>Активный coach не определён.</p>}</article></div><p className="formula">Leadership — корреляционная attribution-модель и не входит в Team Strength.</p></section>
@@ -517,10 +523,14 @@ function rankChangeLabel(
 
 
 export default function App() {
+  if (/^\/ml\/models\/?$/.test(window.location.pathname)) return <MLModelsPage />;
   if (/^\/demos\/?$/.test(window.location.pathname)) return <DemosPage />;
   if (/^\/matches\/?$/.test(window.location.pathname)) return <MatchesPage />;
   const seriesMatch = window.location.pathname.match(/^\/matches\/(\d+)\/?$/);
   if (seriesMatch) return <MatchesPage matchId={Number(seriesMatch[1])} />;
+  if (/^\/tournaments\/new\/?$/.test(window.location.pathname)) return <AddTournamentPage />;
+  const tournamentMatchNew = window.location.pathname.match(/^\/tournaments\/(\d+)\/matches\/new\/?$/);
+  if (tournamentMatchNew) return <AddTournamentMatchPage tournamentId={Number(tournamentMatchNew[1])} />;
   if (/^\/tournaments\/?$/.test(window.location.pathname)) return <TournamentsPage />;
   const tournamentMatch = window.location.pathname.match(/^\/tournaments\/(\d+)\/?$/);
   if (tournamentMatch) return <TournamentsPage tournamentId={Number(tournamentMatch[1])} />;
@@ -633,7 +643,7 @@ export default function App() {
         </span>
       </header>
 
-      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a></nav>
+      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a><a className="button" href="/ml/models">ML-модели</a></nav>
 
       <section className="hero">
         <div>

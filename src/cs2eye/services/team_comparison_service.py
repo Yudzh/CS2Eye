@@ -179,8 +179,6 @@ class TeamComparisonService:
         team, roster = await get_team_with_roster(self._session, team_id)
         if team is None:
             raise TeamNotFoundError("Команда не найдена.")
-        if not team.is_analytics_active:
-            raise InactiveTeamError("Команда не входит в активный Top-30.")
         return team, roster
 
     @staticmethod

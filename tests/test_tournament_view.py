@@ -9,7 +9,7 @@ from cs2eye.db.base import Base
 from cs2eye.db.session import get_db_session
 from cs2eye.main import create_app
 from cs2eye.models.demo import DemoPlayerStat
-from cs2eye.models.match import Match, Tournament
+from cs2eye.models.match import Match, Tournament, TournamentTeam
 from cs2eye.models.team import Team
 from cs2eye.services.tournament_view_service import TournamentViewService
 
@@ -80,7 +80,7 @@ async def test_manual_layout_and_stage_patch_preserve_analytics(match_db, tourna
     tournament_id, qf1, _, sf, _ = await seed_bracket(match_db)
     async with match_db() as session:
         before = await session.scalar(select(func.count(DemoPlayerStat.id)))
-    response = await tournament_api.patch(f"/api/v1/matches/{qf1}", json={"stage":"semifinal", "round_number":2, "round_label":"Upper SF", "bracket_section":"upper", "bracket_position":1, "next_match_id":sf})
+    response = await tournament_api.patch(f"/api/v1/matches/{qf1}", json={"stage":"semifinal", "round_number":2, "round_label":"Upper SF", "bracket_section":"upper", "bracket_position":1, "next_match_id":sf, "next_match_slot":"team_a"})
     assert response.status_code == 200
     body = response.json()
     assert body["stage"] == "semifinal" and body["next_match_id"] == sf and body["bracket_section"] == "upper"
@@ -94,3 +94,34 @@ async def test_tournament_structure_patch(match_db, tournament_api) -> None:
     response = await tournament_api.patch(f"/api/v1/tournaments/{tournament_id}", json={"structure_type":"groups_playoff"})
     assert response.status_code == 200
     assert response.json()["structure_type"] == "groups_playoff"
+
+async def test_create_future_tournament_participants_and_scheduled_match(match_db, tournament_api) -> None:
+    response = await tournament_api.post("/api/v1/tournaments", json={"name":"Future Cup","year":2026,"tier":"S","environment":"lan","start_date":"2026-11-02","end_date":"2026-11-08","structure_type":"single_elimination","team_ids":[1,2],"matches":[{"team_a_id":1,"team_b_id":2,"match_date":"2026-11-02","format":"bo3","stage":"quarterfinal","round_number":1,"round_label":"Quarterfinal","bracket_section":"main","bracket_position":1}]})
+    assert response.status_code == 201
+    tournament_id = response.json()["id"]
+    async with match_db() as session:
+        participants = list((await session.execute(select(TournamentTeam).where(TournamentTeam.tournament_id==tournament_id))).scalars())
+        assert {item.team_id for item in participants} == {1,2}
+    view = (await tournament_api.get(f"/api/v1/tournaments/{tournament_id}/view")).json()
+    match = view["matches"][0]
+    assert match["status"] == "scheduled" and match["maps"] == [] and match["score"] == {"team_a":0,"team_b":0}
+    assert not {"demo_missing","veto_missing"} & {problem["code"] for problem in view["problems"]}
+    assert view["summary"]["participant_count"] == 2 and view["summary"]["scheduled_series"] == 1
+
+@pytest.mark.parametrize("change", [
+    {"team_ids":[1,1]},
+    {"matches":[{"team_a_id":1,"team_b_id":1,"match_date":"2026-11-02","format":"bo3"}]},
+    {"matches":[{"team_a_id":1,"team_b_id":3,"match_date":"2026-11-02","format":"bo3"}]},
+    {"matches":[{"team_a_id":1,"team_b_id":2,"match_date":"2026-12-02","format":"bo3"}]},
+    {"start_date":"2026-11-09"},
+])
+async def test_future_tournament_validation(tournament_api, change) -> None:
+    payload={"name":"Invalid Cup","year":2027,"environment":"online","start_date":"2026-11-02","end_date":"2026-11-08","structure_type":"swiss","team_ids":[1,2],"matches":[]};payload.update(change)
+    assert (await tournament_api.post("/api/v1/tournaments",json=payload)).status_code == 422
+
+async def test_add_scheduled_match_to_existing_tournament(tournament_api) -> None:
+    created = await tournament_api.post("/api/v1/tournaments", json={"name":"Separate Flow","year":2028,"environment":"lan","start_date":"2028-06-01","end_date":"2028-06-05","structure_type":"single_elimination","team_ids":[1,2],"matches":[]})
+    tournament_id = created.json()["id"]
+    response = await tournament_api.post(f"/api/v1/tournaments/{tournament_id}/matches", json={"team_a_id":1,"team_b_id":2,"match_date":"2028-06-02","format":"bo3","stage":"semifinal","round_number":1,"round_label":"Semifinal","bracket_section":"main","bracket_position":1})
+    assert response.status_code == 201
+    assert response.json()["status"] == "scheduled"

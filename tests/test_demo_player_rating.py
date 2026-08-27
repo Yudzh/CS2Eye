@@ -14,7 +14,7 @@ from cs2eye.services.demo_player_link_service import link_demo_player
 from cs2eye.services.demo_parser_service import (
     DamageEvent, DeathEvent, Demoparser2Adapter, ParsedDemoPlayerStat,
     PlayerRef, RoundSnapshot,
-    aggregate_player_events,
+    _damage_grenade_type, _grenade_type, aggregate_player_events,
     completed_rounds_count, is_gameplay_round_end_row, is_restart_round_row, is_valid_round_row,
 )
 from cs2eye.services.demo_parser_service import _rows
@@ -125,6 +125,68 @@ def test_completed_rounds_count_deduplicates_repeated_round_end() -> None:
         {"tick": 101, "total_rounds_played": 1},
         {"tick": 200, "total_rounds_played": 2},
     ]) == 2
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("weapon_hegrenade", "he"),
+    ("HEGrenade", "he"),
+    ("weapon_flashbang", "flash"),
+    ("smoke_grenade", "smoke"),
+    ("weapon_incgrenade", "fire"),
+])
+def test_grenade_type_accepts_game_event_variants(raw, expected) -> None:
+    assert _grenade_type(raw)[0] == expected
+
+
+@pytest.mark.parametrize("raw", [
+    "smokegrenade", "weapon_smokegrenade", "flashbang", "decoy",
+])
+def test_non_damaging_grenades_are_not_converted_to_damage_fields(raw) -> None:
+    assert _damage_grenade_type(raw)[0] is None
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("weapon_hegrenade", "he"), ("inferno", "fire"), ("molotov", "fire"),
+])
+def test_damage_grenade_type_only_accepts_he_and_fire(raw, expected) -> None:
+    assert _damage_grenade_type(raw)[0] == expected
+
+
+def test_demoparser_adapter_uses_weapon_fire_when_grenade_thrown_is_missing(monkeypatch, tmp_path) -> None:
+    class Frame:
+        def __init__(self, rows): self.rows = rows
+        def to_dicts(self): return self.rows
+
+    common = {"total_rounds_played": 1, "is_warmup_period": False,
+              "is_technical_timeout": False, "is_game_restart": False}
+
+    class Parser:
+        def __init__(self, _path): pass
+        def parse_header(self): return {"map_name": "de_mirage"}
+        def parse_event(self, name, **_kwargs):
+            if name == "round_end":
+                return Frame([{"tick": 100, "winner": 2, "round_win_reason": 9, **common}])
+            if name == "weapon_fire":
+                return Frame([{"tick": 50, "weapon": "weapon_hegrenade",
+                               "user_steamid": "1", "user_name": "A",
+                               "user_team_num": 2, "user_team_clan_name": "Alpha", **common}])
+            return Frame([])
+        def parse_ticks(self, props, *, ticks=None, **_kwargs):
+            if "team_rounds_total" in props:
+                return Frame([
+                    {"tick": 100, "steamid": "1", "name": "A", "team_num": 2,
+                     "team_clan_name": "Alpha", "team_rounds_total": 1,
+                     "team_score_overtime": 0, "is_alive": True},
+                    {"tick": 100, "steamid": "2", "name": "B", "team_num": 3,
+                     "team_clan_name": "Bravo", "team_rounds_total": 0,
+                     "team_score_overtime": 0, "is_alive": False},
+                ])
+            return Frame([])
+
+    monkeypatch.setattr("cs2eye.services.demo_parser_service.DemoParser", Parser)
+    parsed = Demoparser2Adapter().parse(tmp_path / "fixture.dem")
+    throws = [item for item in parsed.utility_events if item.event_kind == "throw"]
+    assert [(item.grenade_type, item.player.nickname) for item in throws] == [("he", "A")]
 
 
 @pytest.mark.parametrize(("rank", "group"), [

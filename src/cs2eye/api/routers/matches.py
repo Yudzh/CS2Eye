@@ -31,11 +31,12 @@ async def response(view: MatchView, session: AsyncSession) -> MatchResponse:
         winner_team_id=item.winner_team_id,
         maps=[MatchMapResponse.model_validate(map_item, from_attributes=True) for map_item in view.maps],
         veto_data_status=item.veto_data_status,
-        veto_expected=item.resolution_status == "resolved" and item.format in {"bo1", "bo3", "bo5"} and item.team_a_id is not None and item.team_b_id is not None,
+        veto_expected=item.status != "scheduled" and item.resolution_status == "resolved" and item.format in {"bo1", "bo3", "bo5"} and item.team_a_id is not None and item.team_b_id is not None,
         veto=[{"id":a.id,"order_index":a.order_index,"team_id":a.team_id,"team_name":a.team_name,"action":a.action,"map_name":a.map_name,"source":a.source,"source_external_id":a.source_external_id} for a in veto],
         round_number=item.round_number, round_label=item.round_label,
         group_name=item.group_name, bracket_section=item.bracket_section,
         bracket_position=item.bracket_position, next_match_id=item.next_match_id,
+        next_match_slot=item.next_match_slot,
     )
 
 

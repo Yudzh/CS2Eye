@@ -21,6 +21,7 @@ from cs2eye.models.team import Team,TeamRankingSnapshot,TeamRosterMember
 from cs2eye.services.matchup_service import advantage_level,confidence_level
 from cs2eye.services.player_service import calculate_player_strength
 from cs2eye.services.team_strength_service import TeamPerformanceInput,calculate_team_strength
+from cs2eye.services.form_context_service import FormContextService
 
 def clamp(x:float)->float:return max(0,min(100,x))
 def rate(n:int,d:int)->float|None:return n/d*100 if d else None
@@ -83,6 +84,8 @@ class AnalyticsAsOfService:
                     context=self._matchup(match,state,rankings,members,veto_by_match[match.id] if analysis_mode=="post_veto" else None)
                     if context["reliability"]<.15:excluded["insufficient_reliability"]+=1
                     else:
+                        context["form_context"]=await FormContextService(self.session).compare(
+                            match.team_a_id,match.team_b_id,match.match_date,match.tournament_id,match.id)
                         features=self.features(context,match.format,rankings,match.match_date,match.team_a_id,match.team_b_id)
                         examples.append(HistoricalExample(match.id,match.match_date,match.team_a_id,match.team_b_id,int(match.winner_team_id==match.team_a_id),features,context,context["reliability"]))
             for match in by_date[day]:self._update(match,maps_by_match[match.id],veto_by_match[match.id],stats_by_demo,state)
@@ -108,6 +111,8 @@ class AnalyticsAsOfService:
         if len(state.maps[a])<MIN_HISTORICAL_MAPS_PER_TEAM or len(state.maps[b])<MIN_HISTORICAL_MAPS_PER_TEAM:return self._unavailable(a,b,as_of,format,analysis_mode,"insufficient_history")
         actual=veto_by_match.get(series_id,[]) if analysis_mode=="post_veto" and series_id else None
         context=self._matchup(pseudo,state,rankings,members,actual)
+        context["form_context"]=await FormContextService(self.session).compare(
+            a,b,as_of,getattr(target,"tournament_id",None),series_id)
         context["team_a"]["name"]=team_names.get(a,str(a))
         context["team_b"]["name"]=team_names.get(b,str(b))
         winner=context["advantage"].get("team_id")
@@ -130,7 +135,9 @@ class AnalyticsAsOfService:
         factors={x["key"]:x for x in context["factors"]};strength=(factors.get("team_strength") or {}).get("score") or 50
         rank_a=AnalyticsAsOfService._rank(rankings,a,as_of);rank_b=AnalyticsAsOfService._rank(rankings,b,as_of);rank_adv=0 if not rank_a or not rank_b else max(-30,min(30,rank_b-rank_a))/30
         strength_delta=(strength-50)/50
-        values={"matchup_score_centered":(context["team_a"]["score"]-50)/50,"raw_matchup_centered":(context["raw_score"]-50)/50,"matchup_reliability_advantage":(context["team_a"]["score"]-50)/50*context["reliability"],"team_strength_difference":strength_delta,"map_pool_advantage":(((factors.get("map_veto") or {}).get("score") or 50)-50)/50,"current_roster_advantage":(((factors.get("current_roster_form") or {}).get("score") or 50)-50)/50,"tactical_advantage":(((factors.get("tactical_matchup") or {}).get("score") or 50)-50)/50,"h2h_advantage":(((factors.get("h2h") or {}).get("score") or 50)-50)/50,"leadership_advantage":0,"ranking_advantage":rank_adv,"format_bo1_strength":strength_delta if format=="bo1" else 0,"format_bo3_strength":strength_delta if format=="bo3" else 0,"format_bo5_strength":strength_delta if format=="bo5" else 0}
+        form=context.get("form_context",{});fa=form.get("team_a_form_context",{});fb=form.get("team_b_form_context",{})
+        def delta(key):return 0 if fa.get(key) is None or fb.get(key) is None else (float(fa[key])-float(fb[key]))/100
+        values={"matchup_score_centered":(context["team_a"]["score"]-50)/50,"raw_matchup_centered":(context["raw_score"]-50)/50,"matchup_reliability_advantage":(context["team_a"]["score"]-50)/50*context["reliability"],"team_strength_difference":strength_delta,"map_pool_advantage":(((factors.get("map_veto") or {}).get("score") or 50)-50)/50,"current_roster_advantage":(((factors.get("current_roster_form") or {}).get("score") or 50)-50)/50,"tactical_advantage":(((factors.get("tactical_matchup") or {}).get("score") or 50)-50)/50,"h2h_advantage":(((factors.get("h2h") or {}).get("score") or 50)-50)/50,"leadership_advantage":0,"ranking_advantage":rank_adv,"format_bo1_strength":strength_delta if format=="bo1" else 0,"format_bo3_strength":strength_delta if format=="bo3" else 0,"format_bo5_strength":strength_delta if format=="bo5" else 0,"tournament_form_advantage":delta("tournament_form_score"),"recent_60d_adjusted_form_advantage":delta("recent_60d_adjusted_form_score"),"strength_of_schedule_advantage":delta("strength_of_schedule_score"),"performance_vs_expectation_advantage":delta("performance_vs_expectation_score")}
         return {key:float(values[key]) for key in WIN_PROBABILITY_FEATURES}
 
     def _matchup(self,match,state,rankings,members,actual_veto):

@@ -52,7 +52,9 @@ export interface TeamDetail extends Team {
   strength: TeamStrength;
   leadership: Leadership;
   analyst_factors: AnalystFactor[];
+  form_context: FormContext;
 }
+export interface FormContext {as_of:string;window_days:number;tournament_id:number|null;tournament_form_score:number|null;tournament_strength_of_schedule_score:number|null;tournament_reliability:number;recent_60d_adjusted_form_score:number|null;strength_of_schedule_score:number|null;performance_vs_expectation_score:number|null;recent_60d_reliability:number;tournament_matches_count:number;recent_60d_matches_count:number;top5_matches_60d:number;top10_matches_60d:number;top20_matches_60d:number;top30_matches_60d:number;close_series_count:number;upset_wins_count:number;strong_losses_count:number;performed_above_expectation_count:number;performed_below_expectation_count:number;status:"available"|"insufficient_data";tournament_status:"available"|"insufficient_data";cutoff_policy:string}
 export type AnalystFactorType = "positive" | "negative";
 export type AnalystEnvironment = "lan" | "online" | "any";
 export type AnalystCategory = "overall"|"ct_defense"|"t_attack"|"tactics"|"veto"|"form"|"communication"|"roles"|"individual"|"teamplay"|"mental"|"coach"|"roster"|"other";
@@ -254,7 +256,7 @@ export interface MatchSeries {
   veto_data_status: "not_available"|"complete"|"partial"|"needs_review"|"invalid";
   veto_expected: boolean;
   veto: VetoAction[];
-  round_number:number|null;round_label:string|null;group_name:string|null;bracket_section:"main"|"upper"|"lower"|"group"|"swiss"|null;bracket_position:number|null;next_match_id:number|null;
+  round_number:number|null;round_label:string|null;group_name:string|null;bracket_section:"main"|"upper"|"lower"|"group"|"swiss"|null;bracket_position:number|null;next_match_id:number|null;next_match_slot:"team_a"|"team_b"|null;
 }
 export interface VetoAction { id?:number; order_index:number; team_id:number|null; team_name?:string|null; action:"ban"|"pick"|"decider"; map_name:string; source?:string; source_external_id?:string|null }
 export interface VetoActionRate {count:number;rate:number|null}
@@ -269,22 +271,29 @@ export interface MatchupFactor {key:string;label:string;score:number|null;weight
 export interface MatchupScore {model_version:string;score_semantics:"analytical_score_0_100_not_probability";analysis_mode:"pre_veto"|"post_veto";format:"bo1"|"bo3"|"bo5";as_of:string;historical_policy:string;team_a:{id:number;name:string;score:number;advantage:number};team_b:{id:number;name:string;score:number;advantage:number};raw_score:number;reliability:number;confidence_level:"low"|"medium"|"high";advantage:{team_id:number|null;team_name:string|null;level:"neutral"|"slight"|"moderate"|"strong"};factors:MatchupFactor[];maps:Array<{map:string;map_matchup_score:number;team_b_score:number;playability_weight:number;role:string;confidence:number;contribution:number}>;tactical:Record<string,unknown>&{score:number|null};veto:{basis:string;series_id:number|null;calculated_veto_model_version?:string};limitations:string[]}
 export interface WinProbability {
   model_version:string|null;feature_schema_version?:string;trained_at?:string;
+  model_status:"active"|"experimental"|"unavailable";quality_gate_passed:boolean;
   prediction_status:"available"|"insufficient_data"|"model_not_trained";
   team_a:{id:number;name?:string|null;probability:number|null};
   team_b:{id:number;name?:string|null;probability:number|null};
   confidence:number;
   basis?:{analysis_mode:"pre_veto"|"post_veto";veto:"calculated_veto"|"actual_veto";matchup_score:number};
+  explanation?:{method:string;neutral_probability:number;predicted_probability:number;note:string;has_counterintuitive_factors:boolean;top_factors:Array<{key:string;label:string;feature_value:number;coefficient:number;impact_percentage_points:number;favors:"team_a"|"team_b"|"neutral";counterintuitive:boolean}>}|null;
   limitations:string[];
 }
+export interface MLModelArtifact {id:number;model_version:string;feature_schema_version:string;trained_at:string;trained:boolean;quality_gate_passed:boolean;active:boolean;forced_active:boolean;model_status:"active"|"experimental"|"inactive";training_series:number;validation_series:number;test_series:number;eligible_series:number;metrics:{brier_score?:number;log_loss?:number};baselines:Record<string,{brier_score?:number;log_loss?:number}>}
+export interface MLModelsStatus {active:MLModelArtifact|null;artifacts:MLModelArtifact[]}
 export interface MatchListResponse { total: number; items: MatchSeries[] }
 export interface MatchStatLine { matches_played: number; matches_won: number; matches_lost: number; match_win_rate: number | null }
 export interface TeamMatchStats { team_id: number; aggregation_level: "organization" | "current_roster"; roster_id: number | null; all: MatchStatLine; by_format: Record<"bo1" | "bo3" | "bo5", MatchStatLine>; by_context: Record<"lan" | "online" | "playoff" | "elimination" | "final", MatchStatLine> }
 export interface MatchBackfillResult { candidate_groups: number; processed_groups: number; resolved_matches: number; needs_review_matches: number; unresolved_matches: number; failed_groups: number; errors: string[] }
-export interface TournamentSummary {series_count:number;map_count:number;parsed_maps:number;review_series:number;missing_veto_series:number}
+export interface TournamentSummary {series_count:number;map_count:number;parsed_maps:number;review_series:number;missing_veto_series:number;participant_count:number;scheduled_series:number}
 export interface TournamentListItem {id:number;name:string;year:number;tier:string|null;environment:MatchEnvironment;start_date:string|null;end_date:string|null;structure_type:TournamentStructure;summary:TournamentSummary}
 export interface TournamentListResponse {total:number;items:TournamentListItem[]}
 export interface TournamentProblem {match_id:number;code:string;message:string}
-export interface TournamentView {tournament:Omit<TournamentListItem,"summary">;summary:TournamentSummary;matches:MatchSeries[];stages:string[];bracket_links:Array<{from_match_id:number;to_match_id:number;source:"manual"|"inferred"}>;problems:TournamentProblem[]}
+export interface TournamentView {tournament:Omit<TournamentListItem,"summary">;summary:TournamentSummary;matches:MatchSeries[];stages:string[];bracket_links:Array<{from_match_id:number;to_match_id:number;source:"manual"|"inferred"}>;problems:TournamentProblem[];participants:Array<{team_id:number;name:string;seed:number|null}>}
+export interface TournamentPredictionMatch {id:number;source_match_id:number|null;round_number:number|null;round_label:string|null;stage:MatchStage;bracket_section:MatchSeries["bracket_section"];bracket_position:number|null;format:MatchFormat;team_a:{id:number|null;name:string|null};team_b:{id:number|null;name:string|null};team_a_probability:number|null;team_b_probability:number|null;team_a_score:number|null;team_b_score:number|null;predicted_winner_id:number|null;predicted_winner_name:string|null;confidence:number|null;reliability:number|null;prediction_type:"actual_match"|"projected_match";prediction_basis:"win_probability"|"matchup_score";status:"available"|"comparison_fallback"|"insufficient_data"|"model_not_trained"|"actual_result";model_version:string|null;created_at:string;invalidated_at:string|null}
+export interface TournamentPredictions {tournament_id:number;prediction_run_id:number;generated_at:string;model_version:string|null;model_status?:"active"|"experimental"|null;quality_gate_passed?:boolean|null;status:string;outdated:boolean;matches:TournamentPredictionMatch[]}
+export interface TournamentCreate {name:string;year:number;tier:string|null;environment:"lan"|"online";start_date:string;end_date:string;structure_type:TournamentStructure;team_ids:number[];matches:Array<{team_a_id:number|null;team_b_id:number|null;match_date:string;format:"bo1"|"bo3"|"bo5";stage:MatchStage;round_number:number|null;round_label:string|null;group:string|null;bracket_section:MatchSeries["bracket_section"];bracket_position:number|null}>}
 
 export interface TeamMapComparisonSide {
   maps_played: number; maps_won: number; maps_lost: number; map_win_rate: number | null;
@@ -384,6 +393,8 @@ export interface TeamComparison {
   summary_notes: string[];
   round_swing_comparison: {scope:string;current_roster:boolean;team_a:RosterSwingProfile;team_b:RosterSwingProfile;overall:{team_a:RosterSwingProfile;team_b:RosterSwingProfile};per_map:Record<string,{team_a:RosterSwingProfile;team_b:RosterSwingProfile}>;round_win_model_version:string|null;round_swing_model_version:string;trained_at:string|null};
   analyst_context:{team_a:{relevant:AnalystFactor[];all_active:AnalystFactor[]};team_b:{relevant:AnalystFactor[];all_active:AnalystFactor[]}};
+  team_a_form_context:FormContext;
+  team_b_form_context:FormContext;
 }
 
 export interface RosterSwingProfile {status:string;source:string;avg_swing?:number;top2_swing?:number;bottom2_swing?:number;ct_swing?:number|null;t_swing?:number|null;opening_swing?:number|null;clutch_swing?:number|null;confidence:number;sample:{players:number;rounds:number}}

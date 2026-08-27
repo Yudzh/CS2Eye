@@ -9,7 +9,7 @@ from cs2eye.analytics.win_probability import (
     temporal_split,
 )
 from cs2eye.analytics.win_probability_config import WIN_PROBABILITY_FEATURES
-from cs2eye.services.win_probability_service import _feature_vector
+from cs2eye.services.win_probability_service import _feature_vector, explain_prediction
 
 
 def features(value: float = 0.0) -> dict[str, float]:
@@ -53,6 +53,16 @@ def test_model_probability_is_bounded_and_symmetric() -> None:
 def test_neutral_features_are_exactly_neutral_after_symmetry() -> None:
     rows,targets=training_rows();model=WinProbabilityModel.train(rows,targets)
     assert model.predict_symmetric([features()])[0]==pytest.approx(.5)
+
+
+def test_prediction_explanation_ranks_local_probability_impacts() -> None:
+    rows,targets=training_rows();model=WinProbabilityModel.train(rows,targets)
+    current=features();current["team_strength_difference"]=.8;current["matchup_score_centered"]=.6
+    probability=model.predict_symmetric([current])[0]
+    result=explain_prediction(model,current,probability)
+    assert result["neutral_probability"]==pytest.approx(.5)
+    assert result["top_factors"][0]["impact_percentage_points"]>0
+    assert result["top_factors"][0]["favors"]=="team_a"
 
 
 @dataclass(frozen=True)

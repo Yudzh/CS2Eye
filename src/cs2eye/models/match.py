@@ -27,6 +27,15 @@ class Tournament(Base):
     structure_type: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown", server_default="unknown")
 
 
+class TournamentTeam(Base):
+    __tablename__ = "tournament_teams"
+    __table_args__ = (UniqueConstraint("tournament_id", "team_id", name="uq_tournament_teams_tournament_team"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tournament_id: Mapped[int] = mapped_column(ForeignKey("tournaments.id", ondelete="CASCADE"), nullable=False, index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
+    seed: Mapped[int | None] = mapped_column(Integer)
+
+
 class Match(Base):
     __tablename__ = "matches"
     __table_args__ = (
@@ -68,6 +77,7 @@ class Match(Base):
     bracket_section: Mapped[str | None] = mapped_column(String(16))
     bracket_position: Mapped[int | None] = mapped_column(Integer)
     next_match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"), index=True)
+    next_match_slot: Mapped[str | None] = mapped_column(String(8))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

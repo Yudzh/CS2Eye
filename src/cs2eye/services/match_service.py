@@ -137,6 +137,29 @@ class MatchService:
         maps = [self._map(match, demo, result, run) for demo, result, run in rows]
         return MatchView(match, tournament, team_a, team_b, maps)
 
+    async def create_scheduled(self, *, tournament_id: int, match_date: date,
+            team_a_id: int | None, team_b_id: int | None, format: str, stage: str,
+            environment: str, round_number: int | None = None, round_label: str | None = None,
+            group_name: str | None = None, bracket_section: str | None = None,
+            bracket_position: int | None = None) -> MatchView:
+        if team_a_id is not None and team_a_id == team_b_id:
+            raise MatchValidationError("Team A и Team B должны отличаться.")
+        if await self.session.get(Tournament, tournament_id) is None:
+            raise MatchValidationError("Турнир не найден.")
+        for team_id in (team_a_id, team_b_id):
+            if team_id is not None and await self.session.get(Team, team_id) is None:
+                raise MatchValidationError("Команда не найдена.")
+        match = Match(tournament_id=tournament_id, match_date=match_date,
+            team_a_id=team_a_id, team_b_id=team_b_id, format=format, stage=stage,
+            environment=environment, status="scheduled", resolution_status="resolved",
+            team_a_maps_won=0, team_b_maps_won=0, winner_team_id=None,
+            round_number=round_number, round_label=round_label, group_name=group_name,
+            bracket_section=bracket_section, bracket_position=bracket_position,
+            is_playoff=stage in {"round_of_32", "round_of_16", "quarterfinal", "semifinal", "final"})
+        self.session.add(match)
+        await self.session.flush()
+        return await self.get(match.id)
+
     @staticmethod
     def _map(match: Match, demo: DemoFile, result: DemoMapResult, run=None) -> MatchMap:
         normal = result.team_a_id == match.team_a_id and result.team_b_id == match.team_b_id
@@ -152,9 +175,14 @@ class MatchService:
 
     async def recalculate(self, match_id: int) -> MatchView:
         view = await self.get(match_id); match = view.match
+        previous_result = (match.status, match.winner_team_id, match.team_a_maps_won, match.team_b_maps_won)
         if match.resolution_status != "resolved":
             match.team_a_maps_won = match.team_b_maps_won = 0; match.winner_team_id = None; match.status = "unknown"
-            await self.session.flush(); return await self.get(match_id)
+            await self.session.flush()
+            if previous_result != (match.status, match.winner_team_id, match.team_a_maps_won, match.team_b_maps_won):
+                from cs2eye.services.tournament_prediction_service import invalidate_tournament_predictions
+                await invalidate_tournament_predictions(self.session, match.tournament_id)
+            return await self.get(match_id)
         valid = [m for m in view.maps if m.team_a_score is not None and m.team_b_score is not None and m.team_a_score != m.team_b_score]
         if len(valid) != len(view.maps) or not valid:
             raise MatchValidationError("Resolved-серия должна содержать только валидные карты выбранной пары.")
@@ -163,7 +191,11 @@ class MatchService:
         match.winner_team_id = match.team_a_id if match.team_a_maps_won > match.team_b_maps_won else match.team_b_id if match.team_b_maps_won > match.team_a_maps_won else None
         target = {"bo1": 1, "bo3": 2, "bo5": 3}.get(match.format)
         match.status = "completed" if target and max(match.team_a_maps_won, match.team_b_maps_won) >= target else "in_progress"
-        await self.session.flush(); return await self.get(match_id)
+        await self.session.flush()
+        if previous_result != (match.status, match.winner_team_id, match.team_a_maps_won, match.team_b_maps_won):
+            from cs2eye.services.tournament_prediction_service import invalidate_tournament_predictions
+            await invalidate_tournament_predictions(self.session, match.tournament_id)
+        return await self.get(match_id)
 
     async def create_manual(
         self, demo_file_ids: list[int], *, format: str = "unknown", stage: str = "unknown",
@@ -221,7 +253,7 @@ class MatchService:
             for key in ("format", "resolution_status")
         )
         allowed = {"tournament_id", "format", "stage", "environment", "is_playoff", "is_elimination", "resolution_status",
-                   "round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id"}
+                   "round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id", "next_match_slot"}
         if "next_match_id" in changes and changes["next_match_id"] is not None:
             target = await self.session.get(Match, changes["next_match_id"])
             if target is None or target.id == match.id or target.tournament_id != match.tournament_id:
@@ -229,11 +261,15 @@ class MatchService:
         if "tournament_id" in changes and changes["tournament_id"] is not None:
             if await self.session.get(Tournament, changes["tournament_id"]) is None:
                 raise MatchValidationError("Турнир не найден.")
-        nullable_layout = {"round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id"}
+        if changes.get("next_match_id") is not None and changes.get("next_match_slot", match.next_match_slot) not in {"team_a", "team_b"}:
+            raise MatchValidationError("Для следующего матча укажите слот team_a или team_b.")
+        nullable_layout = {"round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id", "next_match_slot"}
         for key, value in changes.items():
             if key in allowed and (value is not None or key in nullable_layout): setattr(match, key, value)
         if match.stage in {"round_of_32", "round_of_16", "quarterfinal", "semifinal", "final"}: match.is_playoff = True
         await self.session.flush()
+        from cs2eye.services.tournament_prediction_service import invalidate_tournament_predictions
+        await invalidate_tournament_predictions(self.session, match.tournament_id)
         if scoring_changed:
             return await self.recalculate(match_id)
         return await self.get(match_id)

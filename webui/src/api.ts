@@ -22,7 +22,7 @@ import type {
   TeamMapComparisonResponse,
   TeamH2HComparison,
   MatchBackfillResult, MatchEnvironment, MatchFormat, MatchListResponse, MatchResolution, MatchSeries, MatchStage, TeamMatchStats, TeamVetoProfile, VetoAction, VetoComparison, CalculatedVeto, MatchupScore, WinProbability,
-  AnalystFactor, AnalystFactorPayload,
+  AnalystFactor, AnalystFactorPayload, MLModelsStatus,
 } from "./types";
 
 
@@ -138,7 +138,7 @@ export function getMatch(id: number): Promise<MatchSeries> { return request<Matc
 export function createMatchSeries(demoFileIds: number[], format: MatchFormat, stage: MatchStage, environment: MatchEnvironment): Promise<MatchSeries> {
   return request<MatchSeries>("/api/v1/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ demo_file_ids: demoFileIds, format, stage, environment, resolution_status: "resolved" }) });
 }
-export function patchMatchSeries(id: number, payload: Partial<{tournament_id:number;format: MatchFormat; stage: MatchStage; environment: MatchEnvironment; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean;round_number:number|null;round_label:string|null;group_name:string|null;bracket_section:"main"|"upper"|"lower"|"group"|"swiss"|null;bracket_position:number|null;next_match_id:number|null}>): Promise<MatchSeries> {
+export function patchMatchSeries(id: number, payload: Partial<{tournament_id:number;format: MatchFormat; stage: MatchStage; environment: MatchEnvironment; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean;round_number:number|null;round_label:string|null;group_name:string|null;bracket_section:"main"|"upper"|"lower"|"group"|"swiss"|null;bracket_position:number|null;next_match_id:number|null;next_match_slot:"team_a"|"team_b"|null}>): Promise<MatchSeries> {
   return request<MatchSeries>(`/api/v1/matches/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 }
 export function reorderMatchSeries(id: number, demoFileIds: number[]): Promise<MatchSeries> {
@@ -155,10 +155,18 @@ export function compareTeamVeto(a:number,b:number,level:"organization"|"current_
 export function getCalculatedVeto(a:number,b:number):Promise<CalculatedVeto>{return request(`/api/v1/analysis/calculated-veto?team_a_id=${a}&team_b_id=${b}&format=bo3`)}
 export function getMatchupScore(a:number,b:number,format:"bo1"|"bo3"|"bo5"="bo3",analysisMode:"pre_veto"|"post_veto"="pre_veto",seriesId?:number):Promise<MatchupScore>{const q=new URLSearchParams({team_a_id:String(a),team_b_id:String(b),format,analysis_mode:analysisMode});if(seriesId)q.set("series_id",String(seriesId));return request(`/api/v1/analysis/matchup?${q}`)}
 export function getWinProbability(a:number,b:number,format:"bo1"|"bo3"|"bo5"="bo3",analysisMode:"pre_veto"|"post_veto"="pre_veto",seriesId?:number):Promise<WinProbability>{const q=new URLSearchParams({team_a_id:String(a),team_b_id:String(b),format,analysis_mode:analysisMode});if(seriesId)q.set("series_id",String(seriesId));return request(`/api/v1/analysis/win-probability?${q}`)}
+export function getMLModels():Promise<MLModelsStatus>{return request("/api/v1/ml/models")}
+export function activateMLModel(id:number,force:boolean):Promise<unknown>{return request(`/api/v1/ml/models/${id}/activate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({force})})}
+export function trainMLModel():Promise<unknown>{return request("/api/v1/analysis/win-probability/train",{method:"POST"})}
 export function updateMatchVeto(id:number,actions:VetoAction[],status:MatchSeries["veto_data_status"]):Promise<MatchSeries>{return request(`/api/v1/matches/${id}/veto`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({actions,status})})}
 export function updateMatchVetoText(id:number,text:string,status:MatchSeries["veto_data_status"]):Promise<MatchSeries>{return request(`/api/v1/matches/${id}/veto`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,status})})}
 export function getTournaments():Promise<import("./types").TournamentListResponse>{return request("/api/v1/tournaments")}
+export function createTournament(payload:import("./types").TournamentCreate):Promise<{id:number}>{return request("/api/v1/tournaments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})}
+export function createTournamentMatch(id:number,payload:import("./types").TournamentCreate["matches"][number]):Promise<MatchSeries>{return request(`/api/v1/tournaments/${id}/matches`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})}
+export function importTournamentTeam(slug_or_url:string):Promise<{id:number;name:string}>{return request("/api/v1/tournaments/import-team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slug_or_url})})}
 export function getTournamentView(id:number):Promise<import("./types").TournamentView>{return request(`/api/v1/tournaments/${id}/view`)}
+export function getTournamentPredictions(id:number):Promise<import("./types").TournamentPredictions|null>{return request(`/api/v1/tournaments/${id}/predictions`)}
+export function generateTournamentPredictions(id:number):Promise<import("./types").TournamentPredictions>{return request(`/api/v1/tournaments/${id}/predictions/generate`,{method:"POST"})}
 export function patchTournament(id:number,payload:Partial<{structure_type:import("./types").TournamentStructure}>):Promise<import("./types").TournamentListItem>{return request(`/api/v1/tournaments/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})}
 
 export function compareTeamMaps(

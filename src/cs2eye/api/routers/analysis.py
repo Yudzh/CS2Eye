@@ -61,6 +61,9 @@ async def win_probability(team_a_id:int,team_b_id:int,format:str=Query("bo3",pat
 class PredictionRequest(BaseModel):
     team_a_id:int;team_b_id:int;format:str="bo3";analysis_mode:str="pre_veto";as_of:date|None=None;series_id:int|None=None
 
+class ActivationRequest(BaseModel):
+    force:bool=False
+
 @router.post("/predictions")
 async def create_prediction(body:PredictionRequest,session:AsyncSession=Depends(get_db_session))->dict:
     try:
@@ -72,8 +75,8 @@ async def train_probability(mode:str="pre_veto",session:AsyncSession=Depends(get
     result=await train_win_probability(session,mode);await session.commit();return result
 
 @router.post("/win-probability/activate/{artifact_id}")
-async def activate_probability(artifact_id:int,force:bool=False,session:AsyncSession=Depends(get_db_session)):
-    try:result=await activate_win_probability(session,artifact_id,force);await session.commit();return result
+async def activate_probability(artifact_id:int,body:ActivationRequest|None=None,force:bool=False,session:AsyncSession=Depends(get_db_session)):
+    try:result=await activate_win_probability(session,artifact_id,body.force if body else force);await session.commit();return result
     except ValueError as error:raise HTTPException(404,str(error)) from error
 
 @router.post("/win-probability/backtest")

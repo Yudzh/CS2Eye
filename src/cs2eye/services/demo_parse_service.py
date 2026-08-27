@@ -390,6 +390,8 @@ class DemoParseService:
                             [item.rounds for item in [*previous, parsed_demo]],
                             parsed_demo.map_result.team_a_name,
                             parsed_demo.map_result.team_b_name,
+                            parsed_demo.map_result.team_a_score,
+                            parsed_demo.map_result.team_b_score,
                         ),
                         kills=[
                             type(kill)(
@@ -511,7 +513,14 @@ class DemoParseService:
             diagnostics.extend(issue.code for issue in normalized_result.issues)
             await self.session.flush()
             normalized_rounds, round_warnings = normalize_rounds(parsed_demo.rounds, map_result)
-            status, consistency_warnings = round_data_status(normalized_rounds, map_result)
+            if part and not is_final_part:
+                # A non-final split file is only a transport fragment. Its
+                # scoreboard is cumulative while its round events may start or
+                # end mid-round, so map-level count/score validation is deferred
+                # until the final part stitches the complete timeline.
+                status, consistency_warnings = "partial", []
+            else:
+                status, consistency_warnings = round_data_status(normalized_rounds, map_result)
             await replace_rounds(self.session, map_result, normalized_rounds)
             await self.session.flush()
             await recalculate_demo_team_side_stats(self.session, map_result)
@@ -519,7 +528,10 @@ class DemoParseService:
             bomb_status, bomb_warnings = bomb_data_status(normalized_rounds, status)
             map_result.bomb_data_status = bomb_status
             await recalculate_demo_team_bomb_stats(self.session, map_result)
-            economy_status, economy_warnings = economy_data_status(normalized_rounds, status)
+            if part and not is_final_part:
+                economy_status, economy_warnings = "partial", []
+            else:
+                economy_status, economy_warnings = economy_data_status(normalized_rounds, status)
             map_result.economy_data_status = economy_status
             await recalculate_demo_team_economy_stats(self.session, map_result)
             blocking_round_issues = {
