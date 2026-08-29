@@ -6,6 +6,7 @@ import { TeamComparisonSide } from "../components/TeamComparisonSide";
 import { InfoTip, Term } from "../components/InfoTip";
 import type { CalculatedVeto, MapConfidenceLevel, MatchupScore, Team, TeamComparison, TeamH2HComparison, TeamH2HRosterContext, TeamH2HSlice, TeamMapComparisonItem, TeamMapComparisonResponse, VetoComparison, WinProbability } from "../types";
 import {CompareFormContextBlock} from "../components/FormContextPanel";
+import {MatchLLMAnalysisPanel} from "../components/MatchLLMAnalysisPanel";
 
 const confidenceLabels: Record<MapConfidenceLevel, string> = {
   not_enough_data: "Недостаточно данных", low_confidence: "Низкая надёжность",
@@ -186,7 +187,7 @@ export function TeamComparePage() {
   return (
     <main className="page compare-page">
       <header className="compare-topbar"><a className="back-link" href="/">← К командам</a><strong>CS2Eye · сравнение</strong></header>
-      <section className="compare-heading"><p className="eyebrow">Итерация 05</p><h1>Сравнение команд</h1><p className="lead">Рейтинг, текущие составы и прозрачный расчёт силы по данным из БД.</p></section>
+      <section className="compare-heading"><p className="eyebrow">Предматчевый анализ</p><h1>Сравнение команд</h1><p className="lead">ML-прогноз, детерминированная аналитика и объяснение по сохранённым данным CS2Eye.</p></section>
       {loadingTeams ? <div className="empty-state">Загружаю команды…</div> : teams.length === 0 ? <div className="empty-state">Команды ещё не загружены.</div> : insufficient ? <div className="empty-state">Для сравнения нужны минимум две команды.</div> : (
         <form className="compare-form" onSubmit={submit}>
           <label>Команда A<select value={teamA} onChange={(event) => setTeamA(Number(event.target.value))}>{teams.map((team) => <option disabled={team.id === teamB} value={team.id} key={team.id}>#{team.current_rank ?? "—"} · {team.name}{!team.is_analytics_active?" · вне Top-30":""}</option>)}</select></label>
@@ -208,7 +209,8 @@ export function TeamComparePage() {
         </section>
         <CompareFormContextBlock teamA={comparison.team_a_form_context} teamB={comparison.team_b_form_context} nameA={comparison.team_a.name} nameB={comparison.team_b.name}/>
         {winProbability&&<WinProbabilityBlock prediction={winProbability} preVeto={preVetoProbability}/>}
-        {matchup&&<MatchupBlock matchup={matchup}/>}
+        {matchup&&<MatchupBlock matchup={matchup}/>} 
+        <MatchLLMAnalysisPanel teamAId={comparison.team_a.id} teamBId={comparison.team_b.id} matchId={seriesId||undefined}/>
         <section className="strength-panel analyst-compare"><div className="section-heading"><div><p className="eyebrow">Human context · отдельно от scoring</p><h2>Аналитические плюсы и минусы</h2></div><div className="roster-toggle"><button className={analystMode==="relevant"?"button button--primary":"button"} onClick={()=>setAnalystMode("relevant")}>Релевантные</button><button className={analystMode==="all"?"button button--primary":"button"} onClick={()=>setAnalystMode("all")}>Все</button></div></div><div className="analyst-compare-grid">{(["team_a","team_b"] as const).map(key=>{const factors=comparison.analyst_context[key][analystMode==="relevant"?"relevant":"all_active"];return <article key={key}><h3>{comparison[key].name}</h3>{(["positive","negative"] as const).map(type=><div key={type}><h4>{type==="positive"?"Плюсы":"Минусы"}</h4>{factors.filter(x=>x.factor_type===type).map(x=>{const people=[...x.players.map(player=>player.nickname),...(x.coach?[`Coach: ${x.coach.nickname}`]:[])];return <div className={`compare-factor compare-factor--${type}`} key={x.id}><b>{type==="positive"?"+":"−"}</b><span>{x.text}<small>{people.length?`${people.join(", ")} · `:""}{x.map_name??"Все карты"} · {x.environment==="any"?"Любая среда":x.environment.toUpperCase()} · {x.category?.replaceAll("_"," ")??"без категории"}</small></span></div>})}{!factors.some(x=>x.factor_type===type)&&<p className="muted">Нет факторов</p>}</div>)}</article>})}</div><p className="formula">Факторы не меняют Matchup Score, Win Probability или veto.</p></section>
         <RoleComparisonTable comparison={comparison} />
         <RoundSwingBlock comparison={comparison}/>

@@ -1,4 +1,5 @@
-from datetime import date
+from collections.abc import AsyncIterator
+from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +13,15 @@ from cs2eye.api.schemas.analysis import (
     LegacyCurrentRosterComparisonResponse, TeamH2HComparisonResponse,
     TeamMapComparisonResponse, TeamMapDetailResponse, TeamMapsResponse,
 )
+from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
+from cs2eye.api.schemas.match_llm_runtime import (
+    MatchLLMHistoryItem,
+    MatchLLMAnalysisRequest,
+    MatchLLMAnalysisResponse,
+    MatchLLMRegenerateRequest,
+    MatchLLMStoredAnalysisResponse,
+)
+from cs2eye.core.config import settings
 from cs2eye.models.demo import (
     DemoMapResult, DemoParseRun, DemoTeamOpponentContext, DemoTeamSideStat, DemoTeamRoster,
     TeamMapAggregate,
@@ -31,6 +41,17 @@ from cs2eye.services.veto_service import VetoError, VetoService, comparison as v
 from cs2eye.services.calculated_veto_service import CalculatedVetoService
 from cs2eye.services.leadership_service import LeadershipService
 from cs2eye.services.matchup_service import MatchupService
+from cs2eye.services.match_analysis_context_builder import MatchAnalysisContextBuilder
+from cs2eye.services.match_llm_analysis_service import (
+    MatchLLMAnalysisService,
+    MatchLLMServiceError,
+)
+from cs2eye.services.match_llm_analysis_repository import SQLAlchemyMatchLLMAnalysisRepository
+from cs2eye.services.match_llm_analysis_run_service import MatchLLMAnalysisRunService
+from cs2eye.services.ollama_match_analysis_client import (
+    MatchAnalysisProvider,
+    OllamaMatchAnalysisClient,
+)
 from cs2eye.services.win_probability_service import (
     activate_win_probability,
     backtest_win_probability,
@@ -41,6 +62,210 @@ from cs2eye.services.win_probability_service import (
 )
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
+
+
+async def get_ollama_match_analysis_client(
+) -> AsyncIterator[MatchAnalysisProvider | None]:
+    if not settings.match_llm_enabled:
+        yield None
+        return
+    client = OllamaMatchAnalysisClient(
+        host=settings.ollama_host,
+        model=settings.match_llm_model,
+        timeout_seconds=settings.match_llm_timeout_seconds,
+        think=settings.match_llm_think,
+        prompt_version=settings.match_llm_prompt_version,
+    )
+    try:
+        yield client
+    finally:
+        await client.close()
+
+
+@router.get("/match-analysis-context", response_model=MatchAnalysisContext)
+async def match_analysis_context(
+    team_a_id: int,
+    team_b_id: int,
+    as_of: datetime,
+    match_id: int | None = None,
+    tournament_id: int | None = None,
+    analysis_mode: str = Query("pre_match", pattern="^(pre_match|post_match)$"),
+    session: AsyncSession = Depends(get_db_session),
+) -> MatchAnalysisContext:
+    try:
+        return await MatchAnalysisContextBuilder(session).build(
+            team_a_id, team_b_id, as_of=as_of, match_id=match_id,
+            tournament_id=tournament_id, analysis_mode=analysis_mode,
+        )
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@router.post("/llm-match-analysis", response_model=MatchLLMAnalysisResponse)
+async def llm_match_analysis(
+    body: MatchLLMAnalysisRequest,
+    session: AsyncSession = Depends(get_db_session),
+    provider: MatchAnalysisProvider | None = Depends(get_ollama_match_analysis_client),
+) -> MatchLLMAnalysisResponse:
+    service = MatchLLMAnalysisService(
+        MatchAnalysisContextBuilder(session),
+        provider,
+        enabled=settings.match_llm_enabled,
+        model=settings.match_llm_model,
+    )
+    try:
+        return await service.analyze(
+            body.team_a_id,
+            body.team_b_id,
+            as_of=body.as_of,
+            match_id=body.match_id,
+            tournament_id=body.tournament_id,
+            analysis_mode=body.analysis_mode,
+            language=body.language,
+        )
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except MatchLLMServiceError as error:
+        status = {
+            "llm_not_configured": 503,
+            "llm_timeout": 504,
+            "llm_provider_error": 502,
+            "llm_invalid_response": 502,
+            "llm_validation_failed": 502,
+            "llm_grounding_failed": 502,
+        }.get(error.code, 500)
+        raise HTTPException(
+            status_code=status,
+            detail={
+                "code": error.code,
+                "message": str(error),
+                **({"grounding_error_codes": [item.code for item in error.grounding_errors]}
+                   if settings.debug and error.grounding_errors else {}),
+            },
+        ) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
+def _run_service(session, provider) -> tuple[MatchLLMAnalysisRunService, SQLAlchemyMatchLLMAnalysisRepository]:
+    repository = SQLAlchemyMatchLLMAnalysisRepository(session)
+    core = MatchLLMAnalysisService(
+        MatchAnalysisContextBuilder(session), provider,
+        enabled=settings.match_llm_enabled, model=settings.match_llm_model,
+    )
+    return MatchLLMAnalysisRunService(core, repository), repository
+
+
+def _llm_http_error(error: MatchLLMServiceError) -> HTTPException:
+    status = {
+        "llm_not_configured": 503, "llm_timeout": 504,
+        "llm_provider_error": 502, "llm_invalid_response": 502,
+        "llm_validation_failed": 502, "llm_grounding_failed": 502,
+    }.get(error.code, 500)
+    return HTTPException(status_code=status, detail={
+        "code": error.code, "message": str(error),
+        **({"analysis_run_id": error.analysis_run_id}
+           if hasattr(error, "analysis_run_id") else {}),
+        **({"validation_error_codes": list(error.validation_error_codes)}
+           if settings.debug and error.validation_error_codes else {}),
+        **({"grounding_error_codes": [item.code for item in error.grounding_errors]}
+           if settings.debug and error.grounding_errors else {}),
+    })
+
+
+@router.post(
+    "/llm-match-analysis/generate", response_model=MatchLLMStoredAnalysisResponse,
+)
+async def generate_llm_match_analysis(
+    body: MatchLLMAnalysisRequest,
+    session: AsyncSession = Depends(get_db_session),
+    provider: MatchAnalysisProvider | None = Depends(get_ollama_match_analysis_client),
+) -> MatchLLMStoredAnalysisResponse:
+    service, _ = _run_service(session, provider)
+    try:
+        return await service.generate(
+            body.team_a_id, body.team_b_id, as_of=body.as_of,
+            match_id=body.match_id, tournament_id=body.tournament_id,
+            analysis_mode=body.analysis_mode, language=body.language,
+        )
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except MatchLLMServiceError as error:
+        raise _llm_http_error(error) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@router.get(
+    "/llm-match-analysis/latest", response_model=MatchLLMStoredAnalysisResponse,
+)
+async def latest_llm_match_analysis(
+    team_a_id: int, team_b_id: int, match_id: int | None = None,
+    analysis_mode: str = Query("pre_match", pattern="^(pre_match|post_match)$"),
+    session: AsyncSession = Depends(get_db_session),
+) -> MatchLLMStoredAnalysisResponse:
+    service, repository = _run_service(session, None)
+    run = await repository.get_latest(
+        team_a_id=team_a_id, team_b_id=team_b_id,
+        match_id=match_id, analysis_mode=analysis_mode,
+    )
+    if run is None:
+        raise HTTPException(404, "Stored LLM analysis not found")
+    return service.detail(run)
+
+
+@router.get("/llm-match-analysis/history", response_model=list[MatchLLMHistoryItem])
+async def llm_match_analysis_history(
+    match_id: int | None = None, team_a_id: int | None = None,
+    team_b_id: int | None = None,
+    status: str | None = Query(None, pattern="^(pending|completed|failed|skipped_insufficient_data)$"),
+    limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[MatchLLMHistoryItem]:
+    service, repository = _run_service(session, None)
+    rows = await repository.list_history(
+        match_id=match_id, team_a_id=team_a_id, team_b_id=team_b_id,
+        status=status, limit=limit, offset=offset,
+    )
+    return [service.history_item(row) for row in rows]
+
+
+@router.get(
+    "/llm-match-analysis/{analysis_run_id}", response_model=MatchLLMStoredAnalysisResponse,
+)
+async def stored_llm_match_analysis(
+    analysis_run_id: int, session: AsyncSession = Depends(get_db_session),
+) -> MatchLLMStoredAnalysisResponse:
+    service, repository = _run_service(session, None)
+    run = await repository.get_by_id(analysis_run_id)
+    if run is None:
+        raise HTTPException(404, "Stored LLM analysis not found")
+    return service.detail(run)
+
+
+@router.post(
+    "/llm-match-analysis/{analysis_run_id}/regenerate",
+    response_model=MatchLLMStoredAnalysisResponse,
+)
+async def regenerate_llm_match_analysis(
+    analysis_run_id: int, body: MatchLLMRegenerateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    provider: MatchAnalysisProvider | None = Depends(get_ollama_match_analysis_client),
+) -> MatchLLMStoredAnalysisResponse:
+    service, _ = _run_service(session, provider)
+    try:
+        return await service.regenerate(
+            analysis_run_id, reuse_context=body.reuse_context,
+            reuse_explanation_plan=body.reuse_explanation_plan, as_of=body.as_of,
+        )
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except MatchLLMServiceError as error:
+        raise _llm_http_error(error) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
 @router.get("/matchup")
 async def matchup_score(

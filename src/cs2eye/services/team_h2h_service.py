@@ -212,6 +212,7 @@ class TeamH2HService:
 
     async def compare(
         self, team_a_id: int, team_b_id: int, *, recent_limit: int = 10,
+        as_of: date | None = None,
     ) -> TeamH2HComparison:
         if team_a_id == team_b_id:
             raise SameTeamH2HError("Нужно выбрать две разные команды.")
@@ -219,7 +220,7 @@ class TeamH2HService:
         if team_a is None or team_b is None:
             raise H2HTeamNotFoundError("Команда не найдена.")
 
-        candidates = await self._load_candidates(team_a_id, team_b_id)
+        candidates = await self._load_candidates(team_a_id, team_b_id, as_of=as_of)
         valid = [item for item in (self._normalize(c, team_a_id, team_b_id) for c in candidates) if item]
         organizations = self._build_slice(candidates, valid, team_a, team_b, recent_limit, empty_status="no_meetings")
 
@@ -243,11 +244,11 @@ class TeamH2HService:
         else:
             current = self._empty_slice("current_roster_unavailable")
 
-        org_series = await self._series_counts(team_a, team_b, current_rosters=False)
+        org_series = await self._series_counts(team_a, team_b, current_rosters=False, as_of=as_of)
         organizations = replace(organizations, series_played=sum(org_series),
                                 team_a_series_won=org_series[0], team_b_series_won=org_series[1])
         if current_available:
-            current_series = await self._series_counts(team_a, team_b, current_rosters=True)
+            current_series = await self._series_counts(team_a, team_b, current_rosters=True, as_of=as_of)
             current = replace(current, series_played=sum(current_series),
                               team_a_series_won=current_series[0], team_b_series_won=current_series[1])
 
@@ -258,7 +259,9 @@ class TeamH2HService:
             current, roster_context, insights,
         )
 
-    async def _load_candidates(self, team_a_id: int, team_b_id: int) -> list[_Candidate]:
+    async def _load_candidates(
+        self, team_a_id: int, team_b_id: int, *, as_of: date | None = None,
+    ) -> list[_Candidate]:
         link_a, link_b = aliased(DemoTeamRoster), aliased(DemoTeamRoster)
         rows = (await self._session.execute(
             select(DemoFile, DemoMapResult, link_a, link_b)
@@ -268,7 +271,7 @@ class TeamH2HService:
             .where(or_(
                 and_(DemoMapResult.team_a_id == team_a_id, DemoMapResult.team_b_id == team_b_id),
                 and_(DemoMapResult.team_a_id == team_b_id, DemoMapResult.team_b_id == team_a_id),
-            ))
+            ), DemoFile.match_date < as_of if as_of is not None else True)
             .order_by(DemoFile.match_date.desc(), DemoFile.id.desc())
         )).all()
         return [_Candidate(*row) for row in rows]
@@ -424,13 +427,16 @@ class TeamH2HService:
             for roster, team in zip(rosters, (team_a, team_b), strict=True)
         )
 
-    async def _series_counts(self, team_a: Team, team_b: Team, *, current_rosters: bool) -> tuple[int, int]:
+    async def _series_counts(
+        self, team_a: Team, team_b: Team, *, current_rosters: bool,
+        as_of: date | None = None,
+    ) -> tuple[int, int]:
         matches = list((await self._session.execute(select(Match).where(
             Match.resolution_status == "resolved", Match.status == "completed",
             or_(
                 (Match.team_a_id == team_a.id) & (Match.team_b_id == team_b.id),
                 (Match.team_a_id == team_b.id) & (Match.team_b_id == team_a.id),
-            ),
+            ), Match.match_date < as_of if as_of is not None else True,
         ))).scalars().all())
         if current_rosters:
             if team_a.current_roster_id is None or team_b.current_roster_id is None: return 0, 0

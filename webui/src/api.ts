@@ -23,7 +23,12 @@ import type {
   TeamH2HComparison,
   MatchBackfillResult, MatchEnvironment, MatchFormat, MatchListResponse, MatchResolution, MatchSeries, MatchStage, TeamMatchStats, TeamVetoProfile, VetoAction, VetoComparison, CalculatedVeto, MatchupScore, WinProbability,
   AnalystFactor, AnalystFactorPayload, MLModelsStatus,
+  MatchLLMAnalysisRun, MatchLLMGenerateRequest, MatchLLMHistoryItem,
 } from "./types";
+
+export class ApiError extends Error {
+  constructor(public status:number,public code:string|null,message:string){super(message);this.name="ApiError"}
+}
 
 
 async function request<T>(
@@ -34,16 +39,16 @@ async function request<T>(
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
 
+    let code:string|null=null;
     try {
-      const payload: {
-        detail?: string;
-      } = await response.json();
-      detail = payload.detail || detail;
+      const payload:{detail?:string|{code?:string;message?:string}}=await response.json();
+      if(typeof payload.detail==="string")detail=payload.detail;
+      else if(payload.detail){detail=payload.detail.message||detail;code=payload.detail.code||null}
     } catch {
       // Keep the HTTP fallback for non-JSON failures.
     }
 
-    throw new Error(detail);
+    throw new ApiError(response.status,code,detail);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -155,6 +160,11 @@ export function compareTeamVeto(a:number,b:number,level:"organization"|"current_
 export function getCalculatedVeto(a:number,b:number):Promise<CalculatedVeto>{return request(`/api/v1/analysis/calculated-veto?team_a_id=${a}&team_b_id=${b}&format=bo3`)}
 export function getMatchupScore(a:number,b:number,format:"bo1"|"bo3"|"bo5"="bo3",analysisMode:"pre_veto"|"post_veto"="pre_veto",seriesId?:number):Promise<MatchupScore>{const q=new URLSearchParams({team_a_id:String(a),team_b_id:String(b),format,analysis_mode:analysisMode});if(seriesId)q.set("series_id",String(seriesId));return request(`/api/v1/analysis/matchup?${q}`)}
 export function getWinProbability(a:number,b:number,format:"bo1"|"bo3"|"bo5"="bo3",analysisMode:"pre_veto"|"post_veto"="pre_veto",seriesId?:number):Promise<WinProbability>{const q=new URLSearchParams({team_a_id:String(a),team_b_id:String(b),format,analysis_mode:analysisMode});if(seriesId)q.set("series_id",String(seriesId));return request(`/api/v1/analysis/win-probability?${q}`)}
+export async function getLatestMatchLLMAnalysis(teamAId:number,teamBId:number,matchId?:number):Promise<MatchLLMAnalysisRun|null>{const q=new URLSearchParams({team_a_id:String(teamAId),team_b_id:String(teamBId),analysis_mode:"pre_match"});if(matchId)q.set("match_id",String(matchId));try{return await request(`/api/v1/analysis/llm-match-analysis/latest?${q}`)}catch(error){if(error instanceof ApiError&&error.status===404)return null;throw error}}
+export function generateMatchLLMAnalysis(payload:MatchLLMGenerateRequest):Promise<MatchLLMAnalysisRun>{return request("/api/v1/analysis/llm-match-analysis/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})}
+export function getMatchLLMAnalysisRun(id:number):Promise<MatchLLMAnalysisRun>{return request(`/api/v1/analysis/llm-match-analysis/${id}`)}
+export function getMatchLLMAnalysisHistory(teamAId:number,teamBId:number,matchId?:number):Promise<MatchLLMHistoryItem[]>{const q=new URLSearchParams({team_a_id:String(teamAId),team_b_id:String(teamBId),limit:"50",offset:"0"});if(matchId)q.set("match_id",String(matchId));return request(`/api/v1/analysis/llm-match-analysis/history?${q}`)}
+export function regenerateMatchLLMAnalysis(id:number):Promise<MatchLLMAnalysisRun>{return request(`/api/v1/analysis/llm-match-analysis/${id}/regenerate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reuse_context:true})})}
 export function getMLModels():Promise<MLModelsStatus>{return request("/api/v1/ml/models")}
 export function activateMLModel(id:number,force:boolean):Promise<unknown>{return request(`/api/v1/ml/models/${id}/activate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({force})})}
 export function trainMLModel():Promise<unknown>{return request("/api/v1/analysis/win-probability/train",{method:"POST"})}

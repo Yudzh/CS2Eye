@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from cs2eye.db.base import Base
 from cs2eye.db.session import get_db_session
 from cs2eye.main import create_app
-from cs2eye.models.team import Player, Team, TeamParticipantMembership
+from cs2eye.models.team import AnalystFactor, Player, Team, TeamParticipantMembership
 from cs2eye.services.analyst_context_service import AnalystContextService
 
 NOW = datetime(2026, 8, 21, 10, tzinfo=UTC)
@@ -43,6 +43,7 @@ async def test_crud_relations_filters_and_temporal_safety(client_session):
     body=created.json();assert [p["nickname"] for p in body["players"]]==["donk","zont1x"];assert body["coach"]["nickname"]=="hally"
     assert len((await client.get("/api/v1/analyst-factors",params={"team_id":1,"map_name":"dust2","environment":"lan","player_id":10})).json())==1
     patched=await client.patch(f'/api/v1/analyst-factors/{body["id"]}',json={"factor_type":"positive","player_ids":[],"coach_id":None});assert patched.json()["players"]==[];assert patched.json()["factor_type"]=="positive"
+    factor=await session.get(AnalystFactor,body["id"]);factor.created_at=NOW-timedelta(days=1);await session.commit()
     context=await AnalystContextService(session).structured(1,as_of=NOW+timedelta(days=1));assert context["positive"][0]["text"]==payload["text"]
     future=await AnalystContextService(session).structured(1,as_of=datetime(2020,1,1,tzinfo=UTC));assert future["positive"]==[]
 

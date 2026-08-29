@@ -12,6 +12,7 @@ from cs2eye.api.routers.round_swing_admin import router as round_swing_admin_rou
 from cs2eye.api.routers.tournaments import router as tournaments_router
 from cs2eye.api.routers.analyst_factors import router as analyst_factors_router
 from cs2eye.api.routers.ml_models import router as ml_models_router
+from cs2eye.api.routers.llm_quality import router as llm_quality_router
 
 
 api_router = APIRouter(
@@ -39,3 +40,4 @@ api_router.include_router(tournaments_router)
 api_router.include_router(round_swing_admin_router)
 api_router.include_router(analyst_factors_router)
 api_router.include_router(ml_models_router)
+api_router.include_router(llm_quality_router)

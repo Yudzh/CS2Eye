@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cs2eye.models.demo import DemoMapResult, DemoTeamRoster
 from cs2eye.models.demo_file import DemoFile
 from cs2eye.models.match import Match, Tournament
-from cs2eye.models.team import TeamRankingSnapshot
+from cs2eye.models.team import Team, TeamRankingSnapshot
 
 
 def clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
@@ -110,6 +110,96 @@ class FormContextService:
         a = await self.calculate(team_a_id, as_of, tournament_id, exclude_match_id)
         b = await self.calculate(team_b_id, as_of, tournament_id, exclude_match_id)
         return {"team_a_form_context": a, "team_b_form_context": b, "tournament_id": tournament_id}
+
+    async def recent_series_evidence(
+        self, team_id: int, *, as_of: date, tournament_id: int | None = None,
+        exclude_match_id: int | None = None, current_limit: int = 5,
+        other_limit: int = 5, total_limit: int = 10,
+    ) -> list[dict]:
+        """Project existing form signals into a compact, temporal-safe evidence list."""
+        window_start = as_of - timedelta(days=60)
+        date_scope = (
+            or_(Match.match_date >= window_start, Match.tournament_id == tournament_id)
+            if tournament_id is not None else Match.match_date >= window_start
+        )
+        matches = list((await self.session.scalars(select(Match).where(
+            or_(Match.team_a_id == team_id, Match.team_b_id == team_id),
+            Match.match_date < as_of,
+            date_scope,
+            Match.status == "completed",
+            Match.winner_team_id.is_not(None),
+        ).order_by(Match.match_date.desc(), Match.id.desc()))).all())
+        if exclude_match_id is not None:
+            matches = [match for match in matches if match.id != exclude_match_id]
+        signals = await self._signals(team_id, matches, as_of)
+        signal_by_id = {signal.match_id: signal for signal in signals}
+        opponent_ids = {
+            match.team_b_id if match.team_a_id == team_id else match.team_a_id
+            for match in matches
+        } - {None}
+        teams = {
+            team.id: team for team in (await self.session.scalars(
+                select(Team).where(Team.id.in_(opponent_ids))
+            )).all()
+        }
+        tournament_ids = {match.tournament_id for match in matches if match.tournament_id}
+        tournaments = {
+            item.id: item for item in (await self.session.scalars(
+                select(Tournament).where(Tournament.id.in_(tournament_ids))
+            )).all()
+        }
+
+        def informative_key(match: Match) -> tuple:
+            signal = signal_by_id[match.id]
+            rank = signal.opponent_rank
+            return (
+                rank is None,
+                rank if rank is not None else 10_000,
+                -abs(signal.performance_delta),
+                -match.match_date.toordinal(),
+                -match.id,
+            )
+
+        current = sorted(
+            [match for match in matches if tournament_id is not None and match.tournament_id == tournament_id],
+            key=lambda match: (-match.match_date.toordinal(), -match.id),
+        )[:current_limit]
+        current_ids = {match.id for match in current}
+        others = sorted(
+            [
+                match for match in matches
+                if match.id not in current_ids
+                and match.match_date >= window_start
+                and (tournament_id is None or match.tournament_id != tournament_id)
+            ],
+            key=informative_key,
+        )[:other_limit]
+
+        result = []
+        for match in (current + others)[:total_limit]:
+            signal = signal_by_id[match.id]
+            team_is_a = match.team_a_id == team_id
+            opponent_id = match.team_b_id if team_is_a else match.team_a_id
+            opponent = teams.get(opponent_id)
+            maps_for = match.team_a_maps_won if team_is_a else match.team_b_maps_won
+            maps_against = match.team_b_maps_won if team_is_a else match.team_a_maps_won
+            result.append({
+                "evidence_id": f"series:{match.id}",
+                "date": match.match_date,
+                "tournament": tournaments.get(match.tournament_id).name if match.tournament_id in tournaments else None,
+                "opponent": {
+                    "id": opponent_id,
+                    "name": opponent.name if opponent else None,
+                    "rank": signal.opponent_rank,
+                },
+                "result": "win" if signal.won else "loss",
+                "series_score": f"{maps_for}-{maps_against}",
+                "expected_win_probability": round(signal.expectation, 4),
+                "performance_vs_expectation": round(signal.performance_delta, 4),
+                "current_tournament": tournament_id is not None and match.tournament_id == tournament_id,
+                "reliability": None,
+            })
+        return result
 
     async def _signals(self, team_id: int, matches: list[Match], as_of: date) -> list[SeriesSignal]:
         if not matches:

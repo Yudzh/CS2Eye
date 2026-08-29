@@ -41,6 +41,13 @@ services:
       BO3_SITE_BASE_URL: ${BO3_SITE_BASE_URL:-https://bo3.gg}
       BO3_REQUEST_TIMEOUT_SECONDS: ${BO3_REQUEST_TIMEOUT_SECONDS:-20}
       BO3_USER_AGENT: ${BO3_USER_AGENT:-CS2Eye/0.1 (+local analytics project)}
+      MATCH_LLM_ENABLED: ${MATCH_LLM_ENABLED:-false}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://127.0.0.1:11434}
+      MATCH_LLM_PROVIDER: ${MATCH_LLM_PROVIDER:-ollama}
+      MATCH_LLM_MODEL: ${MATCH_LLM_MODEL:-qwen3:8b}
+      MATCH_LLM_PROMPT_VERSION: ${MATCH_LLM_PROMPT_VERSION:-match_analysis_prompt.v3}
+      MATCH_LLM_TIMEOUT_SECONDS: ${MATCH_LLM_TIMEOUT_SECONDS:-60}
+      MATCH_LLM_THINK: ${MATCH_LLM_THINK:-true}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
@@ -72,7 +79,7 @@ services:
       - ./src:/app/src
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini:ro
-      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD21/demos}:/app/storage
+      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD24/demos}:/app/storage
     depends_on:
       db:
         condition: service_healthy
