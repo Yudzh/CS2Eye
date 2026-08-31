@@ -9,9 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
 from cs2eye.api.schemas.match_explanation_plan import MatchExplanationPlan
+from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
 from cs2eye.api.schemas.match_llm_runtime import MatchLLMRuntimeMetadata
 from cs2eye.models.match_llm_analysis_run import MatchLLMAnalysisRun
-from cs2eye.prompts.match_analysis_v3 import PROMPT_VERSION
+from cs2eye.prompts.match_analysis_v5 import PROMPT_VERSION
 
 
 VALID_STATUSES = {"completed", "skipped_insufficient_data"}
@@ -41,7 +42,7 @@ class SQLAlchemyMatchLLMAnalysisRepository:
         match_id: int | None, tournament_id: int | None, as_of: datetime,
         analysis_mode: str, language: str, model: str | None,
         provider: str | None = "ollama", source_run_id: int | None = None,
-        explanation_plan: MatchExplanationPlan | None = None,
+        explanation_plan: MatchExplanationPlan | MatchExplanationPlanV2 | None = None,
     ) -> MatchLLMAnalysisRun:
         run = MatchLLMAnalysisRun(
             source_run_id=source_run_id, match_id=match_id,
@@ -49,7 +50,7 @@ class SQLAlchemyMatchLLMAnalysisRepository:
             as_of=as_of, analysis_mode=analysis_mode, language=language,
             status="pending", llm_called=False,
             context_schema_version=context.schema_version,
-            analysis_schema_version="match_llm_analysis.v2",
+            analysis_schema_version="match_llm_analysis.v3",
             prompt_version=PROMPT_VERSION, provider=provider, model=model,
             context_snapshot=json_snapshot(context),
             explanation_plan_schema_version=(explanation_plan.schema_version

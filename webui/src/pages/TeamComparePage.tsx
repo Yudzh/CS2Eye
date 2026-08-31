@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 
-import { compareTeamMaps, compareTeams, compareTeamVeto, getCalculatedVeto, getMatchupScore, getTeamH2H, getTeams, getWinProbability } from "../api";
+import { capturePredictionHistory, compareTeamMaps, compareTeams, compareTeamVeto, getBettingRestrictions, getCalculatedVeto, getHEKillBacktest, getHEKillByMap, getMatch, getMatchupScore, getTeamH2H, getTeams, getWinProbability } from "../api";
 import { RoleComparisonTable } from "../components/RoleComparisonTable";
 import { TeamComparisonSide } from "../components/TeamComparisonSide";
 import { InfoTip, Term } from "../components/InfoTip";
-import type { CalculatedVeto, MapConfidenceLevel, MatchupScore, Team, TeamComparison, TeamH2HComparison, TeamH2HRosterContext, TeamH2HSlice, TeamMapComparisonItem, TeamMapComparisonResponse, VetoComparison, WinProbability } from "../types";
+import type { BettingRestrictions, CalculatedVeto, HEKillBacktestReport, HEKillByMapPrediction, MapConfidenceLevel, MatchupScore, Team, TeamComparison, TeamH2HComparison, TeamH2HRosterContext, TeamH2HSlice, TeamMapComparisonItem, TeamMapComparisonResponse, VetoComparison, WinProbability } from "../types";
 import {CompareFormContextBlock} from "../components/FormContextPanel";
 import {MatchLLMAnalysisPanel} from "../components/MatchLLMAnalysisPanel";
+import {BettingRestrictionWarning} from "../components/BettingRestrictionWarning";
 
 const confidenceLabels: Record<MapConfidenceLevel, string> = {
   not_enough_data: "Недостаточно данных", low_confidence: "Низкая надёжность",
@@ -44,6 +45,22 @@ function MapMetrics({team}:{team:TeamMapComparisonItem["team_a"]}) {
 const swingStatusLabels:Record<string,string>={complete:"Достаточно данных",partial:"Частичные данные",low_confidence:"Низкая надёжность",not_calculated:"Нет расчёта",model_not_trained:"Модель не обучена"};
 const collisionLabels:Record<string,string>={high:"Высокое",medium:"Среднее",low:"Низкое",none:"Нет"};
 const availabilityLabels:Record<string,string>={both:"Обе команды",team_a_only:"Только команда A",team_b_only:"Только команда B",none:"Нет данных",available:"Доступно",unavailable:"Недоступно"};
+const heConfidenceLabels={low:"Низкая",medium:"Средняя",high:"Высокая"} as const;
+
+export function HEKillByMapBlock({rows,nameA,nameB}:{rows:HEKillByMapPrediction[];nameA:string;nameB:string}){
+  return <section className="map-pool-comparison he-kill-by-map"><div className="section-heading"><div><p className="eyebrow">Secondary bets · deterministic V1</p><h2><Term tip="Вероятность хотя бы одного убийства осколочной гранатой на конкретной карте. Veto карты не исключает.">HE Kill probability</Term></h2></div><span>История за 60 дней</span></div>{rows.length===0?<div className="empty-state">HE Kill prediction unavailable</div>:<><div className="he-kill-grid">{rows.map(row=><article key={row.map}><div><strong>{row.map[0].toUpperCase()+row.map.slice(1)}</strong><span className={`confidence-badge confidence-badge--${row.confidence}`}>{heConfidenceLabels[row.confidence]}</span></div><b>{(row.probability*100).toFixed(0)}%</b><progress max={1} value={row.probability}/><small>sample {row.team_a_sample}/{row.team_b_sample} · {nameA}/{nameB}</small></article>)}</div><p className="formula">Все семь карт активного map pool, уже отсортированы backend по вероятности. Низкая выборка сглаживается к map/global baseline.</p></>}</section>;
+}
+
+function qualityPercent(value:number|null){return value===null?"—":`${(value*100).toFixed(1)}%`}
+function qualityBrier(value:number|null){return value===null?"—":value.toFixed(3)}
+export function HEKillQualityBlock({report,loading,error,onLoad}:{report:HEKillBacktestReport|null;loading:boolean;error:string|null;onLoad:()=>void}){
+  const confidenceLabels={low:"Low",medium:"Medium",high:"High"} as const;
+  return <section className="map-pool-comparison he-quality"><div className="section-heading"><div><p className="eyebrow">Historical temporal backtest</p><h2>HE Kill V1 Quality</h2></div>{!report&&<button className="button" disabled={loading} onClick={onLoad}>{loading?"Считаю backtest…":"Открыть отчёт"}</button>}</div>{error&&<div className="empty-state empty-state--error">{error}</div>}{report&&<><div className="he-quality-summary"><span><small>Predictions</small><b>{report.metrics.predictions_count}</b></span><span><small>Brier Score</small><b>{qualityBrier(report.metrics.brier_score)}</b></span><span><small>Predicted average</small><b>{qualityPercent(report.metrics.avg_predicted_probability)}</b></span><span><small>Actual HE rate</small><b>{qualityPercent(report.metrics.actual_he_kill_rate)}</b></span></div><h3>Calibration</h3><div className="he-quality-table"><div><b>Bucket</b><b>N</b><b>Predicted avg</b><b>Actual</b></div>{report.calibration.map(row=><div key={row.bucket}><strong>{row.bucket}</strong><span>{row.predictions_count}</span><span>{qualityPercent(row.avg_predicted_probability)}</span><span>{qualityPercent(row.actual_he_kill_rate)}</span></div>)}</div><div className="he-quality-columns"><div><h3>By map</h3><div className="he-quality-table"><div><b>Map</b><b>N</b><b>Predicted</b><b>Actual / Brier</b></div>{report.by_map.map(row=><div key={row.map}><strong>{row.map[0].toUpperCase()+row.map.slice(1)}</strong><span>{row.predictions_count}</span><span>{qualityPercent(row.avg_predicted_probability)}</span><span>{qualityPercent(row.actual_he_kill_rate)} / {qualityBrier(row.brier_score)}</span></div>)}</div></div><div><h3>By confidence</h3><div className="he-quality-table"><div><b>Confidence</b><b>N</b><b>Predicted</b><b>Actual / Brier</b></div>{report.by_confidence.map(row=><div key={row.confidence}><strong>{confidenceLabels[row.confidence]}</strong><span>{row.predictions_count}</span><span>{qualityPercent(row.avg_predicted_probability)}</span><span>{qualityPercent(row.actual_he_kill_rate)} / {qualityBrier(row.brier_score)}</span></div>)}</div></div></div><p className="formula">Каждая строка рассчитана production HE Kill V1 строго до даты серии; результат целевой карты использован только как label.</p></>}</section>;
+}
+
+export function missingRequestedTeamIds(payload: Team[], requestedIds: number[]): number[] {
+  return requestedIds.filter(id => id > 0 && !payload.some(team => team.id === id));
+}
 
 function VetoProbabilityBlock({veto}:{veto:CalculatedVeto|null}) {
   if(!veto)return <section className="map-pool-comparison calculated-veto"><div className="empty-state">Расчёт недоступен.</div></section>;
@@ -125,11 +142,16 @@ export function TeamComparePage() {
   const [matchup,setMatchup]=useState<MatchupScore|null>(null);
   const [winProbability,setWinProbability]=useState<WinProbability|null>(null);
   const [preVetoProbability,setPreVetoProbability]=useState<WinProbability|null>(null);
+  const [heKillByMap,setHEKillByMap]=useState<HEKillByMapPrediction[]>([]);
+  const [heQuality,setHEQuality]=useState<HEKillBacktestReport|null>(null);
+  const [heQualityLoading,setHEQualityLoading]=useState(false);
+  const [heQualityError,setHEQualityError]=useState<string|null>(null);
   const [matchFormat,setMatchFormat]=useState<"bo1"|"bo3"|"bo5">("bo3");
   const [analysisMode,setAnalysisMode]=useState<"pre_veto"|"post_veto">("pre_veto");
   const [seriesId,setSeriesId]=useState(0);
   const [error, setError] = useState<string | null>(null);
   const [analystMode,setAnalystMode]=useState<"relevant"|"all">("relevant");
+  const [bettingRestrictions,setBettingRestrictions]=useState<BettingRestrictions|null>(null);
 
   async function loadComparison(a: number, b: number, context?:{format:typeof matchFormat;mode:typeof analysisMode;series:number}) {
     setLoadingComparison(true);
@@ -138,9 +160,26 @@ export function TeamComparePage() {
     setError(null);
     setH2HLoading(true); setH2HError(null); setH2H(null);
     try {
-      const fmt=context?.format??matchFormat, mode=context?.mode??analysisMode, series=context?.series??seriesId;
-      const [organization, maps, vetoData, calculated,matchupData,probabilityData,preProbabilityData] = await Promise.all([compareTeams(a, b), compareTeamMaps(a, b), compareTeamVeto(a,b), getCalculatedVeto(a,b),getMatchupScore(a,b,fmt,mode,series||undefined),getWinProbability(a,b,fmt,mode,series||undefined),mode==="post_veto"?getWinProbability(a,b,fmt,"pre_veto",series||undefined):Promise.resolve(null)]);
-      setComparison(organization); setMapPool(maps); setVeto(vetoData); setCalculatedVeto(calculated);setMatchup(matchupData);setWinProbability(probabilityData);setPreVetoProbability(preProbabilityData);
+      const fmt=context?.format??matchFormat;
+      let mode=context?.mode??analysisMode;
+      let series=context?.series??seriesId;
+      if(series){
+        const selectedMatch=await getMatch(series);
+        const selectedTeams=new Set([selectedMatch.team_a.id,selectedMatch.team_b.id]);
+        if(selectedTeams.size!==2||!selectedTeams.has(a)||!selectedTeams.has(b)){
+          series=0;
+          mode="pre_veto";
+          setSeriesId(0);
+          setAnalysisMode("pre_veto");
+          const query=new URLSearchParams(window.location.search);
+          query.delete("series_id");
+          query.set("team_a",String(a));query.set("team_b",String(b));query.set("format",fmt);
+          window.history.replaceState(null,"",`/compare?${query.toString()}`);
+        }
+        else await capturePredictionHistory(series,selectedMatch.status==="completed");
+      }
+      const [organization, maps, vetoData, calculated,matchupData,probabilityData,preProbabilityData,heKillData,restriction] = await Promise.all([compareTeams(a, b), compareTeamMaps(a, b), compareTeamVeto(a,b), getCalculatedVeto(a,b),getMatchupScore(a,b,fmt,mode,series||undefined),getWinProbability(a,b,fmt,mode,series||undefined),mode==="post_veto"?getWinProbability(a,b,fmt,"pre_veto",series||undefined):Promise.resolve(null),getHEKillByMap(a,b,series||undefined),getBettingRestrictions(a,b,series||undefined)]);
+      setComparison(organization); setMapPool(maps); setVeto(vetoData); setCalculatedVeto(calculated);setMatchup(matchupData);setWinProbability(probabilityData);setPreVetoProbability(preProbabilityData);setHEKillByMap(heKillData);setBettingRestrictions(restriction);
     }
     catch (value: unknown) { setComparison(null); setError(value instanceof Error ? value.message : "Не удалось сравнить команды."); }
     finally { setLoadingComparison(false); }
@@ -156,21 +195,29 @@ export function TeamComparePage() {
     finally { setMapPoolLoading(false); }
   }
 
+  async function loadHEQuality(){setHEQualityLoading(true);setHEQualityError(null);try{setHEQuality(await getHEKillBacktest())}catch(value){setHEQualityError(value instanceof Error?value.message:"Не удалось построить HE Kill backtest.")}finally{setHEQualityLoading(false)}}
+
   useEffect(() => {
     getTeams().then((payload) => {
-      const sorted = payload.sort((a,b)=>Number(b.is_analytics_active)-Number(a.is_analytics_active)||(a.current_rank??9999)-(b.current_rank??9999)||a.name.localeCompare(b.name));
-      setTeams(sorted);
       const query = new URLSearchParams(window.location.search);
       const queryA = Number(query.get("team_a"));
       const queryB = Number(query.get("team_b"));
+      const missing = missingRequestedTeamIds(payload, [queryA, queryB]);
+      const sorted = payload.sort((a,b)=>Number(b.is_analytics_active)-Number(a.is_analytics_active)||(a.current_rank??9999)-(b.current_rank??9999)||a.name.localeCompare(b.name));
+      setTeams(sorted);
       const queryFormat = (["bo1","bo3","bo5"].includes(query.get("format")??"")?query.get("format"):"bo3") as typeof matchFormat;
       const querySeries = Number(query.get("series_id"))||0;
       setMatchFormat(queryFormat);setSeriesId(querySeries);setAnalysisMode("pre_veto");
       const validA = sorted.some((team) => team.id === queryA);
       const validB = sorted.some((team) => team.id === queryB);
-      const initialA = validA ? queryA : (sorted[0]?.id ?? 0);
-      const initialB = validB && queryB !== initialA ? queryB : (sorted.find((team) => team.id !== initialA)?.id ?? 0);
+      const initialA = validA ? queryA : query.has("team_a") ? 0 : (sorted[0]?.id ?? 0);
+      const initialB = validB && queryB !== initialA ? queryB : query.has("team_b") ? 0 : (sorted.find((team) => team.id !== initialA)?.id ?? 0);
       setTeamA(initialA); setTeamB(initialB);
+      if (missing.length) {
+        setComparison(null);
+        setError("Нет данных для сравнения: одна из команд находится вне доступного Top-40 CS2Eye и пока не загружена.");
+        return;
+      }
       if (validA && validB && queryA !== queryB) void loadComparison(queryA, queryB,{format:queryFormat,mode:"pre_veto",series:querySeries});
     }).catch((value: unknown) => setError(value instanceof Error ? value.message : "Не удалось загрузить команды."))
       .finally(() => setLoadingTeams(false));
@@ -190,9 +237,9 @@ export function TeamComparePage() {
       <section className="compare-heading"><p className="eyebrow">Предматчевый анализ</p><h1>Сравнение команд</h1><p className="lead">ML-прогноз, детерминированная аналитика и объяснение по сохранённым данным CS2Eye.</p></section>
       {loadingTeams ? <div className="empty-state">Загружаю команды…</div> : teams.length === 0 ? <div className="empty-state">Команды ещё не загружены.</div> : insufficient ? <div className="empty-state">Для сравнения нужны минимум две команды.</div> : (
         <form className="compare-form" onSubmit={submit}>
-          <label>Команда A<select value={teamA} onChange={(event) => setTeamA(Number(event.target.value))}>{teams.map((team) => <option disabled={team.id === teamB} value={team.id} key={team.id}>#{team.current_rank ?? "—"} · {team.name}{!team.is_analytics_active?" · вне Top-30":""}</option>)}</select></label>
+          <label>Команда A<select value={teamA} onChange={(event) => { setTeamA(Number(event.target.value)); setSeriesId(0); setAnalysisMode("pre_veto"); }}>{teamA===0&&<option value={0}>Нет данных</option>}{teams.map((team) => <option disabled={team.id === teamB} value={team.id} key={team.id}>#{team.current_rank ?? "—"} · {team.name}{!team.is_analytics_active?" · вне Top-30":""}</option>)}</select></label>
           <span>против</span>
-          <label>Команда B<select value={teamB} onChange={(event) => setTeamB(Number(event.target.value))}>{teams.map((team) => <option disabled={team.id === teamA} value={team.id} key={team.id}>#{team.current_rank ?? "—"} · {team.name}{!team.is_analytics_active?" · вне Top-30":""}</option>)}</select></label>
+          <label>Команда B<select value={teamB} onChange={(event) => { setTeamB(Number(event.target.value)); setSeriesId(0); setAnalysisMode("pre_veto"); }}>{teamB===0&&<option value={0}>Нет данных</option>}{teams.map((team) => <option disabled={team.id === teamA} value={team.id} key={team.id}>#{team.current_rank ?? "—"} · {team.name}{!team.is_analytics_active?" · вне Top-30":""}</option>)}</select></label>
           <label>Формат<select value={matchFormat} onChange={event=>setMatchFormat(event.target.value as typeof matchFormat)}><option value="bo1">BO1</option><option value="bo3">BO3</option><option value="bo5">BO5</option></select></label>
           <label>Режим<select value={analysisMode} onChange={event=>setAnalysisMode(event.target.value as typeof analysisMode)}><option value="pre_veto">До вето</option><option value="post_veto">После вето</option></select></label>
           {analysisMode==="post_veto"&&<label>ID серии<input type="number" min="1" value={seriesId||""} onChange={event=>setSeriesId(Number(event.target.value))}/></label>}
@@ -202,6 +249,7 @@ export function TeamComparePage() {
       {(teams.find(t=>t.id===teamA&&!t.is_analytics_active)||teams.find(t=>t.id===teamB&&!t.is_analytics_active))&&<div className="empty-state">Команда вне активного Top-30. Данные могут быть неполными или устаревшими.</div>}
       {error && <div className="empty-state empty-state--error">{error}</div>}
       {loadingComparison ? <div className="empty-state">Собираю сравнение команд…</div> : comparison ? <>
+        <BettingRestrictionWarning restriction={bettingRestrictions}/>
         <section className="comparison-hero">
           <TeamComparisonSide side={comparison.team_a} />
           <div className="comparison-advantage"><small>Преимущество</small>{comparison.strength_advantage_team_name ? <><strong>{comparison.strength_advantage_team_name}</strong><span>+{comparison.strength_advantage_diff.toFixed(2)} пункта</span></> : <strong>Явного преимущества нет</strong>}</div>
@@ -210,7 +258,9 @@ export function TeamComparePage() {
         <CompareFormContextBlock teamA={comparison.team_a_form_context} teamB={comparison.team_b_form_context} nameA={comparison.team_a.name} nameB={comparison.team_b.name}/>
         {winProbability&&<WinProbabilityBlock prediction={winProbability} preVeto={preVetoProbability}/>}
         {matchup&&<MatchupBlock matchup={matchup}/>} 
-        <MatchLLMAnalysisPanel teamAId={comparison.team_a.id} teamBId={comparison.team_b.id} matchId={seriesId||undefined}/>
+        <HEKillByMapBlock rows={heKillByMap} nameA={comparison.team_a.name} nameB={comparison.team_b.name}/>
+        <HEKillQualityBlock report={heQuality} loading={heQualityLoading} error={heQualityError} onLoad={()=>void loadHEQuality()}/>
+        <MatchLLMAnalysisPanel teamAId={comparison.team_a.id} teamBId={comparison.team_b.id} matchId={seriesId||undefined} matchFormat={matchFormat}/>
         <section className="strength-panel analyst-compare"><div className="section-heading"><div><p className="eyebrow">Human context · отдельно от scoring</p><h2>Аналитические плюсы и минусы</h2></div><div className="roster-toggle"><button className={analystMode==="relevant"?"button button--primary":"button"} onClick={()=>setAnalystMode("relevant")}>Релевантные</button><button className={analystMode==="all"?"button button--primary":"button"} onClick={()=>setAnalystMode("all")}>Все</button></div></div><div className="analyst-compare-grid">{(["team_a","team_b"] as const).map(key=>{const factors=comparison.analyst_context[key][analystMode==="relevant"?"relevant":"all_active"];return <article key={key}><h3>{comparison[key].name}</h3>{(["positive","negative"] as const).map(type=><div key={type}><h4>{type==="positive"?"Плюсы":"Минусы"}</h4>{factors.filter(x=>x.factor_type===type).map(x=>{const people=[...x.players.map(player=>player.nickname),...(x.coach?[`Coach: ${x.coach.nickname}`]:[])];return <div className={`compare-factor compare-factor--${type}`} key={x.id}><b>{type==="positive"?"+":"−"}</b><span>{x.text}<small>{people.length?`${people.join(", ")} · `:""}{x.map_name??"Все карты"} · {x.environment==="any"?"Любая среда":x.environment.toUpperCase()} · {x.category?.replaceAll("_"," ")??"без категории"}</small></span></div>})}{!factors.some(x=>x.factor_type===type)&&<p className="muted">Нет факторов</p>}</div>)}</article>})}</div><p className="formula">Факторы не меняют Matchup Score, Win Probability или veto.</p></section>
         <RoleComparisonTable comparison={comparison} />
         <RoundSwingBlock comparison={comparison}/>

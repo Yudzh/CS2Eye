@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 import pytest
@@ -11,6 +11,7 @@ from cs2eye.db.session import get_db_session
 from cs2eye.main import create_app
 from cs2eye.models.demo import DemoMapResult, DemoTeamRoster
 from cs2eye.models.demo_file import DemoFile
+from cs2eye.models.match import Match, Tournament
 from cs2eye.models.team import Team, TeamRoster
 from cs2eye.services.match_service import MatchService, MatchValidationError
 from cs2eye.services.team_h2h_service import TeamH2HService
@@ -92,6 +93,96 @@ async def test_automatic_grouping_resolves_numbered_bo3(match_db) -> None:
         view = await MatchService(session).auto_group_demo(1)
         assert view.match.resolution_status == "resolved" and view.match.format == "bo3"
         assert view.match.team_a_maps_won == 2
+
+
+async def test_automatic_grouping_reuses_scheduled_match_with_reversed_demo_teams(match_db) -> None:
+    await add_map(match_db, 1, 13, 8, filename="alpha-vs-bravo-m1.dem", reverse=True)
+    await add_map(match_db, 2, 13, 9, filename="alpha-vs-bravo-m2.dem")
+    async with match_db() as session:
+        tournament = Tournament(name="IEM", year=DAY.year, environment="lan")
+        session.add(tournament)
+        await session.flush()
+        scheduled = Match(
+            tournament_id=tournament.id, match_date=DAY,
+            team_a_id=1, team_b_id=2, format="bo3", stage="group",
+            environment="lan", status="scheduled", resolution_status="resolved",
+            is_playoff=False,
+        )
+        session.add(scheduled)
+        await session.commit()
+        scheduled_id = scheduled.id
+
+    async with match_db() as session:
+        resolved = await MatchService(session).auto_group_demo(1)
+        await session.commit()
+        assert resolved.match.id == scheduled_id
+        assert resolved.match.stage == "group"
+        assert resolved.match.status == "completed"
+        assert (resolved.match.team_a_maps_won, resolved.match.team_b_maps_won) == (2, 0)
+        assert [item.demo_file_id for item in resolved.maps] == [1, 2]
+        matches = list((await session.scalars(select(Match))).all())
+        assert [item.id for item in matches] == [scheduled_id]
+
+
+async def test_automatic_grouping_reuses_unique_scheduled_match_on_adjacent_date(match_db) -> None:
+    await add_map(match_db, 1, 13, 8, filename="alpha-vs-bravo-m1.dem", reverse=True)
+    await add_map(match_db, 2, 13, 9, filename="alpha-vs-bravo-m2.dem")
+    async with match_db() as session:
+        tournament = Tournament(name="IEM", year=DAY.year, environment="lan")
+        session.add(tournament)
+        await session.flush()
+        scheduled = Match(
+            tournament_id=tournament.id, match_date=DAY - timedelta(days=1),
+            team_a_id=1, team_b_id=2, format="bo3", stage="group",
+            environment="lan", status="scheduled", resolution_status="resolved",
+        )
+        session.add(scheduled)
+        await session.commit()
+        scheduled_id = scheduled.id
+
+    async with match_db() as session:
+        resolved = await MatchService(session).auto_group_demo(1)
+        await session.commit()
+        assert resolved.match.id == scheduled_id
+        assert resolved.match.match_date == DAY - timedelta(days=1)
+        assert resolved.match.status == "completed"
+        assert (resolved.match.team_a_maps_won, resolved.match.team_b_maps_won) == (2, 0)
+
+
+async def test_recalculate_propagates_winner_to_next_match_slot(match_db) -> None:
+    await add_map(match_db, 1, 13, 8, filename="alpha-vs-bravo-m1.dem")
+    async with match_db() as session:
+        tournament = Tournament(name="IEM", year=DAY.year, environment="lan")
+        session.add(tournament); await session.flush()
+        target = Match(tournament_id=tournament.id, match_date=DAY, team_a_id=None, team_b_id=None,
+            format="bo3", stage="group", environment="lan", status="scheduled", resolution_status="resolved")
+        session.add(target); await session.flush()
+        demo = await session.get(DemoFile, 1)
+        source = Match(tournament_id=tournament.id, match_date=DAY, team_a_id=1, team_b_id=2,
+            format="bo1", stage="group", environment="lan", status="scheduled", resolution_status="resolved",
+            next_match_id=target.id, next_match_slot="team_b")
+        session.add(source); await session.flush(); demo.match_id=source.id;demo.map_number=1
+        await session.flush()
+        await MatchService(session).recalculate(source.id)
+        assert target.team_a_id is None and target.team_b_id == 1
+
+
+async def test_recalculate_propagates_loser_to_lower_bracket(match_db) -> None:
+    await add_map(match_db, 1, 8, 13, filename="alpha-vs-bravo-m1.dem")
+    async with match_db() as session:
+        tournament = Tournament(name="IEM", year=DAY.year, environment="lan")
+        session.add(tournament); await session.flush()
+        target = Match(tournament_id=tournament.id, match_date=DAY, team_a_id=None, team_b_id=None,
+            format="bo3", stage="group", environment="lan", status="scheduled", resolution_status="resolved")
+        session.add(target); await session.flush()
+        demo = await session.get(DemoFile, 1)
+        source = Match(tournament_id=tournament.id, match_date=DAY, team_a_id=1, team_b_id=2,
+            format="bo1", stage="group", environment="lan", status="scheduled", resolution_status="resolved",
+            loser_next_match_id=target.id, loser_next_match_slot="team_a")
+        session.add(source); await session.flush(); demo.match_id=source.id; demo.map_number=1
+        await session.flush()
+        await MatchService(session).recalculate(source.id)
+        assert target.team_a_id == 1 and target.team_b_id is None
 
 
 async def test_split_demo_parts_count_as_one_logical_map(match_db) -> None:
@@ -218,3 +309,18 @@ async def test_match_api_contract(match_db, match_api) -> None:
     assert (await match_api.get("/api/v1/matches")).json()["total"] == 1
     stats = (await match_api.get("/api/v1/analysis/teams/1/matches")).json()
     assert stats["all"]["matches_won"] == 1 and stats["by_context"]["final"]["matches_played"] == 1
+
+
+async def test_global_match_list_hides_empty_bracket_placeholders(match_db, match_api) -> None:
+    async with match_db() as session:
+        tournament = Tournament(name="Bracket", year=DAY.year, environment="lan")
+        session.add(tournament)
+        await session.flush()
+        session.add(Match(
+            tournament_id=tournament.id, match_date=DAY,
+            team_a_id=None, team_b_id=None, format="bo3", stage="group",
+            environment="lan", status="scheduled", resolution_status="resolved",
+        ))
+        await session.commit()
+    payload = (await match_api.get("/api/v1/matches")).json()
+    assert payload == {"total": 0, "items": []}

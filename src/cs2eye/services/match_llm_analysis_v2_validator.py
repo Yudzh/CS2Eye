@@ -8,6 +8,7 @@ from cs2eye.api.schemas.match_llm_analysis_v2 import MatchLLMAnalysisV2
 NUMBER_RE = re.compile(r"(?<![\w:])[-+]?\d+(?:[.,]\d+)?\s*%?")
 CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 LATIN_WORD_RE = re.compile(r"\b[A-Za-z]{3,}\b")
+PLAN_LATIN_TOKEN_RE = re.compile(r"[A-Za-z]{3,}")
 MANUAL_RE = re.compile(r"аналитик|ручн\w+ замет", re.IGNORECASE)
 ALLOWED_PRODUCT_WORDS = {"cs2eye", "lan", "online"}
 
@@ -70,7 +71,13 @@ class MatchLLMAnalysisV2Validator:
                 codes.append("wrong_language")
             for token in NUMBER_RE.findall(text):
                 value = float(token.rstrip("%").strip().replace(",", "."))
-                if not any(abs(value - allowed) <= .005 for allowed in allowed_numbers):
+                normalized = token.rstrip("%").strip().replace(",", ".")
+                decimals = len(normalized.rsplit(".", 1)[1]) if "." in normalized else 0
+                rounding_tolerance = .5 * (10 ** -decimals) + 1e-9
+                if not any(
+                    abs(value - allowed) <= rounding_tolerance
+                    for allowed in allowed_numbers
+                ):
                     errors.append(f"new number is not allowed: {token}")
                     codes.append("new_number")
         favorite = plan.conclusion.favored_team
@@ -107,7 +114,13 @@ class MatchLLMAnalysisV2Validator:
         result = set()
         def walk(item):
             if isinstance(item, str):
-                result.update(word.casefold() for word in LATIN_WORD_RE.findall(item))
+                # Plan keys use snake_case (for example ``force_buy``), while the
+                # wording model naturally renders the same supplied term with a
+                # space. Underscores are word characters, so LATIN_WORD_RE cannot
+                # discover the individual allowed tokens in a snake_case value.
+                result.update(
+                    word.casefold() for word in PLAN_LATIN_TOKEN_RE.findall(item)
+                )
             elif isinstance(item, dict):
                 for child in item.values(): walk(child)
             elif isinstance(item, list):
@@ -123,6 +136,12 @@ class MatchLLMAnalysisV2Validator:
             if isinstance(item, (int, float)):
                 result.add(float(item))
                 if 0 <= item <= 1: result.add(float(item) * 100)
+            elif isinstance(item, str) and " " in item:
+                # Human-readable supplied names may legitimately contain a year or
+                # another number (for example a tournament or team name). Technical
+                # IDs and enum values contain no spaces and stay excluded.
+                for token in NUMBER_RE.findall(item):
+                    result.add(float(token.rstrip("%").strip().replace(",", ".")))
             elif isinstance(item, dict):
                 for child in item.values(): walk(child)
             elif isinstance(item, list):

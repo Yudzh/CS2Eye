@@ -11,23 +11,23 @@ from cs2eye.services.match_llm_analysis_rules import matchup_favorite
 
 PROMPT_VERSION = "match_analysis_prompt.v2"
 
-SYSTEM_PROMPT = """You are the analytical explanation layer of CS2Eye, a CS2 pre-match analytics system.
+SYSTEM_PROMPT = """Ты — слой аналитического объяснения CS2Eye, системы предматчевой аналитики CS2.
 
-MatchAnalysisContext is your only source. You may interpret supplied data; you may not create facts. Never use outside knowledge.
+MatchAnalysisContext — твой единственный источник. Ты можешь интерпретировать переданные данные, но не можешь создавать факты. Никогда не используй внешние знания.
 
-The ML prediction is immutable. Never reverse its favorite or estimate, adjust, or create a probability. You may quote an explicitly supplied probability with ordinary rounding. Never calculate new differences, averages, trends, percentages, probabilities, or other derived numerical values. If CS2Eye did not explicitly supply a value, describe the relationship qualitatively.
+ML-прогноз неизменяем. Не меняй его фаворита, не оценивай, не корректируй и не создавай вероятность. Разрешено привести явно переданную вероятность с обычным округлением. Никогда не рассчитывай новые разницы, средние значения, тенденции, проценты, вероятности или другие производные числа. Если CS2Eye явно не передал значение, опиши отношение качественно.
 
-Every concrete factual statement must be supported by evidence_refs. Do not attach unrelated evidence merely to satisfy the schema. Never mention a team, player, coach, map, result, score, or numerical value unless it exists in the referenced evidence. Use evidence types appropriate to the claim category. Keep ML, deterministic analytics, statistics, manual notes, and data quality distinct.
+Каждое конкретное фактическое утверждение должно подтверждаться evidence_refs. Не прикрепляй несвязанные доказательства только ради соответствия схеме. Не упоминай команду, игрока, тренера, карту, результат, счёт или число, если этого нет в указанном доказательстве. Используй тип доказательства, соответствующий категории тезиса. Разделяй ML, детерминированную аналитику, статистику, ручные заметки и качество данных.
 
-When relying only on a manual analyst note, explicitly describe it as analyst-provided context, not verified statistical fact. Account for reliability and sample size. Do not turn missing veto, map, roster, or H2H data into a claim.
+Если тезис основан только на ручной заметке аналитика, явно называй его контекстом от аналитика, а не проверенным статистическим фактом. Учитывай надёжность и размер выборки. Не превращай отсутствие данных о вето, карте, составе или H2H в аналитический тезис.
 
-If ML and Matchup favorites differ, include a contradiction referencing both "prediction" and "matchup". Weak data requires limited status and lower confidence. Insufficient data requires insufficient_data and no favorite. Summary may only synthesize the conclusion and already-grounded claims, contradictions, risks, and limitations; it must add no number, entity, probability, result, or other fact.
+Если фавориты ML и Matchup Score различаются, добавь противоречие со ссылками одновременно на "prediction" и "matchup". Слабые данные требуют статуса limited и пониженной уверенности. Недостаточные данные требуют insufficient_data и отсутствия фаворита. Итог может только обобщать заключение и уже подтверждённые тезисы, противоречия, риски и ограничения; он не должен добавлять числа, сущности, вероятности, результаты или другие факты.
 
-Do not provide betting advice, bookmaker value, or stake sizing. Do not use tools. Return only MatchLLMAnalysis v1 structured data."""
+Не давай советов по ставкам, не оценивай выгоду коэффициентов и размер ставки. Не используй инструменты. Верни только структурированные данные MatchLLMAnalysis v1."""
 
 LANGUAGE_INSTRUCTIONS = {
     "ru": "Напиши ВСЕ человекочитаемые поля только на русском. Ключи JSON и enum не переводи.",
-    "en": "Write ALL human-readable fields only in English. Keep JSON keys and enum values unchanged.",
+    "en": "Напиши ВСЕ человекочитаемые поля только на английском. Ключи JSON и значения enum не переводи.",
 }
 
 
@@ -61,35 +61,35 @@ def build_user_input(
         and deterministic_favorite != favorite
     )
     invariants = (
-        f"\nMandatory backend invariants for this exact context:\n"
-        f"- conclusion.favored_team MUST be {favorite}.\n"
-        f"- analysis_status MUST be "
+        f"\nОбязательные backend-инварианты для этого контекста:\n"
+        f"- conclusion.favored_team ОБЯЗАН иметь значение {favorite}.\n"
+        f"- analysis_status ОБЯЗАН иметь значение "
         f"{'limited' if context.data_quality.overall_status == 'weak' else 'insufficient_data' if context.data_quality.overall_status == 'insufficient' else 'complete or limited'}."
     )
     if matchup_conflict:
         invariants += (
-            "\n- ML and Matchup favor opposite teams. contradictions MUST contain an "
-            "item whose evidence_refs include BOTH prediction and matchup."
+            "\n- ML и Matchup Score отдают преимущество разным командам. contradictions "
+            "ОБЯЗАН содержать пункт, где evidence_refs одновременно включает prediction и matchup."
         )
     if repair_errors:
         instruction = (
-            "Your previous analysis contains specific invalid or unsupported fields.\n\n- "
+            "Предыдущий анализ содержит конкретные некорректные или неподтверждённые поля.\n\n- "
             + "\n- ".join(repair_errors)
-            + "\n\nRepair the previous analysis in place. Preserve every claim, "
-              "counter-argument, risk, limitation, and contradiction that is not named "
-              "by an error. For each invalid item, correct its text or evidence_refs "
-              "using MatchAnalysisContext; remove only that item if it cannot be "
-              "supported. Keep the explanation detailed and useful. Rebuild the "
-              "summary from the repaired grounded items. Do not introduce new facts."
+            + "\n\nИсправь предыдущий анализ на месте. Сохрани каждый тезис, контраргумент, "
+              "риск, ограничение и противоречие, не названные в ошибках. Для каждого "
+              "некорректного пункта исправь текст или evidence_refs по MatchAnalysisContext; "
+              "удаляй пункт только тогда, когда его невозможно подтвердить. Сохрани "
+              "объяснение подробным и полезным. Пересобери итог из исправленных "
+              "подтверждённых пунктов. Не добавляй новые факты."
         )
     else:
-        instruction = "Analyze MatchAnalysisContext according to the system instructions."
+        instruction = "Проанализируй MatchAnalysisContext по системным инструкциям."
     context_json = json.dumps(
         context.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"),
     )
     allowlist = ""
     if allowed_evidence_refs is not None:
-        allowlist = "\nUse evidence_refs only from this allowlist: " + json.dumps(
+        allowlist = "\nИспользуй evidence_refs только из этого разрешённого списка: " + json.dumps(
             sorted(allowed_evidence_refs), ensure_ascii=False,
         )
         registry = MatchLLMGroundingValidator.build_evidence_registry(context)
@@ -101,12 +101,12 @@ def build_user_input(
             for category, evidence_types in CATEGORY_TYPES.items()
         }
         allowlist += (
-            "\nEvidence refs allowed for each claim/risk category (use only the list "
-            "for the selected category): "
+            "\nРазрешённые evidence_refs для каждой категории тезиса или риска "
+            "(используй только список выбранной категории): "
             + json.dumps(compatibility, ensure_ascii=False, separators=(",", ":"))
-            + '\nEvery data_limitation must use only evidence_refs ["data_quality"].'
+            + '\nКаждый data_limitation должен использовать только evidence_refs ["data_quality"].'
         )
     previous = ""
     if previous_analysis is not None:
-        previous = "\nPrevious MatchLLMAnalysis: " + previous_analysis.model_dump_json()
+        previous = "\nПредыдущий MatchLLMAnalysis: " + previous_analysis.model_dump_json()
     return f"{instruction}{invariants}\n{LANGUAGE_INSTRUCTIONS[language]}{allowlist}{previous}\n{context_json}"

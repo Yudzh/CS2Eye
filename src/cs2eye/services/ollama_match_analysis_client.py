@@ -7,8 +7,10 @@ from pydantic import ValidationError
 
 from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
 from cs2eye.api.schemas.match_explanation_plan import MatchExplanationPlan
+from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
 from cs2eye.api.schemas.match_llm_analysis import MatchLLMAnalysis
 from cs2eye.api.schemas.match_llm_analysis_v2 import MatchLLMAnalysisV2
+from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
 from cs2eye.prompts.match_analysis_v2 import build_system_prompt, build_user_input
 from cs2eye.prompts.match_analysis_registry import get_plan_prompt
 from cs2eye.services.match_llm_analysis_validator import MatchLLMAnalysisValidator
@@ -30,7 +32,7 @@ class MatchAnalysisInvalidResponseError(RuntimeError):
 
 @dataclass(frozen=True)
 class MatchAnalysisProviderResult:
-    analysis: MatchLLMAnalysis | MatchLLMAnalysisV2
+    analysis: MatchLLMAnalysis | MatchLLMAnalysisV2 | MatchLLMAnalysisV3
     response_id: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -62,7 +64,7 @@ class OllamaMatchAnalysisClient:
         model: str,
         timeout_seconds: float,
         think: bool = True,
-        prompt_version: str = "match_analysis_prompt.v3",
+        prompt_version: str = "match_analysis_prompt.v5",
     ) -> None:
         self.model = model
         self.think = think
@@ -164,6 +166,45 @@ class OllamaMatchAnalysisClient:
             analysis=parsed, input_tokens=response.prompt_eval_count,
             output_tokens=response.eval_count,
         )
+
+    async def generate_fixed_plan(
+        self, plan: MatchExplanationPlanV2, *, repair_errors: tuple[str, ...] = (),
+        previous_analysis: MatchLLMAnalysisV3 | None = None,
+    ) -> MatchAnalysisProviderResult:
+        system_prompt, user_input = get_plan_prompt(self.prompt_version)
+        try:
+            response = await self._client.chat(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt()},
+                    {"role": "user", "content": user_input(plan, repair_errors, previous_analysis)},
+                ],
+                format=self._fixed_plan_output_schema(),
+                options={"temperature": 0}, think=self.think, tools=[],
+            )
+        except httpx.TimeoutException as error:
+            raise MatchAnalysisProviderTimeoutError("Ollama request timed out") from error
+        except ConnectionError as error:
+            raise MatchAnalysisProviderError("unavailable") from error
+        except (RequestError, ResponseError) as error:
+            raise MatchAnalysisProviderError("provider_error") from error
+        try:
+            parsed = MatchLLMAnalysisV3.model_validate_json(response.message.content)
+        except (ValidationError, ValueError, TypeError) as error:
+            raise MatchAnalysisInvalidResponseError("Ollama did not return a valid MatchLLMAnalysis v3") from error
+        return MatchAnalysisProviderResult(
+            analysis=parsed, input_tokens=response.prompt_eval_count,
+            output_tokens=response.eval_count,
+        )
+
+    @staticmethod
+    def _fixed_plan_output_schema() -> dict:
+        """Require new-run fields while the Pydantic model reads old snapshots."""
+        schema = MatchLLMAnalysisV3.model_json_schema()
+        required = schema.setdefault("required", [])
+        if "expected_winner_text" not in required:
+            required.insert(0, "expected_winner_text")
+        return schema
 
     @staticmethod
     def _plan_output_schema(plan: MatchExplanationPlan) -> dict:

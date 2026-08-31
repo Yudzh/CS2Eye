@@ -13,7 +13,7 @@ from cs2eye.api.schemas.analysis import (
     LegacyCurrentRosterComparisonResponse, TeamH2HComparisonResponse,
     TeamMapComparisonResponse, TeamMapDetailResponse, TeamMapsResponse,
 )
-from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
+from cs2eye.api.schemas.match_analysis_context import HEKillByMapPrediction, MatchAnalysisContext
 from cs2eye.api.schemas.match_llm_runtime import (
     MatchLLMHistoryItem,
     MatchLLMAnalysisRequest,
@@ -27,6 +27,7 @@ from cs2eye.models.demo import (
     TeamMapAggregate,
 )
 from cs2eye.models.demo_file import DemoFile
+from cs2eye.models.match import Match
 from cs2eye.models.team import Player, Team, TeamRosterMember
 from cs2eye.services.team_map_aggregate_service import (
     freshness_label, recalculate_team_map, sample_size_label,
@@ -42,6 +43,9 @@ from cs2eye.services.calculated_veto_service import CalculatedVetoService
 from cs2eye.services.leadership_service import LeadershipService
 from cs2eye.services.matchup_service import MatchupService
 from cs2eye.services.match_analysis_context_builder import MatchAnalysisContextBuilder
+from cs2eye.services.he_kill_by_map_service import HEKillByMapService
+from cs2eye.services.he_kill_backtest_service import HEKillBacktestService
+from cs2eye.services.betting_restriction_service import resolve_betting_restrictions
 from cs2eye.services.match_llm_analysis_service import (
     MatchLLMAnalysisService,
     MatchLLMServiceError,
@@ -89,18 +93,65 @@ async def match_analysis_context(
     as_of: datetime,
     match_id: int | None = None,
     tournament_id: int | None = None,
+    match_format: str | None = Query(None, pattern="^(bo1|bo3|bo5)$"),
     analysis_mode: str = Query("pre_match", pattern="^(pre_match|post_match)$"),
     session: AsyncSession = Depends(get_db_session),
 ) -> MatchAnalysisContext:
     try:
         return await MatchAnalysisContextBuilder(session).build(
             team_a_id, team_b_id, as_of=as_of, match_id=match_id,
-            tournament_id=tournament_id, analysis_mode=analysis_mode,
+            tournament_id=tournament_id, match_format=match_format,
+            analysis_mode=analysis_mode,
         )
     except LookupError as error:
         raise HTTPException(404, str(error)) from error
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
+
+
+@router.get("/he-kill-by-map", response_model=list[HEKillByMapPrediction])
+async def he_kill_by_map(
+    team_a_id: int,
+    team_b_id: int,
+    as_of: datetime,
+    match_id: int | None = None,
+    session: AsyncSession = Depends(get_db_session),
+) -> list[dict]:
+    if team_a_id == team_b_id:
+        raise HTTPException(422, "Нужны две разные команды.")
+    teams = set((await session.scalars(
+        select(Team.id).where(Team.id.in_((team_a_id, team_b_id)))
+    )).all())
+    if teams != {team_a_id, team_b_id}:
+        raise HTTPException(404, "Команда не найдена.")
+    return await HEKillByMapService(session).calculate(
+        team_a_id, team_b_id, as_of=as_of, exclude_match_id=match_id,
+    )
+
+
+@router.get("/he-kill-by-map/backtest")
+async def he_kill_by_map_backtest(
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    return await HEKillBacktestService(session).run()
+
+
+@router.get("/betting-restrictions")
+async def betting_restrictions(
+    team_a_id: int, team_b_id: int, match_id: int | None = None,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    is_playoff = None
+    if match_id is not None:
+        match = await session.get(Match, match_id)
+        if match is None:
+            raise HTTPException(404, "Match not found")
+        if {match.team_a_id, match.team_b_id} != {team_a_id, team_b_id}:
+            raise HTTPException(422, "Match teams do not match requested teams")
+        is_playoff = match.is_playoff
+    return await resolve_betting_restrictions(
+        session, (team_a_id, team_b_id), is_playoff=is_playoff,
+    )
 
 
 @router.post("/llm-match-analysis", response_model=MatchLLMAnalysisResponse)
@@ -122,6 +173,7 @@ async def llm_match_analysis(
             as_of=body.as_of,
             match_id=body.match_id,
             tournament_id=body.tournament_id,
+            match_format=body.match_format,
             analysis_mode=body.analysis_mode,
             language=body.language,
         )
@@ -188,6 +240,7 @@ async def generate_llm_match_analysis(
         return await service.generate(
             body.team_a_id, body.team_b_id, as_of=body.as_of,
             match_id=body.match_id, tournament_id=body.tournament_id,
+            match_format=body.match_format,
             analysis_mode=body.analysis_mode, language=body.language,
         )
     except LookupError as error:

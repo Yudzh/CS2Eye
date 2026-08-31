@@ -22,6 +22,8 @@ from cs2eye.models.team import (
 from cs2eye.services.analyst_context_service import AnalystContextService
 from cs2eye.services.calculated_veto_service import CalculatedVetoService
 from cs2eye.services.form_context_service import FormContextService
+from cs2eye.services.he_kill_by_map_service import HEKillByMapService
+from cs2eye.services.betting_restriction_service import betting_restrictions_for_teams
 from cs2eye.services.leadership_service import LeadershipService
 from cs2eye.services.matchup_service import MatchupService
 from cs2eye.services.team_comparison_service import TeamComparisonService
@@ -87,6 +89,7 @@ class MatchAnalysisContextBuilder:
         as_of: datetime,
         match_id: int | None = None,
         tournament_id: int | None = None,
+        match_format: str | None = None,
         analysis_mode: str = "pre_match",
     ) -> MatchAnalysisContext:
         if team_a_id == team_b_id:
@@ -109,7 +112,12 @@ class MatchAnalysisContextBuilder:
             team_a_id, team_b_id, match_id, tournament_id,
         )
         effective_tournament_id = match.tournament_id if match else tournament_id
-        match_format = match.format if match and match.format in {"bo1", "bo3", "bo5"} else None
+        stored_match_format = match.format if match and match.format in {"bo1", "bo3", "bo5"} else None
+        if match_format is not None and match_format not in {"bo1", "bo3", "bo5"}:
+            raise ValueError("match_format must be bo1, bo3 or bo5")
+        if stored_match_format and match_format and stored_match_format != match_format:
+            raise ValueError("match_format не совпадает с форматом матча.")
+        match_format = stored_match_format or match_format
         match_environment = match.environment if match and match.environment in {"lan", "online"} else None
         service_mode = "post_veto" if analysis_mode == "post_match" else "pre_veto"
 
@@ -210,6 +218,10 @@ class MatchAnalysisContextBuilder:
         if historical:
             warnings.append("Current-roster H2H is unavailable for historical reconstruction.")
 
+        he_kill_by_map = await HEKillByMapService(self.session).calculate(
+            team_a_id, team_b_id, as_of=as_of, exclude_match_id=match_id,
+        )
+
         relevant_maps = [item["map"] for item in likely_maps]
         manual = {
             "source_type": "manual_analyst_note",
@@ -243,7 +255,7 @@ class MatchAnalysisContextBuilder:
             "generated_at": datetime.now(UTC),
             "as_of": as_of,
             "analysis_mode": analysis_mode,
-            "match": self._match_context(match, tournament),
+            "match": self._match_context(match, tournament, match_format),
             "teams": team_contexts,
             "recent_series_evidence": {"team_a": evidence_a, "team_b": evidence_b},
             "prediction": prediction,
@@ -252,6 +264,10 @@ class MatchAnalysisContextBuilder:
             "map_matchups": map_matchups,
             "h2h": h2h_context,
             "manual_context": manual,
+            "secondary_bets": {"he_kill_by_map": he_kill_by_map},
+            "betting_restrictions": betting_restrictions_for_teams(
+                teams, is_playoff=match.is_playoff if match else None,
+            ),
             "data_quality": data_quality,
         })
 
@@ -273,11 +289,14 @@ class MatchAnalysisContextBuilder:
         return match, tournament
 
     @staticmethod
-    def _match_context(match: Match | None, tournament: Tournament | None) -> dict:
+    def _match_context(
+        match: Match | None, tournament: Tournament | None,
+        effective_format: str | None = None,
+    ) -> dict:
         return {
             "id": match.id if match else None,
             "date": match.match_date if match else None,
-            "format": match.format if match and match.format in {"bo1", "bo3", "bo5"} else None,
+            "format": effective_format,
             "environment": match.environment if match and match.environment in {"lan", "online"} else None,
             "stage": match.stage if match and match.stage != "unknown" else None,
             "is_playoff": match.is_playoff if match else None,
@@ -348,7 +367,7 @@ class MatchAnalysisContextBuilder:
             return {
                 "source_type": "deterministic_analytics", "model_version": None,
                 "team_a_score": None, "team_b_score": None,
-                "reliability": None, "factors": [],
+                "reliability": None, "confidence_level": None, "factors": [],
             }
         factors = []
         for item in payload.get("factors", []):
@@ -367,6 +386,7 @@ class MatchAnalysisContextBuilder:
             "team_a_score": (payload.get("team_a") or {}).get("score"),
             "team_b_score": (payload.get("team_b") or {}).get("score"),
             "reliability": payload.get("reliability"),
+            "confidence_level": payload.get("confidence_level"),
             "factors": factors,
         }
 

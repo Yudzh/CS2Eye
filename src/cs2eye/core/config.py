@@ -27,13 +27,18 @@ class Settings(BaseSettings):
     demo_delete_after_successful_parse: bool = False
     demo_parse_concurrency: int = 4
     max_ranking_snapshot_age_days: int = 14
+    prediction_history_strong_conflict_threshold: float = Field(default=10.0, ge=0)
     ollama_host: str = Field(default="http://127.0.0.1:11434", min_length=1)
     match_llm_provider: str = Field(default="ollama", min_length=1)
     match_llm_model: str = Field(default="qwen3:8b", min_length=1)
-    match_llm_prompt_version: str = Field(default="match_analysis_prompt.v3", min_length=1)
+    match_llm_prompt_version: str = Field(default="match_analysis_prompt.v5", min_length=1)
     match_llm_enabled: bool = False
     match_llm_timeout_seconds: float = Field(default=60.0, gt=0)
     match_llm_think: bool = False
+    telegram_bot_token: str = ""
+    cs2eye_api_base_url: str = "http://127.0.0.1:8000"
+    cs2eye_api_timeout_seconds: float = Field(default=15.0, gt=0)
+    cs2eye_api_generation_timeout_seconds: float = Field(default=330.0, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",

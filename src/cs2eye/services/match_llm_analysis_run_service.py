@@ -1,9 +1,12 @@
+from copy import deepcopy
 from datetime import datetime
 
 from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
 from cs2eye.api.schemas.match_llm_analysis import MatchLLMAnalysis
 from cs2eye.api.schemas.match_explanation_plan import MatchExplanationPlan
+from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
 from cs2eye.api.schemas.match_llm_analysis_v2 import MatchLLMAnalysisV2
+from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
 from cs2eye.api.schemas.match_llm_runtime import (
     MatchLLMAnalysisResponse,
     MatchLLMHistoryItem,
@@ -26,12 +29,14 @@ class MatchLLMAnalysisRunService:
     async def generate(
         self, team_a_id: int, team_b_id: int, *, as_of: datetime,
         match_id: int | None = None, tournament_id: int | None = None,
+        match_format: str | None = None,
         analysis_mode: str = "pre_match", language: str = "ru",
         source_run_id: int | None = None,
     ) -> MatchLLMStoredAnalysisResponse:
         context = await self.analysis_service.builder.build(
             team_a_id, team_b_id, as_of=as_of, match_id=match_id,
-            tournament_id=tournament_id, analysis_mode=analysis_mode,
+            tournament_id=tournament_id, match_format=match_format,
+            analysis_mode=analysis_mode,
         )
         return await self.generate_context(
             context, team_a_id=team_a_id, team_b_id=team_b_id, as_of=as_of,
@@ -43,7 +48,7 @@ class MatchLLMAnalysisRunService:
         self, context: MatchAnalysisContext, *, team_a_id: int, team_b_id: int,
         as_of: datetime, match_id: int | None, tournament_id: int | None,
         analysis_mode: str, language: str, source_run_id: int | None = None,
-        explanation_plan: MatchExplanationPlan | None = None,
+        explanation_plan: MatchExplanationPlan | MatchExplanationPlanV2 | None = None,
     ) -> MatchLLMStoredAnalysisResponse:
         plan = explanation_plan or self.analysis_service.explanation_builder.build(context)
         run = await self.repository.create_run(
@@ -76,7 +81,13 @@ class MatchLLMAnalysisRunService:
             if source.explanation_plan_snapshot is None:
                 raise ValueError("Source run has no stored explanation plan")
             context = MatchAnalysisContext.model_validate(source.context_snapshot)
-            plan = MatchExplanationPlan.model_validate(source.explanation_plan_snapshot)
+            plan = (
+                MatchExplanationPlanV2.model_validate(_compatible_v2_plan_snapshot(
+                    source.explanation_plan_snapshot, source.context_snapshot,
+                ))
+                if source.explanation_plan_schema_version == "match_explanation_plan.v2"
+                else MatchExplanationPlan.model_validate(source.explanation_plan_snapshot)
+            )
             return await self.generate_context(
                 context, team_a_id=source.team_a_id, team_b_id=source.team_b_id,
                 as_of=source.as_of, match_id=source.match_id,
@@ -115,12 +126,21 @@ class MatchLLMAnalysisRunService:
             repair_attempted=run.repair_attempted,
             grounding_error_codes=run.grounding_error_codes or [],
         )
-        plan = (MatchExplanationPlan.model_validate(run.explanation_plan_snapshot)
-                if run.explanation_plan_snapshot is not None else None)
+        plan = None
+        if run.explanation_plan_snapshot is not None:
+            plan = (
+                MatchExplanationPlanV2.model_validate(_compatible_v2_plan_snapshot(
+                    run.explanation_plan_snapshot, run.context_snapshot,
+                ))
+                if run.explanation_plan_schema_version == "match_explanation_plan.v2"
+                else MatchExplanationPlan.model_validate(run.explanation_plan_snapshot)
+            )
         analysis = None
         if run.analysis_snapshot is not None:
             analysis = (
-                MatchLLMAnalysisV2.model_validate(run.analysis_snapshot)
+                MatchLLMAnalysisV3.model_validate(run.analysis_snapshot)
+                if run.analysis_schema_version == "match_llm_analysis.v3"
+                else MatchLLMAnalysisV2.model_validate(run.analysis_snapshot)
                 if run.analysis_schema_version == "match_llm_analysis.v2"
                 else MatchLLMAnalysis.model_validate(run.analysis_snapshot)
             )
@@ -153,3 +173,37 @@ class MatchLLMAnalysisRunService:
             favored_team=conclusion.get("favored_team"),
             confidence=conclusion.get("confidence"),
         )
+
+
+def _compatible_v2_plan_snapshot(
+    snapshot: dict, context_snapshot: dict,
+) -> dict:
+    """Hydrate display names absent from early v2 snapshots.
+
+    The first persisted v2 plans stored stable team sides but not their display
+    names. Adding the names at read time keeps those immutable DB snapshots
+    readable without changing analytics or regenerating an analysis.
+    """
+    plan = deepcopy(snapshot)
+    teams = context_snapshot.get("teams") or {}
+    names = {
+        side: str((teams.get(side) or {}).get("name") or side)
+        for side in ("team_a", "team_b")
+    }
+
+    def add_name(item: dict, side_key: str, name_key: str) -> None:
+        if name_key not in item:
+            side = item.get(side_key)
+            item[name_key] = names.get(side) if side in names else None
+
+    conclusion = plan.get("conclusion") or {}
+    add_name(conclusion, "favored_team", "favored_team_name")
+    comparison = ((plan.get("form") or {}).get("comparison") or {})
+    add_name(comparison, "favored_team", "favored_team_name")
+    for edge in (plan.get("maps") or {}).get("key_map_edges") or []:
+        add_name(edge, "favored_team", "favored_team_name")
+        for reason in edge.get("reasons") or []:
+            add_name(reason, "side", "side_name")
+    for signal in (plan.get("teamplay") or {}).get("signals") or []:
+        add_name(signal, "side", "side_name")
+    return plan

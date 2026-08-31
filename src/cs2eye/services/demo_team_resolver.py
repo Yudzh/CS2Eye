@@ -9,6 +9,8 @@ from cs2eye.models.team import Team
 
 
 TEAM_NAME_ALIASES = {
+    "navi": "natus vincere",
+    "natus vincer": "natus vincere",
     "team vitality": "vitality",
     "mongolz": "the mongolz",
     "100t": "100 thieves",

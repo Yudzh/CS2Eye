@@ -107,6 +107,7 @@ def full_context_payload() -> dict:
             "team_a_score": 55.0,
             "team_b_score": 45.0,
             "reliability": 0.82,
+            "confidence_level": "high",
             "factors": [{
                 "factor_id": "matchup:form",
                 "key": "form_context",
@@ -282,6 +283,7 @@ def nullable_context_payload() -> dict:
             "team_a_score": None,
             "team_b_score": None,
             "reliability": None,
+            "confidence_level": None,
             "factors": [],
         },
         "veto": {
@@ -311,6 +313,7 @@ def test_full_match_analysis_context_is_valid() -> None:
     context = MatchAnalysisContext.model_validate(full_context_payload())
     assert context.schema_version == "match_analysis_context.v1"
     assert context.prediction.team_a_probability == 0.58
+    assert context.matchup.confidence_level == "high"
     assert context.h2h.organizations.series_played == 5
 
 
@@ -324,6 +327,7 @@ def test_nullable_match_analysis_context_is_valid_and_preserves_real_zeroes() ->
     context = MatchAnalysisContext.model_validate(nullable_context_payload())
     assert context.match.id is None
     assert context.teams.team_a.roster.sample_maps == 0
+    assert context.matchup.confidence_level is None
     assert context.h2h.organizations.series_played == 0
 
 
@@ -353,9 +357,17 @@ def test_sample_size_must_not_be_negative() -> None:
         MatchAnalysisContext.model_validate(payload)
 
 
+def test_matchup_context_forbids_extra_fields() -> None:
+    payload = full_context_payload()
+    payload["matchup"]["unexpected"] = True
+    with pytest.raises(ValidationError):
+        MatchAnalysisContext.model_validate(payload)
+
+
 @pytest.mark.parametrize(("path", "invalid_value"), [
     (("analysis_mode",), "live"),
     (("prediction", "status"), "ready"),
+    (("matchup", "confidence_level"), "very_high"),
     (("map_matchups", 0, "key_edges", 0, "strength"), "strong"),
     (("h2h", "history_applicability"), "unknown"),
     (("manual_context", "team_a", 0, "polarity"), "upside"),

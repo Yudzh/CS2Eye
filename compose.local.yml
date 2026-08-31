@@ -79,7 +79,7 @@ services:
       - ./src:/app/src
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini:ro
-      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD24/demos}:/app/storage
+      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD26/demos}:/app/storage
     depends_on:
       db:
         condition: service_healthy
@@ -122,6 +122,25 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      CS2EYE_API_BASE_URL: ${CS2EYE_API_BASE_URL:-http://127.0.0.1:8000}
+      CS2EYE_API_TIMEOUT_SECONDS: ${CS2EYE_API_TIMEOUT_SECONDS:-15}
+      CS2EYE_API_GENERATION_TIMEOUT_SECONDS: ${CS2EYE_API_GENERATION_TIMEOUT_SECONDS:-330}
+    volumes:
+      - ./src:/app/src
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["python", "-m", "cs2eye.bot.main"]
 
   pgadmin:
     image: dpage/pgadmin4:latest

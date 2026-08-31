@@ -94,6 +94,17 @@ def test_unreliable_and_tiny_map_signals_are_excluded():
                    for item in (*plan.advantages, *plan.counter_arguments))
 
 
+def test_missing_optional_leadership_reliability_does_not_break_plan():
+    def mutate(payload):
+        payload["teams"]["team_b"]["leadership"]["reliability"] = None
+
+    plan = DeterministicMatchExplanationBuilder().build(source(mutate))
+    assert not any(
+        item.category == "leadership"
+        for item in (*plan.advantages, *plan.counter_arguments)
+    )
+
+
 def test_reliable_factor_is_classified_relative_to_ml_favorite():
     plan = DeterministicMatchExplanationBuilder().build(source())
     assert all(item.side == plan.conclusion.favored_team for item in plan.advantages)
@@ -214,6 +225,19 @@ def test_v2_is_text_only_and_rejects_unknown_or_missing_ids_and_numbers():
     numbered = valid.model_copy(update={"summary": "Вероятность составляет 99 процентов."})
     with pytest.raises(MatchLLMV2ValidationError, match="new number"):
         validator.validate(plan, numbered)
+    rounded = valid.model_copy(update={
+        "summary": "Вероятность фаворита по модели составляет 58,1%.",
+    })
+    validator.validate(plan, rounded)
+    tournament_plan = plan.model_copy(update={
+        "supporting_context": plan.supporting_context.model_copy(update={
+            "tournament": "BLAST Open Porto 2026",
+        }),
+    })
+    tournament_text = valid.model_copy(update={
+        "summary": "Матч проходит в рамках BLAST Open Porto 2026.",
+    })
+    validator.validate(tournament_plan, tournament_text)
     entity = valid.model_copy(update={"summary": "Фаворитом считается Vitality."})
     with pytest.raises(MatchLLMV2ValidationError, match="English prose"):
         validator.validate(plan, entity)
@@ -236,6 +260,25 @@ def test_v3_prompt_receives_plan_not_raw_context_and_versions_remain_available()
     )
 
 
+def test_v3_language_repair_explicitly_requires_all_text_in_russian():
+    plan = DeterministicMatchExplanationBuilder().build(aurora_g2())
+    prompt = build_user_input(
+        plan,
+        repair_errors=(
+            "human-readable text must be Russian",
+            "English prose is not allowed: unsupported words ['the', 'team']",
+        ),
+        previous_analysis=wording(plan),
+    )
+
+    assert "полностью перепиши summary и все значения в секциях *_texts" in prompt
+    assert "Каждое текстовое поле должно содержать осмысленное предложение кириллицей" in prompt
+    assert "Текст должен быть на русском языке; английская проза запрещена." in prompt
+    assert "['the', 'team']" in prompt
+    assert "human-readable text must be Russian" not in prompt
+    assert "Предыдущий ответ:" in prompt
+
+
 def test_v3_output_schema_allows_only_plan_ids_and_requires_high_items():
     plan = DeterministicMatchExplanationBuilder().build(aurora_g2())
     schema = OllamaMatchAnalysisClient._plan_output_schema(plan)
@@ -245,3 +288,15 @@ def test_v3_output_schema_allows_only_plan_ids_and_requires_high_items():
     assert set(advantage["required"]) == {
         item.signal_id for item in plan.advantages if item.importance == "high"
     }
+
+
+def test_v3_validator_allows_snake_case_plan_terms_rendered_with_spaces():
+    plan = DeterministicMatchExplanationBuilder().build(aurora_g2())
+    valid = wording(plan)
+    advantage = plan.advantages[0]
+    advantage.facts[0].values["metric"] = "force_buy"
+    valid.advantage_texts[advantage.signal_id] = (
+        "G2 имеет преимущество в фазе force buy."
+    )
+
+    MatchLLMAnalysisV2Validator().validate(plan, valid)

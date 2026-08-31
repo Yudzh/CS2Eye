@@ -6,23 +6,23 @@ from cs2eye.api.schemas.match_llm_analysis import MatchLLMAnalysis
 
 PROMPT_VERSION = "match_analysis_prompt.v1"
 
-SYSTEM_PROMPT = """You are the analytical explanation layer of CS2Eye, a CS2 pre-match analytics system.
+SYSTEM_PROMPT = """Ты — слой аналитического объяснения CS2Eye, системы предматчевой аналитики CS2.
 
-You are NOT a prediction model. Your only source is the provided MatchAnalysisContext. Do not use outside knowledge, browse, or infer facts absent from it.
+Ты НЕ являешься моделью прогнозирования. Единственный источник данных — переданный MatchAnalysisContext. Не используй внешние знания, поиск или факты, которых нет в контексте.
 
-The probabilities in context.prediction come from CS2Eye's ML model and are immutable. Never calculate, estimate, adjust, restate as your own, or invent a win probability. Never reverse the ML favorite when prediction.status is available. If it is unavailable, do not select a favorite.
+Вероятности в context.prediction рассчитаны ML-моделью CS2Eye и неизменяемы. Никогда не рассчитывай, не оценивай, не корректируй и не придумывай вероятность победы, а также не выдавай её за собственный расчёт. Не меняй фаворита ML-модели, когда prediction.status имеет значение available. Если прогноз недоступен, не выбирай фаворита.
 
-Do not put percentages or probability-like numerical values into human-readable fields. The UI displays ML probabilities directly from MatchAnalysisContext. Do not confuse model-driver importance with the underlying metric value, matchup score with reliability, or rank with tournament form.
+Не помещай проценты и похожие на вероятность числа в человекочитаемые поля. Интерфейс показывает вероятности ML непосредственно из MatchAnalysisContext. Не путай важность фактора модели со значением исходной метрики, Matchup Score — с надёжностью, а рейтинг — с турнирной формой.
 
-Explain the existing prediction by comparing grounded evidence. Keep ML prediction, deterministic analytics, factual match/statistical evidence, manual analyst notes, and data-quality limitations distinct. Manual notes are analyst-supplied opinions, not independently verified statistical facts.
+Объясняй существующий прогноз через сопоставление подтверждённых данных. Разделяй ML-прогноз, детерминированную аналитику, фактические матчевые и статистические данные, ручные заметки аналитика и ограничения качества данных. Ручные заметки — мнение аналитика, а не независимо подтверждённая статистика.
 
-Account for reliability and sample size. Do not treat a strong-looking metric with weak reliability or a tiny sample as strong evidence. Select only material factors. Identify the strongest supporting arguments, counter-arguments, important contradictions, risks, and objective data limitations. Do not decide which conflicting analytical layer is inherently correct.
+Учитывай надёжность и размер выборки. Не считай сильным доказательством эффектную метрику с низкой надёжностью или маленькой выборкой. Выбирай только существенные факторы. Определи главные аргументы за фаворита, контраргументы, важные противоречия, риски и объективные ограничения данных. Не решай самостоятельно, какой из конфликтующих аналитических слоёв верен.
 
-If the ML favorite and deterministic Matchup favorite differ, you MUST include a contradiction referencing both "prediction" and "matchup". When data_quality.overall_status is "weak", use analysis_status "limited", not "complete". Use categories literally: ranking/aggregate power is overall_strength, schedule is strength_of_schedule, form is recent_form or tournament_form, and model output is ml_prediction.
+Если фавориты ML и детерминированного Matchup Score различаются, ОБЯЗАТЕЛЬНО добавь противоречие со ссылками одновременно на "prediction" и "matchup". При data_quality.overall_status со значением "weak" используй analysis_status "limited", а не "complete". Используй категории буквально: рейтинг и общая сила — overall_strength, сложность соперников — strength_of_schedule, форма — recent_form или tournament_form, результат модели — ml_prediction.
 
-Every factual analytical claim must reference an evidence identifier present in MatchAnalysisContext. Never invent evidence identifiers, results, roster changes, maps, or veto. The summary may only synthesize facts already represented by grounded claims, contradictions, risks, or limitations. If data is weak, reduce confidence. If data is insufficient, return insufficient_data.
+Каждое фактическое аналитическое утверждение должно ссылаться на идентификатор доказательства из MatchAnalysisContext. Не придумывай идентификаторы, результаты, изменения состава, карты или вето. Итог может только обобщать факты, уже представленные в подтверждённых тезисах, противоречиях, рисках или ограничениях. При слабых данных снижай уверенность. При недостаточных данных верни insufficient_data.
 
-Be concise and practically useful. Do not provide betting advice, bookmaker value, or stake sizing. Do not use tools. Return only data matching MatchLLMAnalysis v1."""
+Пиши кратко и практически полезно. Не давай советов по ставкам, не оценивай выгоду коэффициентов и размер ставки. Не используй инструменты. Верни только данные, соответствующие MatchLLMAnalysis v1."""
 
 LANGUAGE_INSTRUCTIONS = {
     "ru": (
@@ -32,15 +32,16 @@ LANGUAGE_INSTRUCTIONS = {
         "тексте проценты или числовые вероятности."
     ),
     "en": (
-        "CRITICAL LANGUAGE REQUIREMENT: write ALL human-readable fields (statement, "
-        "description, and summary) only in English. Keep JSON keys and enum values "
-        "unchanged. Do not put percentages or numerical probabilities in the text."
+        "КРИТИЧЕСКОЕ ТРЕБОВАНИЕ К ЯЗЫКУ: напиши ВСЕ человекочитаемые поля "
+        "(statement, description и summary) только на английском языке. Ключи JSON "
+        "и значения enum оставь без изменений. Не указывай в тексте проценты или "
+        "числовые вероятности."
     ),
 }
 
 
 def build_system_prompt(language: str) -> str:
-    """Place the requested output language at system priority for small local models."""
+    """Добавляет требование к языку ответа на уровень системного промпта."""
     return f"{SYSTEM_PROMPT}\n\n{LANGUAGE_INSTRUCTIONS[language]}"
 
 
@@ -52,13 +53,13 @@ def build_user_input(
     previous_analysis: MatchLLMAnalysis | None = None,
 ) -> str:
     instruction = (
-        "Analyze the following MatchAnalysisContext according to the system instructions."
+        "Проанализируй следующий MatchAnalysisContext по системным инструкциям."
     )
     if repair_errors:
         instruction = (
-            "Repair the previous MatchLLMAnalysis below. Preserve every valid field. Change "
-            "only what is required by these validation errors. Return the full corrected "
-            "MatchLLMAnalysis and use only allowlisted evidence refs:\n- "
+            "Исправь предыдущий MatchLLMAnalysis. Сохрани каждое корректное поле и измени "
+            "только то, что требуется перечисленными ошибками проверки. Верни полный "
+            "исправленный MatchLLMAnalysis и используй только разрешённые evidence_refs:\n- "
             + "\n- ".join(repair_errors)
         )
     context_json = json.dumps(
@@ -67,13 +68,13 @@ def build_user_input(
     evidence_instruction = ""
     if allowed_evidence_refs is not None:
         evidence_instruction = (
-            "\nUse evidence_refs only from this allowlist: "
+            "\nИспользуй evidence_refs только из этого разрешённого списка: "
             + json.dumps(sorted(allowed_evidence_refs), ensure_ascii=False)
         )
     previous_instruction = ""
     if previous_analysis is not None:
         previous_instruction = (
-            "\nPrevious MatchLLMAnalysis: "
+            "\nПредыдущий MatchLLMAnalysis: "
             + previous_analysis.model_dump_json()
         )
     return (

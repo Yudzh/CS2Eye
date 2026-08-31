@@ -39,6 +39,7 @@ import { TournamentsPage } from "./pages/TournamentsPage";
 import { AddTournamentPage } from "./pages/AddTournamentPage";
 import { AddTournamentMatchPage } from "./pages/AddTournamentMatchPage";
 import { MLModelsPage } from "./pages/MLModelsPage";
+import { PredictionHistoryPage } from "./pages/PredictionHistoryPage";
 import { AnalystFactorsPanel } from "./components/AnalystFactorsPanel";
 import { TeamFormContextBlock } from "./components/FormContextPanel";
 
@@ -523,6 +524,7 @@ function rankChangeLabel(
 
 
 export default function App() {
+  if (/^\/prediction-history\/?$/.test(window.location.pathname)) return <PredictionHistoryPage />;
   if (/^\/ml\/models\/?$/.test(window.location.pathname)) return <MLModelsPage />;
   if (/^\/demos\/?$/.test(window.location.pathname)) return <DemosPage />;
   if (/^\/matches\/?$/.test(window.location.pathname)) return <MatchesPage />;
@@ -643,7 +645,7 @@ export default function App() {
         </span>
       </header>
 
-      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a><a className="button" href="/ml/models">ML-модели</a></nav>
+      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a><a className="button" href="/prediction-history">Prediction History</a><a className="button" href="/ml/models">ML-модели</a></nav>
 
       <section className="hero">
         <div>

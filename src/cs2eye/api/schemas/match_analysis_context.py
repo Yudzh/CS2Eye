@@ -185,6 +185,7 @@ class MatchupContext(MatchAnalysisContextModel):
     team_a_score: Score | None
     team_b_score: Score | None
     reliability: Reliability | None
+    confidence_level: Literal["low", "medium", "high"] | None
     factors: list[MatchupFactor]
 
 
@@ -276,6 +277,30 @@ class DataQualityContext(MatchAnalysisContextModel):
     warnings: list[str]
 
 
+class HEKillByMapPrediction(MatchAnalysisContextModel):
+    map: str
+    probability: Probability
+    confidence: Literal["low", "medium", "high"]
+    team_a_sample: SampleSize
+    team_b_sample: SampleSize
+
+
+class SecondaryBetsContext(MatchAnalysisContextModel):
+    he_kill_by_map: list[HEKillByMapPrediction]
+
+
+class BettingRestrictionItem(MatchAnalysisContextModel):
+    rule: Literal["navi_no_match_winner_bets", "group_stage_no_match_winner_bets"]
+    message: str
+
+
+class BettingRestrictionsContext(MatchAnalysisContextModel):
+    restricted: bool
+    rule: Literal["navi_no_match_winner_bets", "group_stage_no_match_winner_bets"] | None = None
+    message: str | None = None
+    restrictions: list[BettingRestrictionItem] = Field(default_factory=list)
+
+
 class MatchAnalysisContext(MatchAnalysisContextModel):
     schema_version: Literal["match_analysis_context.v1"] = "match_analysis_context.v1"
     generated_at: datetime
@@ -290,4 +315,10 @@ class MatchAnalysisContext(MatchAnalysisContextModel):
     map_matchups: list[MapMatchupContext]
     h2h: H2HContext
     manual_context: ManualContext
+    secondary_bets: SecondaryBetsContext = Field(
+        default_factory=lambda: SecondaryBetsContext(he_kill_by_map=[]),
+    )
+    betting_restrictions: BettingRestrictionsContext = Field(
+        default_factory=lambda: BettingRestrictionsContext(restricted=False),
+    )
     data_quality: DataQualityContext

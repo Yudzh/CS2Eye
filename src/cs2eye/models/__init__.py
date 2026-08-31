@@ -33,7 +33,7 @@ from cs2eye.models.team import (
     TeamRosterMember,
     TeamRankingSnapshot,
 )
-from cs2eye.models.prediction import MatchPrediction,TournamentMatchPrediction,TournamentPredictionRun,WinProbabilityModelArtifact
+from cs2eye.models.prediction import MatchPrediction,PredictionHistorySnapshot,TournamentMatchPrediction,TournamentPredictionRun,WinProbabilityModelArtifact
 from cs2eye.models.match_llm_analysis_run import MatchLLMAnalysisRun
 from cs2eye.models.llm_quality import LLMQualityReview, LLMQualityRun
 
@@ -72,7 +72,7 @@ __all__ = [
     "TeamRoster",
     "TeamRosterMember",
     "TeamRankingSnapshot",
-    "MatchPrediction","TournamentMatchPrediction","TournamentPredictionRun","WinProbabilityModelArtifact",
+    "MatchPrediction","PredictionHistorySnapshot","TournamentMatchPrediction","TournamentPredictionRun","WinProbabilityModelArtifact",
     "MatchLLMAnalysisRun",
     "LLMQualityRun",
     "LLMQualityReview",

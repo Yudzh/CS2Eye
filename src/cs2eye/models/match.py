@@ -78,6 +78,8 @@ class Match(Base):
     bracket_position: Mapped[int | None] = mapped_column(Integer)
     next_match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"), index=True)
     next_match_slot: Mapped[str | None] = mapped_column(String(8))
+    loser_next_match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"), index=True)
+    loser_next_match_slot: Mapped[str | None] = mapped_column(String(8))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

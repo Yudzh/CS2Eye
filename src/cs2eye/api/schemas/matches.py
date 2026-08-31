@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from cs2eye.api.schemas.match_analysis_context import BettingRestrictionsContext
+
 
 MatchFormat = Literal["bo1", "bo3", "bo5", "unknown"]
 MatchStage = Literal["group", "swiss", "round_of_32", "round_of_16", "quarterfinal", "semifinal", "final", "unknown"]
@@ -52,6 +54,11 @@ class MatchResponse(BaseModel):
     group_name: str | None = None; bracket_section: Literal["main", "upper", "lower", "group", "swiss"] | None = None
     bracket_position: int | None = None; next_match_id: int | None = None
     next_match_slot: Literal["team_a", "team_b"] | None = None
+    loser_next_match_id: int | None = None
+    loser_next_match_slot: Literal["team_a", "team_b"] | None = None
+    betting_restrictions: BettingRestrictionsContext = Field(
+        default_factory=lambda: BettingRestrictionsContext(restricted=False),
+    )
 
 
 class MatchListResponse(BaseModel):
@@ -74,6 +81,8 @@ class MatchPatchRequest(BaseModel):
     bracket_section: Literal["main", "upper", "lower", "group", "swiss"] | None = None
     bracket_position: int | None = Field(None, ge=1); next_match_id: int | None = None
     next_match_slot: Literal["team_a", "team_b"] | None = None
+    loser_next_match_id: int | None = None
+    loser_next_match_slot: Literal["team_a", "team_b"] | None = None
 
 
 class MatchReorderRequest(BaseModel):

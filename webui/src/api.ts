@@ -23,7 +23,7 @@ import type {
   TeamH2HComparison,
   MatchBackfillResult, MatchEnvironment, MatchFormat, MatchListResponse, MatchResolution, MatchSeries, MatchStage, TeamMatchStats, TeamVetoProfile, VetoAction, VetoComparison, CalculatedVeto, MatchupScore, WinProbability,
   AnalystFactor, AnalystFactorPayload, MLModelsStatus,
-  MatchLLMAnalysisRun, MatchLLMGenerateRequest, MatchLLMHistoryItem,
+  BettingRestrictions, HEKillBacktestReport, HEKillByMapPrediction, MatchLLMAnalysisRun, MatchLLMGenerateRequest, MatchLLMHistoryItem, PredictionHistoryResponse,
 } from "./types";
 
 export class ApiError extends Error {
@@ -140,10 +140,13 @@ export function getMatches(resolutionStatus?: MatchResolution,vetoFilter?:"expec
 }
 export function backfillMatches(): Promise<MatchBackfillResult> { return request<MatchBackfillResult>("/api/v1/matches/backfill", { method: "POST" }); }
 export function getMatch(id: number): Promise<MatchSeries> { return request<MatchSeries>(`/api/v1/matches/${id}`); }
+export function capturePredictionHistory(matchId:number,retrospective=false):Promise<{id:number;match_id:number;created_at:string}>{return request("/api/v1/prediction-history/snapshots",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({match_id:matchId,retrospective})})}
+export function captureTournamentPredictionHistory(tournamentId:number):Promise<{tournament_id:number;eligible:number;created:number;existing:number;created_match_ids:number[];errors:Array<{match_id:number;message:string}>}>{return request(`/api/v1/prediction-history/tournaments/${tournamentId}/snapshots`,{method:"POST"})}
+export function getPredictionHistory(filters:{tournamentId?:number;date?:string;status?:"completed"|"future";consensus?:boolean;conflictOnly?:boolean;strongConflicts?:boolean}={}):Promise<PredictionHistoryResponse>{const q=new URLSearchParams();if(filters.tournamentId)q.set("tournament_id",String(filters.tournamentId));if(filters.date)q.set("match_date",filters.date);if(filters.status)q.set("status",filters.status);if(filters.consensus)q.set("consensus_3_3","true");if(filters.conflictOnly)q.set("conflict_only","true");if(filters.strongConflicts)q.set("strong_conflicts","true");return request(`/api/v1/prediction-history${q.size?`?${q}`:""}`)}
 export function createMatchSeries(demoFileIds: number[], format: MatchFormat, stage: MatchStage, environment: MatchEnvironment): Promise<MatchSeries> {
   return request<MatchSeries>("/api/v1/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ demo_file_ids: demoFileIds, format, stage, environment, resolution_status: "resolved" }) });
 }
-export function patchMatchSeries(id: number, payload: Partial<{tournament_id:number;format: MatchFormat; stage: MatchStage; environment: MatchEnvironment; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean;round_number:number|null;round_label:string|null;group_name:string|null;bracket_section:"main"|"upper"|"lower"|"group"|"swiss"|null;bracket_position:number|null;next_match_id:number|null;next_match_slot:"team_a"|"team_b"|null}>): Promise<MatchSeries> {
+export function patchMatchSeries(id: number, payload: Partial<{tournament_id:number;format: MatchFormat; stage: MatchStage; environment: MatchEnvironment; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean;round_number:number|null;round_label:string|null;group_name:string|null;bracket_section:"main"|"upper"|"lower"|"group"|"swiss"|null;bracket_position:number|null;next_match_id:number|null;next_match_slot:"team_a"|"team_b"|null;loser_next_match_id:number|null;loser_next_match_slot:"team_a"|"team_b"|null}>): Promise<MatchSeries> {
   return request<MatchSeries>(`/api/v1/matches/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 }
 export function reorderMatchSeries(id: number, demoFileIds: number[]): Promise<MatchSeries> {
@@ -160,6 +163,9 @@ export function compareTeamVeto(a:number,b:number,level:"organization"|"current_
 export function getCalculatedVeto(a:number,b:number):Promise<CalculatedVeto>{return request(`/api/v1/analysis/calculated-veto?team_a_id=${a}&team_b_id=${b}&format=bo3`)}
 export function getMatchupScore(a:number,b:number,format:"bo1"|"bo3"|"bo5"="bo3",analysisMode:"pre_veto"|"post_veto"="pre_veto",seriesId?:number):Promise<MatchupScore>{const q=new URLSearchParams({team_a_id:String(a),team_b_id:String(b),format,analysis_mode:analysisMode});if(seriesId)q.set("series_id",String(seriesId));return request(`/api/v1/analysis/matchup?${q}`)}
 export function getWinProbability(a:number,b:number,format:"bo1"|"bo3"|"bo5"="bo3",analysisMode:"pre_veto"|"post_veto"="pre_veto",seriesId?:number):Promise<WinProbability>{const q=new URLSearchParams({team_a_id:String(a),team_b_id:String(b),format,analysis_mode:analysisMode});if(seriesId)q.set("series_id",String(seriesId));return request(`/api/v1/analysis/win-probability?${q}`)}
+export function getHEKillByMap(a:number,b:number,matchId?:number):Promise<HEKillByMapPrediction[]>{const q=new URLSearchParams({team_a_id:String(a),team_b_id:String(b),as_of:new Date().toISOString()});if(matchId)q.set("match_id",String(matchId));return request(`/api/v1/analysis/he-kill-by-map?${q}`)}
+export function getHEKillBacktest():Promise<HEKillBacktestReport>{return request("/api/v1/analysis/he-kill-by-map/backtest")}
+export function getBettingRestrictions(a:number,b:number,matchId?:number):Promise<BettingRestrictions>{return request(`/api/v1/analysis/betting-restrictions?team_a_id=${a}&team_b_id=${b}${matchId?`&match_id=${matchId}`:""}`)}
 export async function getLatestMatchLLMAnalysis(teamAId:number,teamBId:number,matchId?:number):Promise<MatchLLMAnalysisRun|null>{const q=new URLSearchParams({team_a_id:String(teamAId),team_b_id:String(teamBId),analysis_mode:"pre_match"});if(matchId)q.set("match_id",String(matchId));try{return await request(`/api/v1/analysis/llm-match-analysis/latest?${q}`)}catch(error){if(error instanceof ApiError&&error.status===404)return null;throw error}}
 export function generateMatchLLMAnalysis(payload:MatchLLMGenerateRequest):Promise<MatchLLMAnalysisRun>{return request("/api/v1/analysis/llm-match-analysis/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})}
 export function getMatchLLMAnalysisRun(id:number):Promise<MatchLLMAnalysisRun>{return request(`/api/v1/analysis/llm-match-analysis/${id}`)}

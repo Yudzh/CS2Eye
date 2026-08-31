@@ -76,6 +76,8 @@ def test_compact_cs2_team_suffix_is_an_exact_alias():
 
 
 @pytest.mark.parametrize(("demo_name", "team_name"), [
+    ("NaVi", "Natus Vincere"),
+    ("Natus Vincer", "Natus Vincere"),
     ("MongolZ", "The MongolZ"),
     ("Team Vitality", "Vitality"),
     ("100T", "100 Thieves"),

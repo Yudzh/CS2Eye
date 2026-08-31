@@ -32,6 +32,28 @@ class MatchPrediction(Base):
     feature_snapshot:Mapped[dict]=mapped_column(JSON,nullable=False);prediction_status:Mapped[str]=mapped_column(String(24),nullable=False)
 
 
+class PredictionHistorySnapshot(Base):
+    __tablename__ = "prediction_history_snapshots"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    tournament_id: Mapped[int | None] = mapped_column(ForeignKey("tournaments.id", ondelete="SET NULL"), index=True)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    source: Mapped[str] = mapped_column(String(24), nullable=False, default="live", server_default="live")
+    team_a_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    team_b_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    team_strength_a: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    team_strength_b: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    team_strength_winner_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
+    matchup_a: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    matchup_b: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    matchup_winner_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
+    ml_a_probability: Mapped[Decimal | None] = mapped_column(Numeric(10, 8))
+    ml_b_probability: Mapped[Decimal | None] = mapped_column(Numeric(10, 8))
+    ml_winner_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
+    actual_winner_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
+
+
 class TournamentPredictionRun(Base):
     __tablename__ = "tournament_prediction_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

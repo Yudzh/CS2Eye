@@ -11,6 +11,7 @@ from cs2eye.services.match_service import (
     MatchNotFoundError, MatchService, MatchValidationError, MatchView,
 )
 from cs2eye.services.veto_service import VetoError, VetoService
+from cs2eye.services.betting_restriction_service import betting_restrictions_for_teams
 
 
 router = APIRouter(tags=["matches"])
@@ -37,6 +38,12 @@ async def response(view: MatchView, session: AsyncSession) -> MatchResponse:
         group_name=item.group_name, bracket_section=item.bracket_section,
         bracket_position=item.bracket_position, next_match_id=item.next_match_id,
         next_match_slot=item.next_match_slot,
+        loser_next_match_id=item.loser_next_match_id,
+        loser_next_match_slot=item.loser_next_match_slot,
+        betting_restrictions=betting_restrictions_for_teams(
+            (team for team in (view.team_a, view.team_b) if team is not None),
+            is_playoff=item.is_playoff,
+        ),
     )
 
 

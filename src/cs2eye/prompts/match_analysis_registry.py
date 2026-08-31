@@ -1,4 +1,4 @@
-from cs2eye.prompts import match_analysis_v3, match_analysis_v4
+from cs2eye.prompts import match_analysis_v3, match_analysis_v4, match_analysis_v5
 
 
 PROMPT_BUILDERS = {
@@ -7,6 +7,9 @@ PROMPT_BUILDERS = {
     ),
     match_analysis_v4.PROMPT_VERSION: (
         match_analysis_v4.build_system_prompt, match_analysis_v4.build_user_input,
+    ),
+    match_analysis_v5.PROMPT_VERSION: (
+        match_analysis_v5.build_system_prompt, match_analysis_v5.build_user_input,
     ),
 }
 

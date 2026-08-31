@@ -105,6 +105,9 @@ class DeterministicMatchExplanationBuilder:
         result: list[_Candidate] = []
         a, b = context.teams.team_a, context.teams.team_b
 
+        def pair_min(left, right):
+            return min(left, right) if left is not None and right is not None else None
+
         def add(
             identifier, side, category, score_a, reliability, sample, refs, fact_type,
             text_key, values, source="statistical", priority=3,
@@ -127,34 +130,36 @@ class DeterministicMatchExplanationBuilder:
         # Pairwise team-level factors.
         team_pairs = (
             ("overall_strength", a.team_strength.score, b.team_strength.score,
-             min(a.team_strength.reliability, b.team_strength.reliability),
-             min(a.team_strength.sample_size, b.team_strength.sample_size), 1),
+             pair_min(a.team_strength.reliability, b.team_strength.reliability),
+             pair_min(a.team_strength.sample_size, b.team_strength.sample_size), 1),
             ("recent_form", a.form.recent_60d_score, b.form.recent_60d_score,
-             min(a.form.recent_60d_reliability, b.form.recent_60d_reliability),
-             min(a.form.recent_60d_matches, b.form.recent_60d_matches), 1),
+             pair_min(a.form.recent_60d_reliability, b.form.recent_60d_reliability),
+             pair_min(a.form.recent_60d_matches, b.form.recent_60d_matches), 1),
             ("tournament_form", a.form.tournament_form_score, b.form.tournament_form_score,
-             min(a.form.tournament_reliability, b.form.tournament_reliability),
-             min(a.form.tournament_matches, b.form.tournament_matches), 1),
+             pair_min(a.form.tournament_reliability, b.form.tournament_reliability),
+             pair_min(a.form.tournament_matches, b.form.tournament_matches), 1),
             ("strength_of_schedule", a.form.strength_of_schedule_score,
              b.form.strength_of_schedule_score,
-             min(a.form.recent_60d_reliability, b.form.recent_60d_reliability),
-             min(a.form.recent_60d_matches, b.form.recent_60d_matches), 2),
+             pair_min(a.form.recent_60d_reliability, b.form.recent_60d_reliability),
+             pair_min(a.form.recent_60d_matches, b.form.recent_60d_matches), 2),
             ("performance_vs_expectation", a.form.performance_vs_expectation_score,
              b.form.performance_vs_expectation_score,
-             min(a.form.recent_60d_reliability, b.form.recent_60d_reliability),
-             min(a.form.recent_60d_matches, b.form.recent_60d_matches), 2),
+             pair_min(a.form.recent_60d_reliability, b.form.recent_60d_reliability),
+             pair_min(a.form.recent_60d_matches, b.form.recent_60d_matches), 2),
             ("roster", a.roster.stability_score, b.roster.stability_score,
-             min(a.roster.reliability, b.roster.reliability),
-             min(a.roster.sample_maps, b.roster.sample_maps), 2),
+             pair_min(a.roster.reliability, b.roster.reliability),
+             pair_min(a.roster.sample_maps, b.roster.sample_maps), 2),
             ("leadership", a.leadership.igl_score, b.leadership.igl_score,
-             min(a.leadership.reliability, b.leadership.reliability),
-             min(a.leadership.sample_size, b.leadership.sample_size), 4),
+             pair_min(a.leadership.reliability, b.leadership.reliability),
+             pair_min(a.leadership.sample_size, b.leadership.sample_size), 4),
         )
         for category, value_a, value_b, reliability, sample, priority in team_pairs:
             if value_a is None or value_b is None:
                 continue
             if category in {"recent_form", "tournament_form", "strength_of_schedule",
-                            "performance_vs_expectation"} and sample < MIN_FORM_SAMPLE:
+                            "performance_vs_expectation"} and (
+                sample is None or sample < MIN_FORM_SAMPLE
+            ):
                 continue
             pair_score = 50 + (float(value_a) - float(value_b)) / 2
             side = score_side(pair_score, neutral=False)

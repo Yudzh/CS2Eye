@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 
 from sqlalchemy import and_, or_, select
@@ -81,7 +81,12 @@ class MatchService:
 
     async def list(self, *, team_id: int | None = None, resolution_status: str | None = None,
                    veto_filter: str | None = None) -> list[MatchView]:
-        query = select(Match).order_by(Match.match_date.desc(), Match.id.desc())
+        # Empty bracket slots belong to the tournament view, not to the global
+        # user-facing match list. Showing them here creates fake Team A 0:0 Team B
+        # cards before upstream matches have populated the participants.
+        query = select(Match).where(
+            Match.team_a_id.is_not(None), Match.team_b_id.is_not(None),
+        ).order_by(Match.match_date.desc(), Match.id.desc())
         if team_id is not None: query = query.where(or_(Match.team_a_id == team_id, Match.team_b_id == team_id))
         if resolution_status is not None: query = query.where(Match.resolution_status == resolution_status)
         if veto_filter == "expected_missing":
@@ -179,6 +184,8 @@ class MatchService:
         if match.resolution_status != "resolved":
             match.team_a_maps_won = match.team_b_maps_won = 0; match.winner_team_id = None; match.status = "unknown"
             await self.session.flush()
+            await self._propagate_winner(match, previous_result[1])
+            await self._propagate_loser(match, previous_result[1])
             if previous_result != (match.status, match.winner_team_id, match.team_a_maps_won, match.team_b_maps_won):
                 from cs2eye.services.tournament_prediction_service import invalidate_tournament_predictions
                 await invalidate_tournament_predictions(self.session, match.tournament_id)
@@ -192,10 +199,45 @@ class MatchService:
         target = {"bo1": 1, "bo3": 2, "bo5": 3}.get(match.format)
         match.status = "completed" if target and max(match.team_a_maps_won, match.team_b_maps_won) >= target else "in_progress"
         await self.session.flush()
+        await self._propagate_winner(match, previous_result[1])
+        await self._propagate_loser(match, previous_result[1])
         if previous_result != (match.status, match.winner_team_id, match.team_a_maps_won, match.team_b_maps_won):
             from cs2eye.services.tournament_prediction_service import invalidate_tournament_predictions
             await invalidate_tournament_predictions(self.session, match.tournament_id)
         return await self.get(match_id)
+
+    async def _propagate_winner(self, match: Match, previous_winner_id: int | None) -> None:
+        if match.next_match_id is None or match.next_match_slot not in {"team_a", "team_b"}:
+            return
+        target = await self.session.get(Match, match.next_match_id)
+        if target is None or target.tournament_id != match.tournament_id:
+            return
+        field = "team_a_id" if match.next_match_slot == "team_a" else "team_b_id"
+        current = getattr(target, field)
+        if match.winner_team_id is None:
+            if current == previous_winner_id:
+                setattr(target, field, None)
+        elif current is None or current == previous_winner_id or current == match.winner_team_id:
+            setattr(target, field, match.winner_team_id)
+        await self.session.flush()
+
+    async def _propagate_loser(self, match: Match, previous_winner_id: int | None) -> None:
+        if match.loser_next_match_id is None or match.loser_next_match_slot not in {"team_a", "team_b"}:
+            return
+        target = await self.session.get(Match, match.loser_next_match_id)
+        if target is None or target.tournament_id != match.tournament_id:
+            return
+        participants = {match.team_a_id, match.team_b_id} - {None}
+        loser_id = next(iter(participants - {match.winner_team_id}), None) if match.winner_team_id else None
+        previous_loser_id = next(iter(participants - {previous_winner_id}), None) if previous_winner_id else None
+        field = "team_a_id" if match.loser_next_match_slot == "team_a" else "team_b_id"
+        current = getattr(target, field)
+        if loser_id is None:
+            if current == previous_loser_id:
+                setattr(target, field, None)
+        elif current is None or current == previous_loser_id or current == loser_id:
+            setattr(target, field, loser_id)
+        await self.session.flush()
 
     async def create_manual(
         self, demo_file_ids: list[int], *, format: str = "unknown", stage: str = "unknown",
@@ -253,17 +295,22 @@ class MatchService:
             for key in ("format", "resolution_status")
         )
         allowed = {"tournament_id", "format", "stage", "environment", "is_playoff", "is_elimination", "resolution_status",
-                   "round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id", "next_match_slot"}
-        if "next_match_id" in changes and changes["next_match_id"] is not None:
-            target = await self.session.get(Match, changes["next_match_id"])
-            if target is None or target.id == match.id or target.tournament_id != match.tournament_id:
-                raise MatchValidationError("Следующий матч должен существовать в том же турнире.")
+                   "round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id", "next_match_slot",
+                   "loser_next_match_id", "loser_next_match_slot"}
+        for transition_field in ("next_match_id", "loser_next_match_id"):
+            if transition_field in changes and changes[transition_field] is not None:
+                target = await self.session.get(Match, changes[transition_field])
+                if target is None or target.id == match.id or target.tournament_id != match.tournament_id:
+                    raise MatchValidationError("Следующий матч должен существовать в том же турнире.")
         if "tournament_id" in changes and changes["tournament_id"] is not None:
             if await self.session.get(Tournament, changes["tournament_id"]) is None:
                 raise MatchValidationError("Турнир не найден.")
         if changes.get("next_match_id") is not None and changes.get("next_match_slot", match.next_match_slot) not in {"team_a", "team_b"}:
             raise MatchValidationError("Для следующего матча укажите слот team_a или team_b.")
-        nullable_layout = {"round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id", "next_match_slot"}
+        if changes.get("loser_next_match_id") is not None and changes.get("loser_next_match_slot", match.loser_next_match_slot) not in {"team_a", "team_b"}:
+            raise MatchValidationError("Для перехода проигравшего укажите слот team_a или team_b.")
+        nullable_layout = {"round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id", "next_match_slot",
+                           "loser_next_match_id", "loser_next_match_slot"}
         for key, value in changes.items():
             if key in allowed and (value is not None or key in nullable_layout): setattr(match, key, value)
         if match.stage in {"round_of_32", "round_of_16", "quarterfinal", "semifinal", "final"}: match.is_playoff = True
@@ -346,7 +393,44 @@ class MatchService:
                 ),
             )
         )).scalars().all())
-        existing_id = trigger_match_id if trigger_match_id in group_match_ids else min(group_match_ids, default=None)
+        scheduled_ids: set[int] = set()
+        if not force_standalone:
+            scheduled_ids = set((await self.session.scalars(select(Match.id).where(
+                Match.tournament_id == tournament.id,
+                Match.match_date == demo.match_date,
+                Match.status == "scheduled",
+                or_(
+                    and_(Match.team_a_id == pair[0], Match.team_b_id == pair[1]),
+                    and_(Match.team_a_id == pair[1], Match.team_b_id == pair[0]),
+                ),
+            ))).all())
+            if not scheduled_ids:
+                adjacent_ids = list((await self.session.scalars(select(Match.id).where(
+                    Match.tournament_id == tournament.id,
+                    Match.match_date.between(
+                        demo.match_date - timedelta(days=1),
+                        demo.match_date + timedelta(days=1),
+                    ),
+                    Match.status == "scheduled",
+                    or_(
+                        and_(Match.team_a_id == pair[0], Match.team_b_id == pair[1]),
+                        and_(Match.team_a_id == pair[1], Match.team_b_id == pair[0]),
+                    ),
+                ))).all())
+                # A one-day discrepancy can come from tournament/source timezone
+                # boundaries. Only accept it when the pair has exactly one slot;
+                # ambiguity means these may be genuine repeat meetings.
+                if len(adjacent_ids) == 1:
+                    scheduled_ids = {adjacent_ids[0]}
+            group_match_ids.update(scheduled_ids)
+        # Prefer the pre-created schedule entry so its stage/bracket metadata and
+        # stable public ID survive. Otherwise keep the match that triggered the
+        # regrouping, preserving the previous behavior for demo-only series.
+        existing_id = (
+            min(scheduled_ids) if scheduled_ids
+            else trigger_match_id if trigger_match_id in group_match_ids
+            else min(group_match_ids, default=None)
+        )
         existing = await self.session.get(Match, existing_id) if existing_id is not None else None
         match = existing or Match(tournament_id=tournament.id, match_date=demo.match_date,
             team_a_id=result.team_a_id, team_b_id=result.team_b_id, format=fmt,

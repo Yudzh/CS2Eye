@@ -367,7 +367,7 @@ export function DemosPage() {
 
   return (
     <main className="page demos-page">
-      <nav className="page-links"><a className="back-link" href="/">← К командам</a><span><a className="back-link" href="/matches">Матчи →</a> <a className="back-link" href="/tournaments">Турниры →</a></span></nav>
+      <nav className="page-links"><a className="back-link" href="/">← К командам</a><span><a className="back-link" href="/matches">Матчи →</a> <a className="back-link" href="/tournaments">Турниры →</a> <a className="back-link" href="/prediction-history">Prediction History →</a></span></nav>
       <section className="demo-heading">
         <p className="eyebrow">Файловое хранилище</p>
         <h1>Демки</h1>

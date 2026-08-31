@@ -113,6 +113,7 @@ def matchup_payload() -> dict:
         "team_a": {"id": 1, "name": "Alpha", "score": 54.0},
         "team_b": {"id": 2, "name": "Bravo", "score": 46.0},
         "reliability": .8,
+        "confidence_level": "high",
         "factors": [{"key": "form_context", "score": 54.0, "confidence": .8, "sample": None}],
         "form_context": {"team_a_form_context": form, "team_b_form_context": form},
         "limitations": [],
@@ -224,11 +225,30 @@ async def test_builder_creates_fully_populated_context(builder_db, monkeypatch) 
     assert isinstance(result, MatchAnalysisContext)
     assert result.match.id == 20
     assert result.prediction.team_a_probability == .57
+    assert result.matchup.confidence_level == "high"
     assert result.matchup.factors[0].sample_size is None
     assert result.veto.source_type == "deterministic_analytics"
     assert result.veto.basis == "calculated_veto"
     assert result.map_matchups[0].map == "mirage"
     assert result.manual_context.team_a[0].text == "Prepared LAN roster."
+    assert len(result.secondary_bets.he_kill_by_map) == 7
+    assert all(item.confidence == "low" for item in result.secondary_bets.he_kill_by_map)
+    assert result.betting_restrictions.restricted is False
+
+
+async def test_navi_rule_does_not_change_prediction_or_matchup(builder_db, monkeypatch) -> None:
+    await seed_context(builder_db)
+    install_full_service_fakes(monkeypatch)
+    async with builder_db() as session:
+        team = await session.get(Team, 1)
+        team.bo3_id = 787
+        team.bo3_slug = "natus-vincere"
+        await session.commit()
+        result = await MatchAnalysisContextBuilder(session).build(1, 2, as_of=AS_OF, match_id=20)
+    assert result.betting_restrictions.restricted is True
+    assert result.betting_restrictions.rule == "navi_no_match_winner_bets"
+    assert result.prediction.team_a_probability == .57
+    assert result.matchup.team_a_score == 54.0
 
 
 async def test_builder_without_match_keeps_match_specific_fields_null(builder_db, monkeypatch) -> None:
@@ -247,6 +267,7 @@ async def test_builder_without_match_keeps_match_specific_fields_null(builder_db
     assert result.match.tournament.id is None
     assert result.prediction.status == "not_available"
     assert result.prediction.team_a_probability is None
+    assert result.matchup.confidence_level is None
 
 
 async def add_evidence_matches(factory, *, count: int = 12) -> None:

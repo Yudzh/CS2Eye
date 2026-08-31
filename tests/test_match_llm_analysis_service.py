@@ -268,9 +268,9 @@ def test_language_instruction_is_explicit_and_context_is_compact_json() -> None:
     ru = build_user_input(context(), "ru")
     en = build_user_input(context(), "en")
     assert "только на русском" in ru
-    assert "only in English" in en
+    assert "только на английском" in en
     assert "только на русском" in build_system_prompt("ru")
-    assert "only in English" in build_system_prompt("en")
+    assert "только на английском" in build_system_prompt("en")
     assert '"schema_version":"match_analysis_context.v1"' in ru
 
 
@@ -333,12 +333,12 @@ async def test_ollama_adapter_uses_async_chat_and_json_schema() -> None:
     assert captured["think"] is True
     assert captured["tools"] == []
     assert captured["messages"][0]["role"] == "system"
-    assert "only in English" in captured["messages"][0]["content"]
+    assert "только на английском" in captured["messages"][0]["content"]
     user_input = captured["messages"][1]["content"]
-    assert "only in English" in user_input
-    assert "Use evidence_refs only from this allowlist" in user_input
+    assert "только на английском" in user_input
+    assert "Используй evidence_refs только из этого разрешённого списка" in user_input
     assert '"series:123"' in user_input
-    assert "Evidence refs allowed for each claim/risk category" in user_input
+    assert "Разрешённые evidence_refs для каждой категории тезиса или риска" in user_input
     assert provider_result.analysis.schema_version == "match_llm_analysis.v1"
     assert provider_result.input_tokens == 12
     assert provider_result.output_tokens == 8
@@ -404,8 +404,8 @@ def test_repair_prompt_preserves_valid_explanation_items() -> None:
         context(), "ru", ("unsupported_number at risks[0].statement",),
         previous_analysis=analysis(),
     )
-    assert "Preserve every claim" in prompt
-    assert "remove only that item" in prompt
+    assert "Сохрани каждый тезис" in prompt
+    assert "удаляй пункт только тогда" in prompt
     assert "return empty key_advantages" not in prompt
 
 
