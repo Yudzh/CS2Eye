@@ -109,6 +109,8 @@ async def train_win_probability(session:AsyncSession,mode:str="pre_veto")->dict:
 async def activate_win_probability(session:AsyncSession,artifact_id:int,force:bool=False)->dict:
     row=await session.get(WinProbabilityModelArtifact,artifact_id)
     if not row:raise ValueError("Model artifact not found.")
+    if row.artifact.get("sandbox"):
+        raise ValueError("Sandbox candidates cannot be activated.")
     passed=bool(row.quality_gate_passed)
     if not passed and not force:
         raise ValueError("Candidate does not outperform the best baseline on Log Loss or Brier; activation rejected.")

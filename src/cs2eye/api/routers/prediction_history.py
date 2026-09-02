@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -52,12 +53,28 @@ async def history(
     consensus_3_3: bool = False,
     conflict_only: bool = False,
     strong_conflicts: bool = False,
+    source: str | None = Query(None, pattern="^(pre_match|retrospective)$"),
+    ml_model_version: str | None = None,
+    team_strength_model_version: str | None = None,
+    matchup_model_version: str | None = None,
+    comparison_type: str | None = Query(None, pattern="^(consensus_3_3|team_strength_dissent|matchup_dissent|ml_dissent|incomplete)$"),
+    matchup_error_driver: str | None = None,
+    error_result: str | None = Query(None, pattern="^(any|matchup|team_strength|ml)$"),
+    ml_confidence_error: Literal[60, 70, 80] | None = None,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
     result = await PredictionHistoryService(session).history(
         tournament_id=tournament_id, match_date=match_date,
         status=status, consensus_3_3=consensus_3_3,
         conflict_only=conflict_only, strong_conflicts=strong_conflicts,
+        source=source,
+        ml_model_version=ml_model_version,
+        team_strength_model_version=team_strength_model_version,
+        matchup_model_version=matchup_model_version,
+        comparison_type=comparison_type,
+        matchup_error_driver=matchup_error_driver,
+        error_result=error_result,
+        ml_confidence_error=ml_confidence_error,
     )
     await session.commit()
     return result

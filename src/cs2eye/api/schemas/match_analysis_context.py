@@ -143,6 +143,29 @@ class RecentSeriesEvidenceContext(MatchAnalysisContextModel):
     team_a: list[RecentSeriesEvidence]
     team_b: list[RecentSeriesEvidence]
 
+class OpponentContextResult(MatchAnalysisContextModel):
+    opponent: dict
+    result: Literal["win","loss"]
+    series_score: str
+    opponent_dynamic_strength: Score
+    opponent_reliability: Reliability
+    result_quality_score: float
+    result_quality_label: str
+
+class OpponentContextTeam(MatchAnalysisContextModel):
+    version: str
+    adjusted_form_version: str
+    raw_form_score: Score
+    opponent_adjusted_form_score: Score
+    tournament_opponent_adjusted_form_score: Score | None
+    dynamic_sos_score: Score | None
+    reliability: Reliability
+    matches: list[OpponentContextResult]
+
+class OpponentContext(MatchAnalysisContextModel):
+    team_a: OpponentContextTeam
+    team_b: OpponentContextTeam
+
 
 class ModelDriver(MatchAnalysisContextModel):
     driver_id: str
@@ -309,6 +332,7 @@ class MatchAnalysisContext(MatchAnalysisContextModel):
     match: MatchContext
     teams: TeamsContext
     recent_series_evidence: RecentSeriesEvidenceContext
+    opponent_context: OpponentContext | None = None
     prediction: PredictionContext
     matchup: MatchupContext
     veto: VetoContext

@@ -22,6 +22,7 @@ from cs2eye.models.team import (
 from cs2eye.services.analyst_context_service import AnalystContextService
 from cs2eye.services.calculated_veto_service import CalculatedVetoService
 from cs2eye.services.form_context_service import FormContextService
+from cs2eye.services.opponent_context_service import OpponentContextService
 from cs2eye.services.he_kill_by_map_service import HEKillByMapService
 from cs2eye.services.betting_restriction_service import betting_restrictions_for_teams
 from cs2eye.services.leadership_service import LeadershipService
@@ -196,6 +197,13 @@ class MatchAnalysisContextBuilder:
             current_limit=MAX_CURRENT_TOURNAMENT_EVIDENCE,
             other_limit=MAX_OTHER_EVIDENCE, total_limit=MAX_TOTAL_EVIDENCE,
         )
+        opponent_service=OpponentContextService(self.session)
+        opponent_a=await opponent_service.calculate(team_a_id,cutoff,effective_tournament_id)
+        opponent_b=await opponent_service.calculate(team_b_id,cutoff,effective_tournament_id)
+        opponent_fields=("version","adjusted_form_version","raw_form_score","opponent_adjusted_form_score","tournament_opponent_adjusted_form_score","dynamic_sos_score","reliability")
+        result_fields=("opponent","result","series_score","opponent_dynamic_strength","opponent_reliability","result_quality_score","result_quality_label")
+        def opponent_payload(value):return {**{key:value[key] for key in opponent_fields},"matches":[{key:item[key] for key in result_fields} for item in value["matches"]]}
+        opponent_context={"team_a":opponent_payload(opponent_a),"team_b":opponent_payload(opponent_b)}
 
         veto_payload = None
         if match_format == "bo3" and not historical:
@@ -258,6 +266,7 @@ class MatchAnalysisContextBuilder:
             "match": self._match_context(match, tournament, match_format),
             "teams": team_contexts,
             "recent_series_evidence": {"team_a": evidence_a, "team_b": evidence_b},
+            "opponent_context": opponent_context,
             "prediction": prediction,
             "matchup": matchup,
             "veto": veto,

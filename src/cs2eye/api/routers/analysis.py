@@ -42,6 +42,8 @@ from cs2eye.services.veto_service import VetoError, VetoService, comparison as v
 from cs2eye.services.calculated_veto_service import CalculatedVetoService
 from cs2eye.services.leadership_service import LeadershipService
 from cs2eye.services.matchup_service import MatchupService
+from cs2eye.services.matchup_calibration_evaluator import MatchupCalibrationEvaluator
+from cs2eye.services.opponent_context_service import OpponentContextService
 from cs2eye.services.match_analysis_context_builder import MatchAnalysisContextBuilder
 from cs2eye.services.he_kill_by_map_service import HEKillByMapService
 from cs2eye.services.he_kill_backtest_service import HEKillBacktestService
@@ -326,10 +328,21 @@ async def matchup_score(
     format:str=Query("bo3",pattern="^(bo1|bo3|bo5)$"),
     analysis_mode:str=Query("pre_veto",pattern="^(pre_veto|post_veto)$"),
     as_of:date|None=None, series_id:int|None=None,
+    model_version:str|None=Query(None,pattern="^(matchup_v1|matchup_v2_candidate)$"),
     session:AsyncSession=Depends(get_db_session),
 )->dict:
-    try:return await MatchupService(session).calculate(team_a_id,team_b_id,format,analysis_mode,as_of,series_id)
+    try:return await MatchupService(session).calculate(team_a_id,team_b_id,format,analysis_mode,as_of,series_id,model_version)
     except ValueError as error:raise HTTPException(422,str(error)) from error
+
+@router.get("/matchup-calibration")
+async def matchup_calibration(limit:int=Query(120,ge=1,le=500),session:AsyncSession=Depends(get_db_session))->dict:
+    return await MatchupCalibrationEvaluator(session).evaluate(limit=limit)
+
+@router.get("/opponent-context")
+async def opponent_context(team_id:int,as_of:date|None=None,tournament_id:int|None=None,session:AsyncSession=Depends(get_db_session))->dict:
+    team=await session.get(Team,team_id)
+    if team is None:raise HTTPException(404,"Team not found.")
+    return await OpponentContextService(session).calculate(team_id,as_of,tournament_id)
 
 @router.get("/win-probability")
 async def win_probability(team_a_id:int,team_b_id:int,format:str=Query("bo3",pattern="^(bo1|bo3|bo5)$"),analysis_mode:str=Query("pre_veto",pattern="^(pre_veto|post_veto)$"),as_of:date|None=None,series_id:int|None=None,session:AsyncSession=Depends(get_db_session))->dict:

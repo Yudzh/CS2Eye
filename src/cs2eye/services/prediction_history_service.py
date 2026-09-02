@@ -11,16 +11,43 @@ from cs2eye.models.match import Match, Tournament
 from cs2eye.models.prediction import PredictionHistorySnapshot
 from cs2eye.models.team import Team
 from cs2eye.core.config import settings
+from cs2eye.analytics.scoring import SCORING_MODEL_VERSION
 from cs2eye.services.matchup_service import MatchupService
 from cs2eye.services.analytics_as_of_service import AnalyticsAsOfService
 from cs2eye.services.team_comparison_service import TeamComparisonService
 from cs2eye.services.win_probability_service import predict_win_probability
+from cs2eye.services.prediction_history_evaluation_service import (
+    COMPARISON_TYPES, PredictionHistoryEvaluationService,
+)
+from cs2eye.services.prediction_history_error_analysis_service import PredictionHistoryErrorAnalysisService
 
 
 def _winner(a: float | None, b: float | None, team_a_id: int, team_b_id: int) -> int | None:
     if a is None or b is None or a == b:
         return None
     return team_a_id if a > b else team_b_id
+
+
+def _matchup_factor_snapshot(matchup: dict) -> dict:
+    """Copy only stable, formula-relevant values from the Matchup result."""
+    reliability = float(matchup.get("reliability") or 0)
+    factors = {}
+    for factor in matchup.get("factors", []):
+        score = factor.get("score")
+        impact = float(factor.get("impact") or 0)
+        factors[factor["key"]] = {
+            "label": factor.get("label") or factor["key"],
+            "team_a_score": None if score is None else float(score),
+            "team_b_score": None if score is None else 100 - float(score),
+            "weight": float(factor.get("weight") or 0),
+            "effective_weight": float(factor.get("effective_weight") or 0),
+            "reliability": factor.get("confidence"),
+            "sample": factor.get("sample"),
+            "available": bool(factor.get("available", score is not None)),
+            "raw_contribution": impact,
+            "contribution": round(impact * reliability, 4),
+        }
+    return {"matchup_reliability": reliability, "factors": factors}
 
 
 class PredictionHistoryService:
@@ -50,6 +77,7 @@ class PredictionHistoryService:
                 raise ValueError("Недостаточно исторических данных до даты матча.")
             strength_a = float(matchup["team_strength"]["team_a_score"])
             strength_b = float(matchup["team_strength"]["team_b_score"])
+            ml = None
         else:
             comparison = await TeamComparisonService(self.session, now=captured_at).compare(
                 match.team_a_id, match.team_b_id,
@@ -60,22 +88,27 @@ class PredictionHistoryService:
             )
             strength_a = float(comparison.team_a.strength.team_strength_score)
             strength_b = float(comparison.team_b.strength.team_strength_score)
-        ml = await predict_win_probability(
-            self.session, a=match.team_a_id, b=match.team_b_id,
-            format=match.format, mode="pre_veto", as_of=captured_at.date(), series_id=match.id,
-        )
+            ml = await predict_win_probability(
+                self.session, a=match.team_a_id, b=match.team_b_id,
+                format=match.format, mode="pre_veto", as_of=captured_at.date(), series_id=match.id,
+            )
         matchup_a = float(matchup["team_a"]["score"])
         matchup_b = float(matchup["team_b"]["score"])
-        ml_a = ml.get("team_a", {}).get("probability") if ml.get("prediction_status") == "available" else None
-        ml_b = ml.get("team_b", {}).get("probability") if ml.get("prediction_status") == "available" else None
+        ml_a = ml.get("team_a", {}).get("probability") if ml and ml.get("prediction_status") == "available" else None
+        ml_b = ml.get("team_b", {}).get("probability") if ml and ml.get("prediction_status") == "available" else None
         snapshot = PredictionHistorySnapshot(
             match_id=match.id, tournament_id=match.tournament_id, as_of=captured_at,
-            source="retrospective" if retrospective else "live",
+            source="retrospective" if retrospective else "pre_match",
+            team_strength_model_version=SCORING_MODEL_VERSION,
+            matchup_model_version=matchup.get("model_version"),
+            ml_model_version=ml.get("model_version") if ml else None,
+            ml_feature_schema_version=ml.get("feature_schema_version") if ml else None,
             team_a_id=match.team_a_id, team_b_id=match.team_b_id,
             team_strength_a=Decimal(str(strength_a)), team_strength_b=Decimal(str(strength_b)),
             team_strength_winner_id=_winner(strength_a, strength_b, match.team_a_id, match.team_b_id),
             matchup_a=Decimal(str(matchup_a)), matchup_b=Decimal(str(matchup_b)),
-            matchup_winner_id=_winner(matchup_a, matchup_b, match.team_a_id, match.team_b_id),
+            matchup_winner_id=matchup.get("advantage", {}).get("team_id"),
+            matchup_factors=_matchup_factor_snapshot(matchup),
             ml_a_probability=None if ml_a is None else Decimal(str(ml_a)),
             ml_b_probability=None if ml_b is None else Decimal(str(ml_b)),
             ml_winner_id=_winner(ml_a, ml_b, match.team_a_id, match.team_b_id),
@@ -125,6 +158,10 @@ class PredictionHistoryService:
         self, *, tournament_id: int | None = None, match_date: date | None = None,
         status: str | None = None, consensus_3_3: bool = False,
         conflict_only: bool = False, strong_conflicts: bool = False,
+        source: str | None = None, ml_model_version: str | None = None,
+        team_strength_model_version: str | None = None, matchup_model_version: str | None = None,
+        comparison_type: str | None = None, matchup_error_driver: str | None = None,
+        error_result: str | None = None, ml_confidence_error: int | None = None,
     ) -> dict:
         query = select(PredictionHistorySnapshot, Match).join(
             Match, Match.id == PredictionHistorySnapshot.match_id,
@@ -139,58 +176,115 @@ class PredictionHistoryService:
             query = query.where(Match.status != "completed")
         elif status is not None:
             raise ValueError("status must be completed or future")
+        if source not in {None, "pre_match", "retrospective"}:
+            raise ValueError("source must be pre_match or retrospective")
+        if comparison_type is not None and comparison_type not in COMPARISON_TYPES:
+            raise ValueError("invalid comparison_type")
+        if error_result not in {None, "any", "matchup", "team_strength", "ml"}:
+            raise ValueError("invalid error_result")
+        if ml_confidence_error not in {None, 60, 70, 80}:
+            raise ValueError("ml_confidence_error must be 60, 70 or 80")
+        if ml_model_version is not None:
+            query = query.where(PredictionHistorySnapshot.ml_model_version.is_(None) if ml_model_version == "unknown" else PredictionHistorySnapshot.ml_model_version == ml_model_version)
+        if team_strength_model_version is not None:
+            query = query.where(PredictionHistorySnapshot.team_strength_model_version.is_(None) if team_strength_model_version == "unknown" else PredictionHistorySnapshot.team_strength_model_version == team_strength_model_version)
+        if matchup_model_version is not None:
+            query = query.where(PredictionHistorySnapshot.matchup_model_version.is_(None) if matchup_model_version == "unknown" else PredictionHistorySnapshot.matchup_model_version == matchup_model_version)
         rows = list((await self.session.execute(query)).all())
-        items = []
+        all_items = []
         for snapshot, match in rows:
             if match.winner_team_id is not None and snapshot.actual_winner_id != match.winner_team_id:
                 snapshot.actual_winner_id = match.winner_team_id
             item = await self._item(snapshot, match)
+            all_items.append(item)
+        statistics_items = []
+        for item in all_items:
             if consensus_3_3 and item["consensus"]["votes"] != 3:
                 continue
             if conflict_only and item["conflict"]["type"] in {"none", "incomplete"}:
                 continue
             if strong_conflicts and not item["conflict"]["strong"]:
                 continue
-            items.append(item)
-        return {"items": items, "statistics": self._statistics(items),
-                "tournaments": await self._tournaments()}
+            if comparison_type is not None and item["comparison"]["type"] != comparison_type:
+                continue
+            analysis = item["error_analysis"]
+            if error_result is not None and not (item["source"] == "pre_match" and item["completed"]):
+                continue
+            if error_result == "any" and not any(analysis[key]["is_correct"] is False for key in ("team_strength", "matchup", "ml")):
+                continue
+            if error_result in {"team_strength", "matchup", "ml"} and analysis[error_result]["is_correct"] is not False:
+                continue
+            matchup_analysis = analysis["matchup"]
+            top_driver = matchup_analysis["error_drivers"][0]["factor"] if matchup_analysis["error_drivers"] else None
+            if matchup_error_driver is not None and not (
+                item["source"] == "pre_match" and item["completed"] and
+                matchup_analysis["is_correct"] is False and top_driver == matchup_error_driver
+            ):
+                continue
+            if ml_confidence_error is not None and not (
+                analysis["ml"]["is_correct"] is False and analysis["ml"]["probability"] is not None
+                and analysis["ml"]["probability"] >= ml_confidence_error / 100
+            ):
+                continue
+            statistics_items.append(item)
+        items = [item for item in statistics_items if source is None or item["source"] == source]
+        statistics = PredictionHistoryEvaluationService().evaluate(statistics_items, count_items=all_items)
+        statistics.update(PredictionHistoryErrorAnalysisService().aggregate(statistics_items))
+        statistics["strong_conflict_threshold"] = settings.prediction_history_strong_conflict_threshold
+        return {"items": items, "statistics": statistics,
+                "tournaments": await self._tournaments(), "model_versions": self._model_versions(all_items)}
 
     async def _item(self, row: PredictionHistorySnapshot, match: Match) -> dict:
         teams = {team.id: team.name for team in (await self.session.scalars(
             select(Team).where(Team.id.in_((row.team_a_id, row.team_b_id)))
         )).all()}
         tournament = await self.session.get(Tournament, row.tournament_id) if row.tournament_id else None
-        predictions = [row.team_strength_winner_id, row.matchup_winner_id, row.ml_winner_id]
+        retrospective = row.source == "retrospective"
+        effective_ml_winner = None if retrospective else row.ml_winner_id
+        effective_ml_a = None if retrospective else row.ml_a_probability
+        effective_ml_b = None if retrospective else row.ml_b_probability
+        predictions = [row.team_strength_winner_id, row.matchup_winner_id, effective_ml_winner]
         votes = {team_id: predictions.count(team_id) for team_id in set(predictions) if team_id is not None}
         consensus_winner = max(votes, key=votes.get) if len(predictions) == 3 and all(predictions) else None
         consensus_votes = votes.get(consensus_winner, 0) if consensus_winner else 0
-        def prediction(winner_id, a, b, *, probability=False):
+        def prediction(winner_id, a, b, *, probability=False, evaluation_status=None):
             return {"team_a_value": None if a is None else float(a), "team_b_value": None if b is None else float(b),
                     "predicted_winner_id": winner_id, "predicted_winner": teams.get(winner_id),
                     "correct": None if row.actual_winner_id is None or winner_id is None else winner_id == row.actual_winner_id,
-                    "probability": probability}
-        conflict = self._conflict(row, predictions)
-        return {
+                    "probability": probability,
+                    "evaluation_status": evaluation_status or ("available" if winner_id is not None else "unavailable")}
+        conflict = self._conflict_values(row, predictions, effective_ml_a, effective_ml_b)
+        comparison = PredictionHistoryEvaluationService.comparison(predictions)
+        item = {
             "id": row.id, "match_id": row.match_id, "tournament_id": row.tournament_id,
             "tournament": tournament.name if tournament else None, "match_date": match.match_date.isoformat(),
             "as_of": row.as_of.isoformat(), "created_at": row.created_at.isoformat(), "source": row.source,
+            "evaluation": {"eligible": not retrospective, "reason": "retrospective" if retrospective else None},
+            "versions": {"team_strength": row.team_strength_model_version,
+                         "matchup": row.matchup_model_version, "ml": row.ml_model_version,
+                         "ml_feature_schema": row.ml_feature_schema_version},
             "team_a": {"id": row.team_a_id, "name": teams.get(row.team_a_id)},
             "team_b": {"id": row.team_b_id, "name": teams.get(row.team_b_id)},
             "actual_winner_id": row.actual_winner_id, "actual_winner": teams.get(row.actual_winner_id),
-            "completed": row.actual_winner_id is not None,
+            "completed": match.status == "completed" and row.actual_winner_id is not None,
             "team_strength": prediction(row.team_strength_winner_id, row.team_strength_a, row.team_strength_b),
             "matchup": prediction(row.matchup_winner_id, row.matchup_a, row.matchup_b),
-            "ml": prediction(row.ml_winner_id, row.ml_a_probability, row.ml_b_probability, probability=True),
+            "ml": prediction(effective_ml_winner, effective_ml_a, effective_ml_b, probability=True,
+                             evaluation_status="not_evaluable_retrospective" if retrospective else None),
             "consensus": {"winner_id": consensus_winner, "winner": teams.get(consensus_winner),
                           "votes": consensus_votes, "total": 3 if consensus_winner else 0,
                           "correct": None if row.actual_winner_id is None or consensus_winner is None else consensus_winner == row.actual_winner_id},
+            "comparison": comparison,
             "conflict": {**conflict,
                          "majority_winner": teams.get(conflict["majority_winner_id"]),
                          "dissent_winner": teams.get(conflict["dissent_winner_id"])},
         }
+        item["error_analysis"] = PredictionHistoryErrorAnalysisService.analyze_item(item, row.matchup_factors)
+        return item
 
     @staticmethod
-    def _conflict(row: PredictionHistorySnapshot, predictions: list[int | None]) -> dict:
+    def _conflict_values(row: PredictionHistorySnapshot, predictions: list[int | None],
+                         ml_a: Decimal | None, ml_b: Decimal | None) -> dict:
         base = {"type": "none", "strength": None, "strong": False,
                 "majority_winner_id": None, "dissent_winner_id": None,
                 "dissenting_prediction": None}
@@ -198,7 +292,7 @@ class PredictionHistoryService:
             return {**base, "type": "incomplete"}
         margins = [abs(float(row.team_strength_a) - float(row.team_strength_b)),
                    abs(float(row.matchup_a) - float(row.matchup_b)),
-                   abs(float(row.ml_a_probability) - float(row.ml_b_probability)) * 100]
+                   abs(float(ml_a) - float(ml_b)) * 100]
         strength = sum(margins) / len(margins)
         distinct = set(predictions)
         if len(distinct) == 1:
@@ -219,29 +313,9 @@ class PredictionHistoryService:
                 "dissenting_prediction": layer}
 
     @staticmethod
-    def _statistics(items: list[dict]) -> dict:
-        def metric(key: str) -> dict:
-            eligible = [item[key] for item in items if item["completed"] and item[key]["predicted_winner_id"] is not None]
-            correct = sum(value["correct"] is True for value in eligible)
-            return {"correct": correct, "total": len(eligible), "accuracy": None if not eligible else correct / len(eligible)}
-        consensus = [item["consensus"] for item in items if item["completed"] and item["consensus"]["votes"] == 3]
-        correct = sum(value["correct"] is True for value in consensus)
-        conflict_statistics = {}
-        for conflict_type in ("ts_matchup_vs_ml", "ts_ml_vs_matchup", "matchup_ml_vs_ts"):
-            eligible = [item for item in items if item["completed"] and item["conflict"]["type"] == conflict_type]
-            majority_correct = sum(item["conflict"]["majority_winner_id"] == item["actual_winner_id"] for item in eligible)
-            dissent_correct = sum(item["conflict"]["dissent_winner_id"] == item["actual_winner_id"] for item in eligible)
-            total = len(eligible)
-            conflict_statistics[conflict_type] = {
-                "total": total, "majority_correct": majority_correct, "dissent_correct": dissent_correct,
-                "majority_accuracy": None if not total else majority_correct / total,
-                "dissent_accuracy": None if not total else dissent_correct / total,
-            }
-        return {"team_strength": metric("team_strength"), "matchup": metric("matchup"), "ml": metric("ml"),
-                "consensus_3_3": {"correct": correct, "total": len(consensus),
-                                  "accuracy": None if not consensus else correct / len(consensus)},
-                "conflicts": conflict_statistics,
-                "strong_conflict_threshold": settings.prediction_history_strong_conflict_threshold}
+    def _model_versions(items: list[dict]) -> dict:
+        return {key: sorted({item["versions"][key] or "unknown" for item in items})
+                for key in ("team_strength", "matchup", "ml")}
 
     async def _tournaments(self) -> list[dict]:
         rows = (await self.session.execute(select(Tournament.id, Tournament.name).join(

@@ -9,6 +9,7 @@ from cs2eye.models.team import RankingImportRun, Team, TeamRankingSnapshot
 from cs2eye.services.form_context_service import (
     FormContextService, expected_probability, rank_strength, series_quality,
 )
+from cs2eye.services.opponent_context_service import OpponentContextService
 
 
 AS_OF = date(2026, 8, 26)
@@ -88,3 +89,28 @@ async def test_insufficient_data_returns_null_scores(form_db) -> None:
 
 def test_rank_strength_is_monotonic() -> None:
     assert rank_strength(3) > rank_strength(10) > rank_strength(30)
+
+
+async def test_opponent_context_is_temporal_depth_one_and_cached(form_db) -> None:
+    await seed(form_db)
+    async with form_db() as session:
+        service=OpponentContextService(session)
+        first=await service.calculate(1,AS_OF,1)
+        second=await service.calculate(1,AS_OF,1)
+    assert first is second
+    assert first["depth"]==1
+    assert all(row["date"]<AS_OF for row in first["matches"])
+    assert {row["match_id"] for row in first["matches"]}=={2,3,4}
+
+
+async def test_strong_win_has_more_quality_and_weak_loss_more_penalty(form_db) -> None:
+    await seed(form_db)
+    async with form_db() as session:
+        rows=(await OpponentContextService(session).calculate(1,AS_OF,1))["matches"]
+    strong_win=next(row for row in rows if row["match_id"]==3)
+    weak_win=next(row for row in rows if row["match_id"]==4)
+    assert strong_win["opponent_dynamic_strength"]>weak_win["opponent_dynamic_strength"]
+    assert strong_win["result_quality_score"]>weak_win["result_quality_score"]
+    # The loss to highly ranked Team 2 is not punished like a loss to a weak team.
+    loss=next(row for row in rows if row["match_id"]==2)
+    assert loss["result_quality_score"]>-1

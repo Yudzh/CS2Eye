@@ -1,7 +1,7 @@
 from datetime import date,datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON,Boolean,Date,DateTime,ForeignKey,Index,Integer,Numeric,String,UniqueConstraint,func,text
+from sqlalchemy import JSON,Boolean,CheckConstraint,Date,DateTime,ForeignKey,Index,Integer,Numeric,String,UniqueConstraint,func,text
 from sqlalchemy.orm import Mapped,mapped_column
 from cs2eye.db.base import Base
 
@@ -20,6 +20,16 @@ class WinProbabilityModelArtifact(Base):
     __table_args__=(Index("uq_win_probability_one_active", "active", unique=True,
         postgresql_where=text("active = true"), sqlite_where=text("active = 1")),)
 
+
+class MLFeatureDiagnosticRun(Base):
+    __tablename__="ml_feature_diagnostic_runs"
+    id:Mapped[int]=mapped_column(Integer,primary_key=True)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=False,server_default=func.now())
+    model_version:Mapped[str]=mapped_column(String(32),nullable=False)
+    feature_schema_version:Mapped[str]=mapped_column(String(32),nullable=False)
+    sample_size:Mapped[int]=mapped_column(Integer,nullable=False)
+    report_json:Mapped[dict]=mapped_column(JSON,nullable=False)
+
 class MatchPrediction(Base):
     __tablename__="match_predictions"
     __table_args__=(UniqueConstraint("series_id","mode","model_version","as_of",name="uq_match_prediction_snapshot"),)
@@ -34,12 +44,17 @@ class MatchPrediction(Base):
 
 class PredictionHistorySnapshot(Base):
     __tablename__ = "prediction_history_snapshots"
+    __table_args__ = (CheckConstraint("source IN ('pre_match','retrospective')", name="ck_prediction_history_source"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     tournament_id: Mapped[int | None] = mapped_column(ForeignKey("tournaments.id", ondelete="SET NULL"), index=True)
     as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    source: Mapped[str] = mapped_column(String(24), nullable=False, default="live", server_default="live")
+    source: Mapped[str] = mapped_column(String(24), nullable=False, default="pre_match", server_default="pre_match")
+    team_strength_model_version: Mapped[str | None] = mapped_column(String(64))
+    matchup_model_version: Mapped[str | None] = mapped_column(String(64))
+    ml_model_version: Mapped[str | None] = mapped_column(String(64))
+    ml_feature_schema_version: Mapped[str | None] = mapped_column(String(64))
     team_a_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
     team_b_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
     team_strength_a: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
@@ -48,6 +63,7 @@ class PredictionHistorySnapshot(Base):
     matchup_a: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     matchup_b: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     matchup_winner_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
+    matchup_factors: Mapped[dict | None] = mapped_column(JSON)
     ml_a_probability: Mapped[Decimal | None] = mapped_column(Numeric(10, 8))
     ml_b_probability: Mapped[Decimal | None] = mapped_column(Numeric(10, 8))
     ml_winner_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))

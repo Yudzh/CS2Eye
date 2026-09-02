@@ -14,6 +14,7 @@ from cs2eye.api.routers.analyst_factors import router as analyst_factors_router
 from cs2eye.api.routers.ml_models import router as ml_models_router
 from cs2eye.api.routers.llm_quality import router as llm_quality_router
 from cs2eye.api.routers.prediction_history import router as prediction_history_router
+from cs2eye.api.routers.model_sandbox import router as model_sandbox_router
 
 
 api_router = APIRouter(
@@ -43,3 +44,4 @@ api_router.include_router(analyst_factors_router)
 api_router.include_router(ml_models_router)
 api_router.include_router(llm_quality_router)
 api_router.include_router(prediction_history_router)
+api_router.include_router(model_sandbox_router)

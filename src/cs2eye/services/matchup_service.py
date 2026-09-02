@@ -6,7 +6,8 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cs2eye.analytics.matchup_config import MATCHUP_MODEL_VERSION, MATCHUP_WEIGHTS, TACTICAL_WEIGHTS
+from cs2eye.analytics.matchup_config import ACTIVE_MATCHUP_CONFIG, MATCHUP_CONFIGS, MATCHUP_MODEL_VERSION, MATCHUP_WEIGHTS, TACTICAL_WEIGHTS
+from cs2eye.analytics.matchup_engine import apply_config_to_payload, calculate_matchup
 from cs2eye.analytics.scoring.core import FactorInput, score_factors
 from cs2eye.models.match import Match, MatchVetoAction
 from cs2eye.services.calculated_veto_service import CalculatedVetoService
@@ -34,6 +35,14 @@ def advantage_level(score: float) -> str:
 
 def confidence_level(reliability: float) -> str:
     return "low" if reliability < .45 else "medium" if reliability < .75 else "high"
+
+def form_context_input(form_pair:dict)->FactorInput:
+    form_a,form_b=form_pair["team_a_form_context"],form_pair["team_b_form_context"]
+    def value(payload):
+        present=[float(payload[key]) for key in ("tournament_form_score","recent_60d_adjusted_form_score","strength_of_schedule_score","performance_vs_expectation_score") if payload.get(key) is not None]
+        return sum(present)/len(present) if present else None
+    score=cross(value(form_a),value(form_b));confidence=min(float(form_a.get("recent_60d_reliability",0)),float(form_b.get("recent_60d_reliability",0)))
+    return FactorInput("form_context","Контекст формы",form_pair,score,MATCHUP_WEIGHTS["form_context"],min(form_a["recent_60d_matches_count"],form_b["recent_60d_matches_count"]),confidence,"Турнирная форма и последние 60 дней с поправкой на силу соперников и ожидание.",score is not None)
 
 
 def relevant_map_weights(calculated: dict, format: str, actual: list[MatchVetoAction] | None = None) -> dict[str, tuple[float,str]]:
@@ -79,16 +88,19 @@ def aggregate_maps(calculated: dict, weights: dict[str,tuple[float,str]]) -> tup
 class MatchupService:
     def __init__(self,session:AsyncSession):self.session=session
 
-    async def calculate(self,team_a_id:int,team_b_id:int,format:str="bo3",analysis_mode:str="pre_veto",as_of:date|None=None,series_id:int|None=None)->dict:
+    async def calculate(self,team_a_id:int,team_b_id:int,format:str="bo3",analysis_mode:str="pre_veto",as_of:date|None=None,series_id:int|None=None,model_version:str|None=None)->dict:
         if format not in {"bo1","bo3","bo5"}:raise ValueError("format must be bo1, bo3 or bo5")
         if analysis_mode not in {"pre_veto","post_veto"}:raise ValueError("analysis_mode must be pre_veto or post_veto")
         if team_a_id==team_b_id:raise ValueError("Нужны две разные команды.")
+        config=MATCHUP_CONFIGS.get(model_version or ACTIVE_MATCHUP_CONFIG.version)
+        if config is None:raise ValueError("Unknown Matchup model version.")
         as_of=as_of or date.today();historical=as_of < date.today()
         # Current aggregate/roster artifacts are not temporal snapshots. In a historical
         # request they are deliberately disabled instead of leaking future information.
         if historical:
             from cs2eye.services.analytics_as_of_service import AnalyticsAsOfService
-            return await AnalyticsAsOfService(self.session).calculate(team_a_id,team_b_id,as_of,format,analysis_mode,series_id)
+            payload=await AnalyticsAsOfService(self.session).calculate(team_a_id,team_b_id,as_of,format,analysis_mode,series_id)
+            return payload if config.version==MATCHUP_MODEL_VERSION else apply_config_to_payload(payload,config)
         comparison=await TeamComparisonService(self.session,now=datetime.combine(as_of,datetime.min.time(),tzinfo=UTC)).compare(team_a_id,team_b_id)
         calculated=await CalculatedVetoService(self.session,today=as_of).calculate(team_a_id,team_b_id,"bo3")
         actual=await self._actual_veto(team_a_id,team_b_id,series_id,as_of) if analysis_mode=="post_veto" else None
@@ -116,17 +128,11 @@ class MatchupService:
         target_match=await self.session.get(Match,series_id) if series_id else None
         form_pair=await FormContextService(self.session).compare(team_a_id,team_b_id,as_of,
             target_match.tournament_id if target_match else None,series_id)
-        form_a,form_b=form_pair["team_a_form_context"],form_pair["team_b_form_context"]
-        def form_score(payload):
-            values=[payload.get(key) for key in ("tournament_form_score","recent_60d_adjusted_form_score","strength_of_schedule_score","performance_vs_expectation_score")]
-            present=[float(value) for value in values if value is not None]
-            return sum(present)/len(present) if present else None
-        form_context_score=cross(form_score(form_a),form_score(form_b))
-        form_conf=min(float(form_a.get("recent_60d_reliability",0)),float(form_b.get("recent_60d_reliability",0)))
+        form_factor=form_context_input(form_pair)
         inputs=[
             FactorInput("map_veto","Карты и вето",{"mode":analysis_mode,"format":format},map_score,MATCHUP_WEIGHTS["map_veto"],len(maps),map_conf,"Релевантные карты определены фактическим или расчётным вето."),
             FactorInput("team_strength","Сила команд",None,strength_score,MATCHUP_WEIGHTS["team_strength"],confidence=strength_conf,reason="Сравнение готовых Team Strength V2 без повторного расчёта."),
-            FactorInput("form_context","Контекст формы",form_pair,form_context_score,MATCHUP_WEIGHTS["form_context"],min(form_a["recent_60d_matches_count"],form_b["recent_60d_matches_count"]),form_conf,"Турнирная форма и последние 60 дней с поправкой на силу соперников и ожидание.",form_context_score is not None),
+            form_factor,
             FactorInput("current_roster_form","Текущий состав и форма",None,roster_score,MATCHUP_WEIGHTS["current_roster_form"],confidence=roster_conf,reason="Recent 5/10/20 текущего состава плавно смешаны с историей организации через roster reliability."),
             FactorInput("tactical_matchup","Тактическое соответствие",tactical,tactical["score"],MATCHUP_WEIGHTS["tactical_matchup"],confidence=tactical_conf,reason="CT/T, bomb, contextual Swing/combat, economy, utility и trading на релевантных картах."),
             FactorInput("h2h","Личные встречи",{"scope":"current_rosters" if h2h.current_rosters.maps_played else "organizations"},h2h_score,MATCHUP_WEIGHTS["h2h"],hslice.maps_played,h2h_conf,"Текущие составы приоритетнее истории организаций.",h2h_score is not None),
@@ -134,12 +140,12 @@ class MatchupService:
         ]
         available=[item for item in inputs if item.available and item.normalized_score is not None]
         reliability=sum((item.confidence or 0)*item.weight for item in available)/sum(item.weight for item in available) if available else 0
-        result=score_factors(inputs,reliability);score=result.final_score;team_b_score=round(100-score,2)
+        result=calculate_matchup(inputs,reliability,config);score=result.final_score;team_b_score=round(100-score,2)
         winner=team_a_id if score>53 else team_b_id if score<47 else None
         names={team_a_id:comparison.team_a.team.name,team_b_id:comparison.team_b.team.name}
-        return {"model_version":MATCHUP_MODEL_VERSION,"score_semantics":"analytical_score_0_100_not_probability","analysis_mode":analysis_mode,"format":format,"as_of":as_of,"historical_policy":"current_snapshot" if not historical else "historical_safe",
+        return {"model_version":config.version,"score_semantics":"analytical_score_0_100_not_probability","analysis_mode":analysis_mode,"format":format,"as_of":as_of,"historical_policy":"current_snapshot" if not historical else "historical_safe",
             "team_a":{"id":team_a_id,"name":names[team_a_id],"score":score,"advantage":round(score-50,2)},"team_b":{"id":team_b_id,"name":names[team_b_id],"score":team_b_score,"advantage":round(team_b_score-50,2)},
-            "raw_score":result.raw_score,"reliability":result.reliability,"confidence_level":confidence_level(result.reliability),
+            "raw_score":result.raw_score,"reliability":result.reliability,"raw_coverage":getattr(result,"raw_coverage",None),"effective_coverage":getattr(result,"effective_coverage",None),"factor_agreement_score":getattr(result,"factor_agreement_score",None),"confidence_level":confidence_level(result.reliability),
             "advantage":{"team_id":winner,"team_name":names.get(winner),"level":advantage_level(score)},
             "factors":[{**factor.__dict__,"score":factor.normalized_score,"sample":factor.sample_size} for factor in result.factors],"maps":maps,"tactical":tactical,
             "veto":{"basis":"actual_veto" if actual else "calculated_veto","series_id":series_id,"calculated_veto_model_version":calculated["calculated_veto_model_version"]},

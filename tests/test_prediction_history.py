@@ -37,9 +37,10 @@ async def test_capture_saves_all_three_snapshots_and_never_recalculates(history_
     async def compare(self, a, b):
         return SimpleNamespace(team_a=SimpleNamespace(strength=SimpleNamespace(team_strength_score=state["strength"][0])), team_b=SimpleNamespace(strength=SimpleNamespace(team_strength_score=state["strength"][1])))
     async def matchup(self, *args):
-        return {"team_a": {"score": state["matchup"][0]}, "team_b": {"score": state["matchup"][1]}}
+        winner = 1 if state["matchup"][0] > 53 else 2 if state["matchup"][0] < 47 else None
+        return {"model_version":"matchup_v1","team_a": {"score": state["matchup"][0]}, "team_b": {"score": state["matchup"][1]}, "reliability":.8,"advantage":{"team_id":winner},"factors":[{"key":"map_veto","label":"Карты и вето","score":60,"weight":.3,"effective_weight":.3,"impact":3,"confidence":.9,"available":True}]}
     async def ml(*args, **kwargs):
-        return {"prediction_status": "available", "team_a": {"probability": state["ml"][0]}, "team_b": {"probability": state["ml"][1]}}
+        return {"prediction_status": "available", "model_version":"ml_v1", "feature_schema_version":"features_v2", "team_a": {"probability": state["ml"][0]}, "team_b": {"probability": state["ml"][1]}}
     monkeypatch.setattr(module.TeamComparisonService, "compare", compare)
     monkeypatch.setattr(module.MatchupService, "calculate", matchup)
     monkeypatch.setattr(module, "predict_win_probability", ml)
@@ -50,12 +51,17 @@ async def test_capture_saves_all_three_snapshots_and_never_recalculates(history_
         await session.commit()
         assert (float(first.team_strength_a), float(first.team_strength_b), first.team_strength_winner_id) == (60, 40, 1)
         assert (float(first.matchup_a), float(first.matchup_b), first.matchup_winner_id) == (45, 55, 2)
+        assert first.matchup_factors["factors"]["map_veto"]["contribution"] == 2.4
         assert (float(first.ml_a_probability), float(first.ml_b_probability), first.ml_winner_id) == (.61, .39, 1)
+        assert first.source == "pre_match"
+        assert (first.team_strength_model_version, first.matchup_model_version,
+                first.ml_model_version, first.ml_feature_schema_version) == ("v2", "matchup_v1", "ml_v1", "features_v2")
         state.update(strength=(1, 99), matchup=(99, 1), ml=(.1, .9))
         second = await service.capture(10, as_of=datetime(2026, 9, 1, tzinfo=UTC))
         assert second.id == first.id
         assert (float(second.team_strength_a), second.team_strength_winner_id) == (60, 1)
         assert (float(second.matchup_a), second.matchup_winner_id) == (45, 2)
+        assert second.matchup_factors["factors"]["map_veto"]["contribution"] == 2.4
         assert (float(second.ml_a_probability), second.ml_winner_id) == (.61, 1)
 
 
@@ -77,7 +83,13 @@ async def test_history_result_consensus_accuracy_missing_ml_pending_and_filters(
             team_strength_a=60, team_strength_b=40, team_strength_winner_id=1,
             matchup_a=60, matchup_b=40, matchup_winner_id=1,
             ml_a_probability=.57, ml_b_probability=.43, ml_winner_id=1)
-        session.add_all([pending, completed_match, missing_ml, unanimous_match, unanimous])
+        retrospective_match = Match(id=13, tournament_id=1, match_date=date(2026, 8, 28), team_a_id=1, team_b_id=2,
+            format="bo3", stage="group", environment="lan", status="completed", resolution_status="resolved", winner_team_id=1, team_a_maps_won=2, team_b_maps_won=0)
+        retrospective = PredictionHistorySnapshot(match_id=13, tournament_id=1, as_of=datetime(2026, 8, 27, tzinfo=UTC), source="retrospective", team_a_id=1, team_b_id=2,
+            team_strength_a=1, team_strength_b=99, team_strength_winner_id=2,
+            matchup_a=1, matchup_b=99, matchup_winner_id=2,
+            ml_a_probability=.01, ml_b_probability=.99, ml_winner_id=2)
+        session.add_all([pending, completed_match, missing_ml, unanimous_match, unanimous, retrospective_match, retrospective])
         await session.commit()
         service = PredictionHistoryService(session)
         result = await service.history()
@@ -91,9 +103,19 @@ async def test_history_result_consensus_accuracy_missing_ml_pending_and_filters(
         assert result["statistics"]["matchup"] == {"correct": 2, "total": 2, "accuracy": 1.0}
         assert result["statistics"]["ml"] == {"correct": 1, "total": 1, "accuracy": 1.0}
         assert result["statistics"]["consensus_3_3"] == {"correct": 1, "total": 1, "accuracy": 1.0}
+        assert result["statistics"]["snapshot_counts"] == {"pre_match": 3, "retrospective": 1, "completed_pre_match": 2}
+        assert by_match[10]["evaluation"] == {"eligible": True, "reason": None}
+        assert by_match[13]["evaluation"] == {"eligible": False, "reason": "retrospective"}
+        assert by_match[13]["ml"]["evaluation_status"] == "not_evaluable_retrospective"
+        assert by_match[13]["ml"]["predicted_winner_id"] is None
+        assert by_match[13]["versions"] == {"team_strength": None, "matchup": None, "ml": None, "ml_feature_schema": None}
         assert [item["match_id"] for item in (await service.history(status="future"))["items"]] == [10]
         assert [item["match_id"] for item in (await service.history(consensus_3_3=True))["items"]] == [12]
         assert [item["match_id"] for item in (await service.history(match_date=date(2026, 8, 30)))["items"]] == [11]
+        assert {item["match_id"] for item in (await service.history(source="pre_match"))["items"]} == {10, 11, 12}
+        retrospective_only = await service.history(source="retrospective")
+        assert [item["match_id"] for item in retrospective_only["items"]] == [13]
+        assert retrospective_only["statistics"]["team_strength"]["total"] == 2
 
 
 async def test_capture_tournament_processes_only_new_scheduled_matches_with_teams(history_db, monkeypatch) -> None:
@@ -129,15 +151,19 @@ async def test_completed_match_can_be_captured_only_as_strict_retrospective(hist
         with pytest.raises(ValueError, match="после завершения"):
             await PredictionHistoryService(session).capture(10)
         async def historical(self, *args):
-            return {"team_a":{"score":44},"team_b":{"score":56},"team_strength":{"team_a_score":48,"team_b_score":52}}
+            return {"model_version":"matchup_v1","team_a":{"score":44},"team_b":{"score":56},"team_strength":{"team_a_score":48,"team_b_score":52},"reliability":.8,"advantage":{"team_id":2},"factors":[]}
         async def ml(*args, **kwargs):
-            return {"prediction_status":"available","team_a":{"probability":.4},"team_b":{"probability":.6}}
+            raise AssertionError("retrospective capture must not invoke current ML")
         monkeypatch.setattr(module.AnalyticsAsOfService,"calculate",historical)
         monkeypatch.setattr(module,"predict_win_probability",ml)
         row = await PredictionHistoryService(session).capture(10, retrospective=True)
         assert row.source == "retrospective"
         assert row.as_of.date() == match.match_date
-        assert (row.team_strength_winner_id,row.matchup_winner_id,row.ml_winner_id) == (2,2,2)
+        assert (row.team_strength_winner_id,row.matchup_winner_id,row.ml_winner_id) == (2,2,None)
+        assert row.ml_a_probability is None and row.ml_b_probability is None
+        item = (await PredictionHistoryService(session).history())["items"][0]
+        assert item["evaluation"] == {"eligible": False, "reason": "retrospective"}
+        assert item["ml"]["evaluation_status"] == "not_evaluable_retrospective"
 
 
 async def test_conflict_types_statistics_and_filters(history_db) -> None:
@@ -188,3 +214,29 @@ async def test_conflict_types_statistics_and_filters(history_db) -> None:
         assert {item["match_id"] for item in strong["items"]} == {11, 12, 13, 16}
         # Match 16 is future and therefore did not increase the completed total.
         assert strong["statistics"]["conflicts"]["ts_matchup_vs_ml"]["total"] == 1
+
+
+async def test_official_accuracy_uses_only_two_pre_match_among_ten_retrospective(history_db) -> None:
+    async with history_db() as session:
+        for index in range(12):
+            match_id = 20 + index
+            source = "pre_match" if index < 2 else "retrospective"
+            actual = 1
+            session.add(Match(id=match_id, tournament_id=1, match_date=date(2026, 7, index + 1),
+                team_a_id=1, team_b_id=2, format="bo3", stage="group", environment="lan",
+                status="completed", resolution_status="resolved", winner_team_id=actual,
+                team_a_maps_won=2, team_b_maps_won=0))
+            session.add(PredictionHistorySnapshot(match_id=match_id, tournament_id=1,
+                as_of=datetime(2026, 6, index + 1, tzinfo=UTC), source=source,
+                team_a_id=1, team_b_id=2, team_strength_a=60, team_strength_b=40,
+                team_strength_winner_id=1, matchup_a=60, matchup_b=40, matchup_winner_id=1,
+                ml_a_probability=.6, ml_b_probability=.4, ml_winner_id=1, actual_winner_id=actual))
+        await session.commit()
+        result = await PredictionHistoryService(session).history()
+        assert result["statistics"]["team_strength"]["total"] == 2
+        assert result["statistics"]["matchup"]["total"] == 2
+        assert result["statistics"]["ml"]["total"] == 2
+        assert result["statistics"]["consensus_3_3"]["total"] == 2
+        assert result["statistics"]["snapshot_counts"] == {
+            "pre_match": 2, "retrospective": 10, "completed_pre_match": 2,
+        }

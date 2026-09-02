@@ -17,6 +17,7 @@ import {
   getTeamMapDetail,
   getTeamMatchStats,
   getTeamVeto,
+  getOpponentContext,
 } from "./api";
 import type {
   ProbeResult,
@@ -39,7 +40,10 @@ import { TournamentsPage } from "./pages/TournamentsPage";
 import { AddTournamentPage } from "./pages/AddTournamentPage";
 import { AddTournamentMatchPage } from "./pages/AddTournamentMatchPage";
 import { MLModelsPage } from "./pages/MLModelsPage";
+import { MLFeatureDiagnosticsPage } from "./pages/MLFeatureDiagnosticsPage";
 import { PredictionHistoryPage } from "./pages/PredictionHistoryPage";
+import { MatchupCalibrationPage } from "./pages/MatchupCalibrationPage";
+import { ModelSandboxPage } from "./pages/ModelSandboxPage";
 import { AnalystFactorsPanel } from "./components/AnalystFactorsPanel";
 import { TeamFormContextBlock } from "./components/FormContextPanel";
 
@@ -299,6 +303,7 @@ function TeamPage({ id }: { id: number }) {
   const [aggregationLevel, setAggregationLevel] = useState<"organization" | "current_roster">("current_roster");
   const [matchStats, setMatchStats] = useState<TeamMatchStats | null>(null);
   const [veto,setVeto]=useState<TeamVetoProfile|null>(null);
+  const [opponentContext,setOpponentContext]=useState<any>(null);
 
   useEffect(() => {
     getTeam(id).then(setTeam).catch((value: unknown) => {
@@ -317,6 +322,7 @@ function TeamPage({ id }: { id: number }) {
 
   useEffect(() => { void getTeamMatchStats(id, aggregationLevel).then(setMatchStats).catch(() => setMatchStats(null)); }, [id, aggregationLevel]);
   useEffect(() => { void getTeamVeto(id, aggregationLevel).then(setVeto).catch(() => setVeto(null)); }, [id, aggregationLevel]);
+  useEffect(() => { void getOpponentContext(id).then(setOpponentContext).catch(() => setOpponentContext(null)); }, [id]);
 
   if (error) return <main className="page"><a className="back-link" href="/">← К командам</a><div className="empty-state empty-state--error">{error}</div></main>;
   if (!team) return <main className="page"><div className="empty-state">Загружаю команду…</div></main>;
@@ -389,6 +395,7 @@ function TeamPage({ id }: { id: number }) {
 
       <AnalystFactorsPanel teamId={team.id} roster={team.roster} initial={team.analyst_factors} />
 
+      {opponentContext&&<section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">{opponentContext.version} · candidate</p><h2>Форма с учётом силы соперников</h2></div><div><b>Raw {opponentContext.raw_form_score.toFixed(1)}</b> → <b>Adjusted {opponentContext.opponent_adjusted_form_score.toFixed(1)}</b></div></div><div className="map-pool-table"><div className="map-pool-row map-pool-row--head"><span>Соперник</span><span>Счёт</span><span>Сила соперника</span><span>Качество результата</span></div>{opponentContext.matches.slice(0,8).map((x:any)=><div className="map-pool-row" key={x.match_id}><strong>{x.opponent.name||x.opponent.id}</strong><span>{x.series_score}</span><span>{x.opponent_dynamic_strength.toFixed(1)} <small>reliability {(x.opponent_reliability*100).toFixed(0)}%</small></span><span>{x.result_quality_label.replaceAll("_"," ")}</span></div>)}</div><p className="formula">Dynamic SoS {opponentContext.dynamic_sos_score?.toFixed(1)??"—"} · Tournament adjusted {opponentContext.tournament_opponent_adjusted_form_score?.toFixed(1)??"нет матчей"}. Только матчи строго до даты расчёта.</p></section>}
       <section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">Standalone analytics</p><h2>Leadership</h2></div></div><div className="h2h-grid"><article className="h2h-card"><h3>IGL</h3>{team.leadership.igl?<><a href={`/players/${team.leadership.igl.player_id}`}><strong>{team.leadership.igl.name}</strong></a><div className="team-map-rates"><span>Player Strength <b>{team.leadership.igl.player_strength??"—"}</b></span><span>IGL Strength <b>{team.leadership.igl.score.toFixed(1)}</b></span><span>Captain Strength <b>{team.leadership.igl.captain_strength?.toFixed(1)??"—"}</b></span></div><LeadershipFactors value={team.leadership.igl}/></>:<p>Активная роль IGL достоверно не назначена.</p>}</article><article className="h2h-card"><h3>Coach</h3>{team.leadership.coach?<><a href={`/players/${team.leadership.coach.id}`}><strong>{team.leadership.coach.name}</strong></a><div className="team-map-rates"><span>Coach Impact <b>{team.leadership.coach.score.toFixed(1)}</b></span><span>Confidence <b>{(team.leadership.coach.reliability*100).toFixed(0)}%</b></span><span>Maps <b>{team.leadership.coach.sample.maps}</b></span></div><LeadershipFactors value={team.leadership.coach}/></>:<p>Активный coach не определён.</p>}</article></div><p className="formula">Leadership — корреляционная attribution-модель и не входит в Team Strength.</p></section>
 
       <section className="strength-panel team-match-panel"><div className="section-heading"><div><p className="eyebrow">Серии</p><h2>Матчи</h2></div><a className="back-link" href={`/matches?team_id=${id}`}>Все серии →</a></div>{matchStats ? <><div className="team-match-summary"><article><span>Всего</span><strong>{matchStats.all.matches_played}</strong></article><article><span>Победы</span><strong>{matchStats.all.matches_won}</strong></article><article><span>Поражения</span><strong>{matchStats.all.matches_lost}</strong></article><article><span>Winrate</span><strong>{matchStats.all.match_win_rate === null ? "—" : `${matchStats.all.match_win_rate.toFixed(1)}%`}</strong></article></div><div className="team-match-breakdown"><span>BO1: <b>{matchStats.by_format.bo1.matches_won}–{matchStats.by_format.bo1.matches_lost}</b></span><span>BO3: <b>{matchStats.by_format.bo3.matches_won}–{matchStats.by_format.bo3.matches_lost}</b></span><span>BO5: <b>{matchStats.by_format.bo5.matches_won}–{matchStats.by_format.bo5.matches_lost}</b></span><span>LAN: <b>{matchStats.by_context.lan.matches_won}–{matchStats.by_context.lan.matches_lost}</b></span><span>Playoff: <b>{matchStats.by_context.playoff.matches_won}–{matchStats.by_context.playoff.matches_lost}</b></span><span>Final: <b>{matchStats.by_context.final.matches_won}–{matchStats.by_context.final.matches_lost}</b></span></div></> : <div className="empty-state">Статистика матчей пока недоступна.</div>}</section>
@@ -524,8 +531,11 @@ function rankChangeLabel(
 
 
 export default function App() {
+  if (/^\/model-sandbox\/?$/.test(window.location.pathname)) return <ModelSandboxPage />;
+  if (/^\/matchup-calibration\/?$/.test(window.location.pathname)) return <MatchupCalibrationPage />;
   if (/^\/prediction-history\/?$/.test(window.location.pathname)) return <PredictionHistoryPage />;
   if (/^\/ml\/models\/?$/.test(window.location.pathname)) return <MLModelsPage />;
+  if (/^\/ml\/feature-diagnostics\/?$/.test(window.location.pathname)) return <MLFeatureDiagnosticsPage />;
   if (/^\/demos\/?$/.test(window.location.pathname)) return <DemosPage />;
   if (/^\/matches\/?$/.test(window.location.pathname)) return <MatchesPage />;
   const seriesMatch = window.location.pathname.match(/^\/matches\/(\d+)\/?$/);
@@ -645,7 +655,7 @@ export default function App() {
         </span>
       </header>
 
-      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a><a className="button" href="/prediction-history">Prediction History</a><a className="button" href="/ml/models">ML-модели</a></nav>
+      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a><a className="button" href="/prediction-history">Prediction History</a><a className="button" href="/matchup-calibration" title="Read-only сравнение готовых Matchup V1 и V2">Matchup V1 ↔ V2</a><a className="button" href="/model-sandbox" title="Ручные временные эксперименты с Matchup и ML features">Model Sandbox</a><a className="button" href="/ml/models">ML-модели и активация</a><a className="button" href="/ml/feature-diagnostics" title="Read-only диагностика признаков текущей активной ML-модели">ML: диагностика текущей модели</a></nav>
 
       <section className="hero">
         <div>
