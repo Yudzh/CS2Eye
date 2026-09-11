@@ -73,6 +73,8 @@ def test_trade_window_intermediate_kill_and_single_was_traded():
     assert not events[3].is_trade_kill
     assert players["b3"]["trade_kills"] == 1
     assert teams["B"]["trade_kills"] == 1
+    assert players["b3"]["ct_trade_kills"] == 1
+    assert players["b1"]["ct_deaths_traded"] == 1
 
 
 def test_revenge_after_window_or_other_round_is_not_trade():
@@ -103,6 +105,8 @@ def test_1v3_transition_is_one_clutch_and_win():
     assert players["a5"]["clutch_1v5_attempts"] == 1
     assert players["a5"]["clutch_1v5_wins"] == 1
     assert teams["A"]["clutch_wins"] == 1
+    assert players["a5"]["t_clutch_opportunities"] == 1
+    assert players["a5"]["t_clutch_1v5_wins"] == 1
 
 
 def test_1v1_loss_and_empty_rates_are_null():

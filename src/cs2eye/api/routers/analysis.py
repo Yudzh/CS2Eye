@@ -35,6 +35,7 @@ from cs2eye.services.team_map_aggregate_service import (
 from cs2eye.services.team_map_strength_service import (
     MapStrengthResult, calculate_map_strength,
 )
+from cs2eye.services.map_strength_v3_service import MapStrengthV3Service
 from cs2eye.services.team_h2h_service import (
     H2HTeamNotFoundError, SameTeamH2HError, TeamH2HService,
 )
@@ -751,6 +752,42 @@ async def compare_team_maps(
         "status": "current_roster_unavailable" if roster_unavailable else "available",
         "maps": maps, "summary": summary,
     }
+
+
+@router.get("/teams/{team_id}/maps-v3")
+async def team_maps_v3(team_id: int, as_of: date | None = None, exclude_match_id: int | None = None,
+                      exclude_demo_id: int | None = None, tournament_id: int | None = None,
+                      match_id: int | None = None, session: AsyncSession = Depends(get_db_session)) -> dict:
+    try:
+        pool = await MapStrengthV3Service(session).pool(team_id, as_of, exclude_match_id=exclude_match_id,
+            exclude_demo_id=exclude_demo_id, tournament_id=tournament_id, match_id=match_id)
+        return {**pool, "maps": [{"map": item["map"], "map_strength_v3": item} for item in pool["maps"]]}
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/teams/{team_id}/maps-v3/{map_name}")
+async def team_map_v3(team_id: int, map_name: str, as_of: date | None = None,
+                     exclude_match_id: int | None = None, exclude_demo_id: int | None = None,
+                     tournament_id: int | None = None, match_id: int | None = None,
+                     session: AsyncSession = Depends(get_db_session)) -> dict:
+    try:
+        value = await MapStrengthV3Service(session).calculate(team_id, map_name, as_of,
+            exclude_match_id=exclude_match_id, exclude_demo_id=exclude_demo_id,
+            tournament_id=tournament_id, match_id=match_id)
+        return {"map": map_name, "map_strength_v3": value}
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/maps-v3/recalculate")
+async def recalculate_team_maps_v3(team_id: int, session: AsyncSession = Depends(get_db_session)) -> dict:
+    try:
+        value = await MapStrengthV3Service(session).pool(team_id, force=True)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    await session.commit()
+    return {**value, "maps": [{"map": item["map"], "map_strength_v3": item} for item in value["maps"]]}
 
 
 @router.get("/teams/{team_id}/maps", response_model=TeamMapsResponse)

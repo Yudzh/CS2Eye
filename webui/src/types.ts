@@ -14,6 +14,7 @@ export interface Team {
   is_analytics_active: boolean;
   roster_synced_at: string | null;
   roster: TeamParticipant[];
+  analyst_factors: AnalystFactor[];
 }
 
 export interface TeamStrengthFactor {
@@ -51,8 +52,10 @@ export interface TeamStrength {
 export interface TeamDetail extends Team {
   strength: TeamStrength;
   leadership: Leadership;
-  analyst_factors: AnalystFactor[];
   form_context: FormContext;
+  performance_profile: PerformanceProfile;
+  team_strength_v3: TeamStrengthV3;
+  form_v3: TeamFormV3New;
 }
 export interface FormContext {as_of:string;window_days:number;tournament_id:number|null;tournament_form_score:number|null;tournament_strength_of_schedule_score:number|null;tournament_reliability:number;recent_60d_adjusted_form_score:number|null;strength_of_schedule_score:number|null;performance_vs_expectation_score:number|null;recent_60d_reliability:number;tournament_matches_count:number;recent_60d_matches_count:number;top5_matches_60d:number;top10_matches_60d:number;top20_matches_60d:number;top30_matches_60d:number;close_series_count:number;upset_wins_count:number;strong_losses_count:number;performed_above_expectation_count:number;performed_below_expectation_count:number;status:"available"|"insufficient_data";tournament_status:"available"|"insufficient_data";cutoff_policy:string}
 export type AnalystFactorType = "positive" | "negative";
@@ -151,6 +154,26 @@ export interface TeamMapsResponse {
   roster_sample: { maps_played: number; first_match_date: string | null; last_match_date: string | null } | null;
   maps: TeamMapAggregate[];
 }
+
+export interface MapV3Metric {
+  score: number | null; reliability: number; sample_size?: number; wins?: number;
+  weight?: number; effective_weight?: number; coverage?: number;
+  unavailable_reason?: string | null; metrics?: Record<string, MapV3Metric>;
+  plant_opportunities?:number; plants?:number; diagnostics?:Record<string,MapV3Metric>;
+}
+export interface MapV3Results extends MapV3Metric {maps:number; wins:number; losses:number; round_differential:number; rounds:number; effective_maps:number}
+export interface MapStrengthV3Item {
+  map:string; map_id:number|null; is_active_pool:boolean; score:number|null; reliability:number;
+  delta_vs_team:number|null; team_strength_v3:number|null; status:string; flags:string[];
+  model_version:string; as_of:string;
+  components:Record<"results_quality"|"side_performance"|"map_execution",MapV3Metric>;
+  sides:Record<"ct"|"t",MapV3Metric & {rounds:number}>;
+  results_breakdown:{overall:MapV3Results;groups:Record<string,MapV3Results>};
+  performance_profile:PerformanceProfile; sample:Record<string,number>;
+  reliability_breakdown:Record<string,number>;
+  roster_context:{source:string;effective_player_ids:number[];permanent_player_ids:number[];warnings:string[];replacements:Array<{id:number;player_in:{id:number;nickname:string};player_out:{id:number;nickname:string}}>};
+}
+export interface MapsV3Response {team_id:number;as_of:string;model_version:string;maps:MapStrengthV3Item[]}
 
 export interface TeamMapDetail extends TeamMapAggregate {
   aggregation_level: "organization" | "current_roster";
@@ -336,6 +359,9 @@ export interface TournamentListItem {id:number;name:string;year:number;tier:stri
 export interface TournamentListResponse {total:number;items:TournamentListItem[]}
 export interface TournamentProblem {match_id:number;code:string;message:string}
 export interface TournamentView {tournament:Omit<TournamentListItem,"summary">;summary:TournamentSummary;matches:MatchSeries[];stages:string[];bracket_links:Array<{from_match_id:number;to_match_id:number;source:"manual"|"inferred"}>;problems:TournamentProblem[];participants:Array<{team_id:number;name:string;seed:number|null}>}
+export interface RosterPlayerRef {id:number;nickname:string}
+export interface TournamentRosterReplacement {id:number;player_out:RosterPlayerRef;player_in:RosterPlayerRef;status:"MANUAL"|"CONFIRMED"|"DETECTED";source_type:"MANUAL"|"AUTO";source_reference:string|null}
+export interface EffectiveTournamentRoster {team_id:number;tournament_id:number;permanent_roster:RosterPlayerRef[];effective_roster:RosterPlayerRef[];replacements:TournamentRosterReplacement[];has_temporary_replacement:boolean;stand_in_penalty:number;roster_source:string;override_status:string|null;reliability:string;warnings:string[]}
 export interface TournamentPredictionMatch {id:number;source_match_id:number|null;round_number:number|null;round_label:string|null;stage:MatchStage;bracket_section:MatchSeries["bracket_section"];bracket_position:number|null;format:MatchFormat;team_a:{id:number|null;name:string|null};team_b:{id:number|null;name:string|null};team_a_probability:number|null;team_b_probability:number|null;team_a_score:number|null;team_b_score:number|null;predicted_winner_id:number|null;predicted_winner_name:string|null;confidence:number|null;reliability:number|null;prediction_type:"actual_match"|"projected_match";prediction_basis:"win_probability"|"matchup_score";status:"available"|"comparison_fallback"|"insufficient_data"|"model_not_trained"|"actual_result";model_version:string|null;created_at:string;invalidated_at:string|null}
 export interface TournamentPredictions {tournament_id:number;prediction_run_id:number;generated_at:string;model_version:string|null;model_status?:"active"|"experimental"|null;quality_gate_passed?:boolean|null;status:string;outdated:boolean;matches:TournamentPredictionMatch[]}
 export interface TournamentCreate {name:string;year:number;tier:string|null;environment:"lan"|"online";start_date:string;end_date:string;structure_type:TournamentStructure;team_ids:number[];matches:Array<{team_a_id:number|null;team_b_id:number|null;match_date:string;format:"bo1"|"bo3"|"bo5";stage:MatchStage;round_number:number|null;round_label:string|null;group:string|null;bracket_section:MatchSeries["bracket_section"];bracket_position:number|null}>}
@@ -378,6 +404,14 @@ export interface TeamComparisonPlayer {
   bo3_rating: string | number | null;
   bo3_avg_rating: string | number | null;
   player_strength: number | null;
+  mechanical_strength_v3: number|null;
+  supporting_strength_v3: number|null;
+  player_strength_v3: number|null;
+  player_strength_v3_reliability: number|null;
+  player_strength_v3_breakdown: PlayerStrengthV3Breakdown|null;
+  player_strength_v3_model_version: string|null;
+  round_impact: number|null;
+  round_impact_reliability: number|null;
   internal_rating: string | number | null;
   internal_rating_version: string | null;
   internal_rating_top15: string | number | null;
@@ -459,6 +493,15 @@ export interface TeamParticipant {
   joined_at: string | null;
   left_at: string | null;
   player_strength: number | null;
+  mechanical_strength_v3:number|null;
+  supporting_strength_v3:number|null;
+  player_strength_v3:number|null;
+  player_strength_v3_reliability:number|null;
+  player_strength_v3_breakdown:PlayerStrengthV3Breakdown|null;
+  player_strength_v3_model_version:string|null;
+  player_form_v3:PlayerFormV3;
+  round_impact:number|null;
+  round_impact_reliability:number|null;
   bo3_rating: string | number | null;
   bo3_avg_rating: string | number | null;
   internal_rating: string | number | null;
@@ -507,6 +550,14 @@ export interface Player {
   player_strength_raw_score: number | null;
   player_strength_reliability: number | null;
   player_strength_model_version: string | null;
+  mechanical_strength_v3:number|null;
+  supporting_strength_v3:number|null;
+  player_strength_v3:number|null;
+  player_strength_v3_reliability:number|null;
+  player_strength_v3_breakdown:PlayerStrengthV3Breakdown|null;
+  player_strength_v3_model_version:string|null;
+  player_form_v3:PlayerFormV3;
+  performance_profile:PerformanceProfile;
   igl: Leadership["igl"];
   captain_strength: number|null;
   steam_id: string | null;
@@ -537,6 +588,19 @@ export interface Player {
   utility: { overall: UtilityStats | null; recent_5: UtilityStats | null; recent_10: UtilityStats | null; recent_20: UtilityStats | null; top_15: UtilityStats | null; top_16_30: UtilityStats | null; maps: Record<string, UtilityStats | null> };
   round_swing: SwingScope & {status:string;overall:SwingScope|null;maps:Record<string,SwingScope|null>;rank_scopes:Record<string,SwingScope|null>;recent:Record<string,SwingScope|null>;model?:{round_win_model_version:string|null;round_swing_model_version:string;trained_at:string|null}};
 }
+
+export interface PlayerStrengthV3Block{score:number|null;reliability:number;factors:Array<{key:string;raw_value:number|null;normalized_score:number|null;weight:number;effective_weight:number;sample:{maps:number;rounds:number};reliability:number;available:boolean;normalization:string}>}
+export interface PlayerStrengthV3Breakdown{mechanical:PlayerStrengthV3Block;supporting:PlayerStrengthV3Block;scopes:Record<string,{mechanical:PlayerStrengthV3Block;supporting:PlayerStrengthV3Block;sample:{maps:number;rounds:number}}> ;sample:{maps:number;rounds:number;combat_coverage:number;utility_coverage:number}}
+export interface PerformanceFactor{key:string;raw_value:number|null;normalized_score:number|null;weight:number;effective_weight:number;available:boolean}
+export interface PerformanceMetric{score:number|null;reliability:number;sample_size:number;breakdown:PerformanceFactor[];unavailable_reason:string|null;limitation:string|null;situations?:Record<string,{attempts:number;wins:number}>|null;model_version:string}
+export interface PerformanceProfile{model_version:string;normalization_version:string;as_of:string|null;entity_type:"player"|"team";entity_id:number;scopes:Record<"overall"|"ct"|"t",Record<"firepower"|"entrying"|"trading"|"opening"|"clutching"|"sniping"|"utility",PerformanceMetric>>}
+export interface TeamStrengthV3Player{id:number;nickname:string;player_strength_v3:number|null;mechanical_strength:number|null;supporting_strength:number|null;reliability:number}
+export interface TeamStrengthV3{score:number|null;reliability:number;model_version:string;as_of:string;roster:{id:number|null;active_from:string|null;active_to:string|null;players_count:number;age_days:number|null;total_maps:number;current_roster_maps:number;partial_roster_maps:number;old_roster_maps:number;unknown_roster_maps:number;current_roster_matches:number;selected_maps:number;selected_rounds:number;current_roster_percentage:number;ranking_snapshots:number;ranking_coverage:number;roster_applicability_coverage:number;latest_current_roster_map_date:string|null};components:{roster_quality:{score:number|null;reliability:number;weight:number;avg_all:number|null;avg_top_2:number|null;avg_bottom_2:number|null;players:TeamStrengthV3Player[]};team_execution:{score:number|null;reliability:number;weight:number;coverage:number;metrics:Record<string,{score:number|null;reliability:number;sample_size:number;weight:number}>};results_quality:{score:number|null;reliability:number;weight:number;overall:{maps:number;wins:number;losses:number;average_round_diff:number|null;adjusted_score:number|null};groups:Record<string,{maps:number;wins:number;losses:number;average_round_diff:number|null;adjusted_score:number|null}>;sample:{total_maps:number;current_roster_maps:number;partial_roster_maps:number;old_roster_maps:number;unknown_roster_maps:number;current_roster_matches:number;selected_maps:number;selected_rounds:number;current_roster_percentage:number;ranking_snapshots:number;ranking_coverage:number;roster_applicability_coverage:number;latest_current_roster_map_date:string|null}}};reliability_breakdown:{score:number;factors:Record<string,number>;weights:Record<string,number>;score_component_coverage:number}}
+export interface FormScope{score:number;delta:number;maps:number;rounds:number;opponents:number;available:boolean}
+export interface TeamFormV3Event{series_key:string;match_id:number|null;date:string;opponent_id:number|null;opponent:string|null;tournament_id:number|null;tournament:string|null;environment:"lan"|"online"|"unknown";format:"bo1"|"bo3"|"bo5"|"unknown";actual_result:"win"|"loss";round_score:string;round_diff:number;maps:number;rounds:number;expected:number;performance_vs_expectation:number;form_contribution:number;opponent_rank:number|null;opponent_group:string;expectation_source:string;freshness_weight:number;aggregation_weight:number}
+export interface TeamFormV3Scope{delta:number|null;score:number|null;reliability:number;series:number;maps:number;rounds:number;available:boolean;effective_weight:number;events:TeamFormV3Event[]}
+export interface TeamFormV3New{score:number|null;delta:number|null;form_score:number|null;form_delta:number|null;reliability:number;model_version:"team_form.v3";as_of:string;team_id:number;roster_id:number|null;current_tournament:TeamFormV3Scope&{tournament_id:number|null};recent_60d:TeamFormV3Scope&{window_days:number;excludes_tournament_id:number|null};effective_weights:{current_tournament:number;recent_60d:number};opponent_breakdown:Record<string,{delta:number|null;series:number;maps:number;rounds:number;available:boolean}>;events:TeamFormV3Event[];environment_breakdown:Record<"lan"|"online"|"unknown",number>;sample:{candidate_maps:number;current_roster_maps:number;excluded_roster_maps:number;series:number;maps:number;rounds:number}}
+export interface PlayerFormV3{score:number;delta:number;reliability:number;model_version:string;mechanical_form:{delta:number|null;reliability:number};supporting_form:{delta:number|null;reliability:number};metrics:Record<string,{delta:number|null;recent_score:number|null;baseline_score:number|null;reliability:number;sample_size:number}>}
 
 export interface SwingScope {score?:number|null;raw_per_round?:number;adjusted_per_round?:number;confidence?:number;rounds?:number;ct?:number|null;t?:number|null;opening?:number|null;trade?:number|null;clutch?:number|null;postplant?:number|null;retake?:number|null;total_swing?:number;positive_swing?:number;negative_swing?:number}
 

@@ -20,6 +20,15 @@ class TeamParticipantResponse(BaseModel):
     joined_at: datetime | None = None
     left_at: datetime | None = None
     player_strength: int | None = None
+    mechanical_strength_v3: float | None = None
+    supporting_strength_v3: float | None = None
+    player_strength_v3: float | None = None
+    player_strength_v3_reliability: float | None = None
+    player_strength_v3_breakdown: dict | None = None
+    player_strength_v3_model_version: str | None = None
+    player_form_v3: dict = Field(default_factory=dict)
+    round_impact: float | None = None
+    round_impact_reliability: float | None = None
     bo3_rating: Decimal | None = None
     bo3_avg_rating: Decimal | None = None
     internal_rating: Decimal | None = None
@@ -108,13 +117,16 @@ class TeamListItem(BaseModel):
     roster: list[TeamParticipantResponse] = Field(
         default_factory=list,
     )
+    analyst_factors: list[AnalystFactorResponse] = Field(default_factory=list)
 
 
 class TeamDetailResponse(TeamListItem):
     strength: TeamStrengthResponse
     leadership: dict | None = None
     form_context: dict = Field(default_factory=dict)
-    analyst_factors: list[AnalystFactorResponse] = Field(default_factory=list)
+    performance_profile: dict = Field(default_factory=dict)
+    team_strength_v3: dict = Field(default_factory=dict)
+    form_v3: dict = Field(default_factory=dict)
 
 
 class TeamComparisonPlayerResponse(BaseModel):

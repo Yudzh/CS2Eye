@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -93,3 +93,38 @@ class TournamentViewResponse(BaseModel):
     bracket_links: list[BracketLink]
     problems: list[TournamentProblem]
     participants: list[TournamentParticipant] = []
+
+class TournamentRosterOverrideCreate(BaseModel):
+    team_id: int
+    player_out_id: int
+    player_in_id: int
+    valid_from: date | None = None
+    valid_until: date | None = None
+    notes: str | None = Field(None, max_length=2000)
+    created_by: str | None = Field(None, max_length=160)
+
+class TournamentRosterOverridePatch(BaseModel):
+    player_out_id: int | None = None
+    player_in_id: int | None = None
+    status: Literal["CONFIRMED", "DETECTED", "MANUAL", "REJECTED"] | None = None
+    valid_from: date | None = None
+    valid_until: date | None = None
+    is_active: bool | None = None
+    notes: str | None = Field(None, max_length=2000)
+
+class TournamentRosterOverrideResponse(BaseModel):
+    id: int
+    tournament_id: int
+    team_id: int
+    player_out_id: int
+    player_in_id: int
+    status: str
+    source_type: str
+    source_reference: str | None
+    valid_from: date | None
+    valid_until: date | None
+    is_active: bool
+    created_by: str | None
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime

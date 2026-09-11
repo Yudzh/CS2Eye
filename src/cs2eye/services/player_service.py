@@ -16,6 +16,7 @@ from cs2eye.analytics.scoring.config import (
 )
 from cs2eye.analytics.scoring.core import FactorInput, sample_reliability, score_factors
 from cs2eye.services.round_swing_service import player_round_swing
+from cs2eye.services.player_strength_v3_service import PlayerStrengthV3Service
 
 
 @dataclass(frozen=True)
@@ -170,6 +171,7 @@ async def get_player(session: AsyncSession, player_id: int):
     ), None)
     swing = await player_round_swing(session, player.id)
     player.round_swing = swing
+    player.player_strength_v3_payload=await PlayerStrengthV3Service(session).calculate_and_store(player)
     strength, breakdown = calculate_player_strength(
         player.bo3_rating, internal_rating=player.internal_rating,
         internal_maps=player.internal_rating_maps_count,

@@ -1,5 +1,8 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.api.routers.matches import response as match_response
@@ -8,9 +11,13 @@ from cs2eye.api.schemas.tournaments import (
     BracketLink, TournamentCreateRequest, TournamentListItem, TournamentListResponse, TournamentPatchRequest,
     TournamentParticipant, TournamentScheduledMatchCreate,
     TournamentProblem, TournamentSummary, TournamentViewResponse,
+    TournamentRosterOverrideCreate, TournamentRosterOverridePatch, TournamentRosterOverrideResponse,
 )
 from cs2eye.db.session import get_db_session
-from cs2eye.models.match import Tournament
+from cs2eye.models.match import Tournament, TournamentRosterOverride
+from cs2eye.models.team import AnalystFactor
+from cs2eye.services.effective_roster_service import EffectiveRosterService
+from cs2eye.services.tournament_lineup_monitor import TournamentLineupMonitor
 from cs2eye.services.tournament_view_service import TournamentNotFoundError, TournamentViewService
 from cs2eye.services.team_import_service import TeamImportService
 from cs2eye.services.match_service import MatchService
@@ -147,5 +154,66 @@ async def patch_tournament(tournament_id: int, payload: TournamentPatchRequest, 
         return tournament_response(tournament)
     except TournamentNotFoundError as error:
         await session.rollback(); raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        await session.rollback(); raise HTTPException(422, str(error)) from error
+
+
+@router.get("/{tournament_id}/roster-overrides", response_model=list[TournamentRosterOverrideResponse])
+async def list_roster_overrides(tournament_id: int, team_id: int | None = None,
+        session: AsyncSession = Depends(get_db_session)):
+    query = select(TournamentRosterOverride).where(TournamentRosterOverride.tournament_id == tournament_id)
+    if team_id is not None: query = query.where(TournamentRosterOverride.team_id == team_id)
+    return list((await session.scalars(query.order_by(TournamentRosterOverride.team_id, TournamentRosterOverride.id))).all())
+
+
+@router.post("/{tournament_id}/roster-overrides", response_model=TournamentRosterOverrideResponse, status_code=201)
+async def create_roster_override(tournament_id: int, payload: TournamentRosterOverrideCreate,
+        session: AsyncSession = Depends(get_db_session)):
+    try:
+        row = await EffectiveRosterService(session).create_manual(tournament_id, **payload.model_dump())
+        await session.commit(); await session.refresh(row); return row
+    except ValueError as error:
+        await session.rollback(); raise HTTPException(422, str(error)) from error
+
+
+@router.patch("/{tournament_id}/roster-overrides/{override_id}", response_model=TournamentRosterOverrideResponse)
+async def patch_roster_override(tournament_id: int, override_id: int, payload: TournamentRosterOverridePatch,
+        session: AsyncSession = Depends(get_db_session)):
+    row = await session.get(TournamentRosterOverride, override_id)
+    if row is None or row.tournament_id != tournament_id: raise HTTPException(404, "Override not found")
+    changes = payload.model_dump(exclude_unset=True)
+    if row.source_type == "AUTO" and changes.get("status") == "MANUAL":
+        raise HTTPException(422, "Create a separate manual override instead")
+    for key, value in changes.items(): setattr(row, key, value)
+    if row.player_in_id == row.player_out_id:
+        await session.rollback(); raise HTTPException(422, "player_in and player_out must differ")
+    await session.commit(); await session.refresh(row); return row
+
+
+@router.delete("/{tournament_id}/roster-overrides/{override_id}", status_code=204)
+async def disable_roster_override(tournament_id: int, override_id: int,
+        session: AsyncSession = Depends(get_db_session)):
+    row = await session.get(TournamentRosterOverride, override_id)
+    if row is None or row.tournament_id != tournament_id: raise HTTPException(404, "Override not found")
+    row.is_active = False
+    if row.analyst_factor_id:
+        factor = await session.get(AnalystFactor, row.analyst_factor_id)
+        if factor is not None: factor.is_active = False
+    await session.commit()
+
+
+@router.get("/{tournament_id}/teams/{team_id}/effective-roster")
+async def get_effective_roster(tournament_id: int, team_id: int, match_id: int | None = None,
+        as_of: date | None = None, session: AsyncSession = Depends(get_db_session)):
+    try: return await EffectiveRosterService(session).get_effective_roster(team_id, tournament_id, match_id, as_of)
+    except ValueError as error: raise HTTPException(422, str(error)) from error
+
+
+@router.post("/{tournament_id}/teams/{team_id}/roster-overrides/check")
+async def check_roster(tournament_id: int, team_id: int,
+        session: AsyncSession = Depends(get_db_session)):
+    try:
+        result = await TournamentLineupMonitor(session).check(tournament_id, team_id)
+        await session.commit(); return result
     except ValueError as error:
         await session.rollback(); raise HTTPException(422, str(error)) from error

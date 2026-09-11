@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer,
-    String, UniqueConstraint, func,
+    String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +34,35 @@ class TournamentTeam(Base):
     tournament_id: Mapped[int] = mapped_column(ForeignKey("tournaments.id", ondelete="CASCADE"), nullable=False, index=True)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
     seed: Mapped[int | None] = mapped_column(Integer)
+
+
+class TournamentRosterOverride(Base):
+    __tablename__ = "tournament_roster_overrides"
+    __table_args__ = (
+        CheckConstraint("status IN ('CONFIRMED','DETECTED','MANUAL','REJECTED')", name="ck_tournament_roster_override_status"),
+        CheckConstraint("source_type IN ('AUTO','MANUAL')", name="ck_tournament_roster_override_source"),
+        CheckConstraint("player_out_id <> player_in_id", name="ck_tournament_roster_override_different_players"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    analyst_factor_id: Mapped[int | None] = mapped_column(
+        ForeignKey("analyst_factors.id", ondelete="SET NULL"), unique=True, index=True,
+    )
+    tournament_id: Mapped[int] = mapped_column(ForeignKey("tournaments.id", ondelete="CASCADE"), nullable=False, index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
+    player_out_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="RESTRICT"), nullable=False, index=True)
+    player_in_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="RESTRICT"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_reference: Mapped[str | None] = mapped_column(Text)
+    valid_from: Mapped[date | None] = mapped_column(Date)
+    valid_until: Mapped[date | None] = mapped_column(Date)
+    detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true", index=True)
+    created_by: Mapped[str | None] = mapped_column(String(160))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class Match(Base):

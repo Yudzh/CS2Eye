@@ -40,6 +40,11 @@ def _empty_player() -> dict:
         "deaths_traded": 0, "deaths_not_traded": 0,
         "clutch_opportunities": 0, "clutch_wins": 0, "clutch_losses": 0,
         **{f"clutch_1v{x}_{field}": 0 for x in range(1, 6) for field in ("attempts", "wins")},
+        **{f"{side}_{key}": 0 for side in ("ct", "t") for key in
+           ("trade_kills", "trade_opportunities", "deaths_traded", "deaths_not_traded",
+            "clutch_opportunities", "clutch_wins", "clutch_losses")},
+        **{f"{side}_clutch_1v{x}_{field}": 0 for side in ("ct", "t")
+           for x in range(1, 6) for field in ("attempts", "wins")},
     }
 
 
@@ -126,6 +131,8 @@ def calculate_combat(kills: Iterable[CombatKill], rosters: dict[str, set[str]],
             possible = alive.get(event.victim_team, set()) - {event.victim_key}
             for key in possible:
                 players[key]["trade_opportunities"] += 1
+                if event.victim_side in {"CT", "T"}:
+                    players[key][f"{event.victim_side.lower()}_trade_opportunities"] += 1
             alive.setdefault(event.victim_team, set()).discard(event.victim_key)
             for prior_pos in range(pos - 1, -1, -1):
                 prior_i, prior = valid[prior_pos]
@@ -136,6 +143,10 @@ def calculate_combat(kills: Iterable[CombatKill], rosters: dict[str, set[str]],
                     output[prior_i] = replace(output[prior_i], was_traded=True)
                     players[event.attacker_key]["trade_kills"] += 1
                     players[prior.victim_key]["deaths_traded"] += 1
+                    if event.attacker_side in {"CT", "T"}:
+                        players[event.attacker_key][f"{event.attacker_side.lower()}_trade_kills"] += 1
+                    if prior.victim_side in {"CT", "T"}:
+                        players[prior.victim_key][f"{prior.victim_side.lower()}_deaths_traded"] += 1
                     teams[event.attacker_team]["trade_kills"] += 1
                     teams[prior.victim_team]["deaths_traded"] += 1
                     break
@@ -146,9 +157,18 @@ def calculate_combat(kills: Iterable[CombatKill], rosters: dict[str, set[str]],
                     clutch_started[team] = (player, size)
         for team, (player, size) in clutch_started.items():
             won = round_winners.get(round_number) == team
+            side = next((e.attacker_side for _, e in valid if e.attacker_team == team and e.attacker_side in {"CT", "T"}), None)
+            if side is None:
+                side = next((e.victim_side for _, e in valid if e.victim_team == team and e.victim_side in {"CT", "T"}), None)
             players[player]["clutch_opportunities"] += 1; players[player]["clutch_wins" if won else "clutch_losses"] += 1
             players[player][f"clutch_1v{size}_attempts"] += 1
             if won: players[player][f"clutch_1v{size}_wins"] += 1
+            if side:
+                prefix = side.lower()
+                players[player][f"{prefix}_clutch_opportunities"] += 1
+                players[player][f"{prefix}_clutch_{'wins' if won else 'losses'}"] += 1
+                players[player][f"{prefix}_clutch_1v{size}_attempts"] += 1
+                if won: players[player][f"{prefix}_clutch_1v{size}_wins"] += 1
             teams[team]["clutch_opportunities"] += 1; teams[team]["clutch_wins" if won else "clutch_losses"] += 1
             teams[team][f"clutch_1v{size}_attempts"] += 1
             if won: teams[team][f"clutch_1v{size}_wins"] += 1
@@ -156,4 +176,6 @@ def calculate_combat(kills: Iterable[CombatKill], rosters: dict[str, set[str]],
     for event in output:
         if event.valid_enemy_kill and not event.was_traded:
             players[event.victim_key]["deaths_not_traded"] += 1
+            if event.victim_side in {"CT", "T"}:
+                players[event.victim_key][f"{event.victim_side.lower()}_deaths_not_traded"] += 1
     return output, {k: _rates(v) for k, v in players.items()}, {k: _rates(v) for k, v in teams.items()}, issues

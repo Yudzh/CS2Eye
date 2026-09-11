@@ -94,6 +94,11 @@ class Team(Base):
         ForeignKey("team_rosters.id", ondelete="SET NULL", use_alter=True),
         index=True,
     )
+    team_strength_v3: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    team_strength_v3_reliability: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    team_strength_v3_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    team_strength_v3_model_version: Mapped[str | None] = mapped_column(String(32))
+    team_strength_v3_calculated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Player(Base):
@@ -117,6 +122,12 @@ class Player(Base):
     bo3_rating: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
     player_strength: Mapped[int | None] = mapped_column(Integer)
     strength_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    mechanical_strength_v3: Mapped[Decimal | None] = mapped_column(Numeric(8,4))
+    supporting_strength_v3: Mapped[Decimal | None] = mapped_column(Numeric(8,4))
+    player_strength_v3: Mapped[Decimal | None] = mapped_column(Numeric(8,4))
+    player_strength_v3_reliability: Mapped[Decimal | None] = mapped_column(Numeric(8,6))
+    player_strength_v3_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    player_strength_v3_model_version: Mapped[str | None] = mapped_column(String(32))
     source_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
     )
@@ -446,3 +457,56 @@ class TeamRankingSnapshot(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class TeamStrengthV3Snapshot(Base):
+    __tablename__ = "team_strength_v3_snapshots"
+    __table_args__ = (UniqueConstraint("team_id", "as_of", "model_version",
+                                      name="uq_team_strength_v3_snapshot"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    reliability: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    breakdown: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class TeamFormV3Snapshot(Base):
+    __tablename__ = "team_form_v3_snapshots"
+    __table_args__ = (UniqueConstraint("team_id", "as_of", "model_version",
+                                      name="uq_team_form_v3_snapshot"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    tournament_id: Mapped[int | None] = mapped_column(ForeignKey("tournaments.id", ondelete="SET NULL"), index=True)
+    form_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    form_delta: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    reliability: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    current_tournament_delta: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    recent_60d_delta: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    model_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    breakdown: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MapStrengthV3Snapshot(Base):
+    __tablename__="map_strength_v3_snapshots"
+    __table_args__=(UniqueConstraint("team_id","map_name","as_of","model_version",name="uq_map_strength_v3_snapshot"),)
+    id:Mapped[int]=mapped_column(Integer,primary_key=True)
+    team_id:Mapped[int]=mapped_column(ForeignKey("teams.id",ondelete="CASCADE"),nullable=False,index=True)
+    map_name:Mapped[str]=mapped_column(String(160),nullable=False,index=True)
+    as_of:Mapped[date]=mapped_column(Date,nullable=False,index=True)
+    map_score:Mapped[Decimal|None]=mapped_column(Numeric(8,4),nullable=True)
+    map_delta:Mapped[Decimal|None]=mapped_column(Numeric(8,4),nullable=True)
+    ct_score:Mapped[Decimal|None]=mapped_column(Numeric(8,4))
+    ct_delta:Mapped[Decimal|None]=mapped_column(Numeric(8,4))
+    t_score:Mapped[Decimal|None]=mapped_column(Numeric(8,4))
+    t_delta:Mapped[Decimal|None]=mapped_column(Numeric(8,4))
+    reliability:Mapped[Decimal]=mapped_column(Numeric(8,4),nullable=False)
+    breakdown:Mapped[dict[str,Any]]=mapped_column(JSON,nullable=False,default=dict)
+    model_version:Mapped[str]=mapped_column(String(32),nullable=False)
+    calculated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=False,server_default=func.now())

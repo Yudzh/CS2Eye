@@ -17,6 +17,7 @@ import type {
   DemoMapResult, DemoMapResultPatch, DemoMapOption,
   DemoRoundsResponse, DemoSideStatsResponse, DemoBombStatsResponse, DemoEconomyStatsResponse, DemoCombatStatsResponse, DemoUtilityStatsResponse,
   TeamMapsResponse,
+  MapsV3Response,
   TeamMapDetail,
   CurrentRosterComparison,
   TeamMapComparisonResponse,
@@ -114,6 +115,12 @@ export function getTeams(): Promise<Team[]> {
 export function getTeam(id: number): Promise<TeamDetail> {
   return request<TeamDetail>(`/api/v1/teams/${id}`);
 }
+export function getTeamStrengthV3(id: number): Promise<TeamDetail["team_strength_v3"]> {
+  return request<TeamDetail["team_strength_v3"]>(`/api/v1/teams/${id}/strength-v3`);
+}
+export function getTeamFormV3(id: number): Promise<TeamDetail["form_v3"]> {
+  return request<TeamDetail["form_v3"]>(`/api/v1/teams/${id}/form-v3`);
+}
 export function createAnalystFactor(payload:AnalystFactorPayload):Promise<AnalystFactor>{return request("/api/v1/analyst-factors",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})}
 export function updateAnalystFactor(id:number,payload:Partial<AnalystFactorPayload>):Promise<AnalystFactor>{return request(`/api/v1/analyst-factors/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})}
 export async function deleteAnalystFactor(id:number):Promise<void>{await request(`/api/v1/analyst-factors/${id}`,{method:"DELETE"})}
@@ -121,6 +128,11 @@ export async function deleteAnalystFactor(id:number):Promise<void>{await request
 export function getTeamMaps(id: number, level: "organization" | "current_roster" = "organization"): Promise<TeamMapsResponse> {
   return request<TeamMapsResponse>(`/api/v1/analysis/teams/${id}/maps?aggregation_level=${level}`);
 }
+export async function getTeamMapsV3(id:number, query=""):Promise<MapsV3Response>{
+  const value=await request<Omit<MapsV3Response,"maps"> & {maps:Array<{map:string;map_strength_v3:MapsV3Response["maps"][number]}>}>(`/api/v1/analysis/teams/${id}/maps-v3${query}`);
+  return {...value,maps:value.maps.map(item=>item.map_strength_v3)};
+}
+export function getTeamMapV3(id:number,map:string,query=""):Promise<{map_strength_v3:MapsV3Response["maps"][number]}>{return request(`/api/v1/analysis/teams/${id}/maps-v3/${encodeURIComponent(map)}${query}`)}
 
 export function getTeamMapDetail(id: number, mapName: string, level: "organization" | "current_roster" = "organization"): Promise<TeamMapDetail> {
   return request<TeamMapDetail>(`/api/v1/analysis/teams/${id}/maps/${encodeURIComponent(mapName)}?aggregation_level=${level}`);
@@ -189,6 +201,10 @@ export function createTournament(payload:import("./types").TournamentCreate):Pro
 export function createTournamentMatch(id:number,payload:import("./types").TournamentCreate["matches"][number]):Promise<MatchSeries>{return request(`/api/v1/tournaments/${id}/matches`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})}
 export function importTournamentTeam(slug_or_url:string):Promise<{id:number;name:string}>{return request("/api/v1/tournaments/import-team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slug_or_url})})}
 export function getTournamentView(id:number):Promise<import("./types").TournamentView>{return request(`/api/v1/tournaments/${id}/view`)}
+export function getEffectiveTournamentRoster(tournamentId:number,teamId:number):Promise<import("./types").EffectiveTournamentRoster>{return request(`/api/v1/tournaments/${tournamentId}/teams/${teamId}/effective-roster`)}
+export function createTournamentRosterOverride(tournamentId:number,payload:{team_id:number;player_out_id:number;player_in_id:number;notes?:string|null}):Promise<unknown>{return request(`/api/v1/tournaments/${tournamentId}/roster-overrides`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})}
+export function disableTournamentRosterOverride(tournamentId:number,id:number):Promise<void>{return request(`/api/v1/tournaments/${tournamentId}/roster-overrides/${id}`,{method:"DELETE"})}
+export function checkTournamentRoster(tournamentId:number,teamId:number):Promise<{status:string}>{return request(`/api/v1/tournaments/${tournamentId}/teams/${teamId}/roster-overrides/check`,{method:"POST"})}
 export function getTournamentPredictions(id:number):Promise<import("./types").TournamentPredictions|null>{return request(`/api/v1/tournaments/${id}/predictions`)}
 export function generateTournamentPredictions(id:number):Promise<import("./types").TournamentPredictions>{return request(`/api/v1/tournaments/${id}/predictions/generate`,{method:"POST"})}
 export function patchTournament(id:number,payload:Partial<{structure_type:import("./types").TournamentStructure}>):Promise<import("./types").TournamentListItem>{return request(`/api/v1/tournaments/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})}

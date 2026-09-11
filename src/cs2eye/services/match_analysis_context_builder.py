@@ -31,6 +31,8 @@ from cs2eye.services.team_comparison_service import TeamComparisonService
 from cs2eye.services.team_h2h_service import TeamH2HService
 from cs2eye.services.team_map_strength_service import calculate_map_strength
 from cs2eye.services.win_probability_service import predict_win_probability
+from cs2eye.services.effective_roster_service import EffectiveRosterService
+from cs2eye.services.tournament_lineup_monitor import TournamentLineupMonitor
 
 
 MAX_CURRENT_TOURNAMENT_EVIDENCE = 5
@@ -125,6 +127,14 @@ class MatchAnalysisContextBuilder:
         limitations: list[str] = []
         warnings: list[str] = []
         missing: list[str] = []
+        effective_rosters: dict[int, dict] = {}
+        if effective_tournament_id is not None:
+            for team_id in (team_a_id, team_b_id):
+                if not historical:
+                    await TournamentLineupMonitor(self.session).check(effective_tournament_id, team_id, match_id)
+                effective_rosters[team_id] = await EffectiveRosterService(self.session).get_effective_roster(
+                    team_id, effective_tournament_id, match_id, as_of)
+                warnings.extend(effective_rosters[team_id]["warnings"])
 
         matchup_payload: dict | None = None
         prediction_payload = await self._prediction(
@@ -166,6 +176,12 @@ class MatchAnalysisContextBuilder:
 
         ranks = await self._ranks_as_of((team_a_id, team_b_id), cutoff, by_id)
         roster_contexts = await self._rosters_as_of((team_a_id, team_b_id), cutoff, by_id)
+        for team_id, effective in effective_rosters.items():
+            if effective["has_temporary_replacement"]:
+                roster_contexts[team_id]["players"] = [
+                    {"id": item["id"], "name": item["nickname"], "role": None}
+                    for item in effective["effective_roster"]
+                ]
         comparison_sides = {}
         if comparison:
             comparison_sides = {

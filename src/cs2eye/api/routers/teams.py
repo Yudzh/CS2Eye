@@ -35,12 +35,65 @@ from cs2eye.models.team import Player, Team, TeamParticipantMembership, TeamRost
 from cs2eye.services.analyst_context_service import AnalystContextService
 from cs2eye.api.routers.analyst_factors import response as analyst_factor_response
 from cs2eye.services.form_context_service import FormContextService
+from cs2eye.services.player_strength_v3_service import PlayerStrengthV3Service
+from cs2eye.services.performance_profile_service import PerformanceProfileService
+from cs2eye.services.team_strength_v3_service import TeamStrengthV3Service
+from cs2eye.services.team_form_v3_service import TeamFormV3Service
 
 
 router = APIRouter(
     prefix="/teams",
     tags=["teams"],
 )
+
+
+@router.get("/{team_id}/performance-profile")
+async def get_team_performance_profile(team_id: int, as_of: date | None = None, session: AsyncSession = Depends(get_db_session)) -> dict:
+    if await session.get(Team, team_id) is None:
+        raise HTTPException(status_code=404, detail="Команда не найдена.")
+    return await PerformanceProfileService(session).team(team_id, as_of)
+
+
+@router.get("/{team_id}/strength-v3")
+async def get_team_strength_v3(team_id: int, as_of: date | None = None,
+                               exclude_match_id: int | None = None,
+                               session: AsyncSession = Depends(get_db_session)) -> dict:
+    try: return await TeamStrengthV3Service(session).calculate(team_id, as_of, exclude_match_id=exclude_match_id)
+    except ValueError as exc: raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{team_id}/strength-v3/recalculate")
+async def recalculate_team_strength_v3(team_id: int, as_of: date | None = None,
+                                       session: AsyncSession = Depends(get_db_session)) -> dict:
+    try: result = await TeamStrengthV3Service(session).calculate(team_id, as_of, force=True)
+    except ValueError as exc: raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit(); return result
+
+
+@router.get("/{team_id}/form-v3")
+async def get_team_form_v3(team_id: int, as_of: date | None = None,
+                           exclude_match_id: int | None = None,
+                           tournament_id: int | None = None,
+                           session: AsyncSession = Depends(get_db_session)) -> dict:
+    try:
+        return await TeamFormV3Service(session).calculate(
+            team_id, as_of, exclude_match_id=exclude_match_id,
+            tournament_id=tournament_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{team_id}/form-v3/recalculate")
+async def recalculate_team_form_v3(team_id: int, as_of: date | None = None,
+                                   tournament_id: int | None = None,
+                                   session: AsyncSession = Depends(get_db_session)) -> dict:
+    try:
+        result = await TeamFormV3Service(session).calculate(
+            team_id, as_of, tournament_id=tournament_id, force=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    return result
 
 
 @router.get("/{team_id}/rosters/current")
@@ -74,10 +127,17 @@ async def get_teams(
 ) -> list[TeamListItem]:
     teams = await list_ranked_teams(session)
     rosters = await list_active_rosters(session)
+    factors_by_team = {
+        team.id: [
+            await analyst_factor_response(session, factor)
+            for factor in await AnalystContextService(session).list(team_id=team.id, active_at=True)
+        ]
+        for team in teams
+    }
     return [
         TeamListItem(
             **TeamListItem.model_validate(team).model_dump(
-                exclude={"roster"},
+                exclude={"roster", "analyst_factors"},
             ),
             roster=[
                 TeamParticipantResponse(
@@ -110,6 +170,7 @@ async def get_teams(
                 for player, membership
                 in rosters.get(team.id, [])
             ],
+            analyst_factors=factors_by_team[team.id],
         )
         for team in teams
     ]
@@ -222,6 +283,17 @@ async def get_team(
     team, roster = await get_team_with_roster(session, team_id)
     if team is None:
         raise HTTPException(status_code=404, detail="Команда не найдена.")
+    v3_service=PlayerStrengthV3Service(session)
+    player_v3_values={}
+    for player,_ in roster:
+        if as_of is not None or player.player_strength_v3 is None:
+            player_v3_values[player.id]=await v3_service.calculate_and_store(player,as_of)
+        else:
+            player_v3_values[player.id]={"mechanical_strength":player.mechanical_strength_v3,
+                "supporting_strength":player.supporting_strength_v3,"player_strength":player.player_strength_v3,
+                "reliability":player.player_strength_v3_reliability,"breakdown":player.player_strength_v3_breakdown,
+                "model_version":player.player_strength_v3_model_version}
+    swings={player.id:await player_round_swing(session,player.id) for player,_ in roster}
     participants = [
         TeamParticipantResponse(
             id=player.id,
@@ -237,6 +309,14 @@ async def get_team(
             joined_at=membership.joined_at,
             left_at=membership.left_at,
             player_strength=player.player_strength,
+            mechanical_strength_v3=player_v3_values[player.id]["mechanical_strength"],
+            supporting_strength_v3=player_v3_values[player.id]["supporting_strength"],
+            player_strength_v3=player_v3_values[player.id]["player_strength"],
+            player_strength_v3_reliability=player_v3_values[player.id]["reliability"],
+            player_strength_v3_breakdown=player_v3_values[player.id]["breakdown"],
+            player_strength_v3_model_version=player_v3_values[player.id].get("model_version") or "player_strength.v3",
+            round_impact=swings[player.id].get("score") if swings[player.id].get("status")=="complete" else None,
+            round_impact_reliability=swings[player.id].get("confidence"),
             bo3_rating=player.bo3_rating,
             bo3_avg_rating=player.bo3_rating,
             internal_rating=player.internal_rating,
@@ -257,8 +337,11 @@ async def get_team(
         performance=await load_team_performance(session, team.id, team.current_roster_id),
     )
     analyst_factors = await AnalystContextService(session).list(team_id=team_id)
+    # Heavy V3 analytics is loaded independently by /strength-v3 so it cannot
+    # block the basic team page response.
+    strength_v3 = team.team_strength_v3_breakdown or {}
     return TeamDetailResponse(
-        **TeamListItem.model_validate(team).model_dump(exclude={"roster"}),
+        **TeamListItem.model_validate(team).model_dump(exclude={"roster", "analyst_factors"}),
         roster=participants,
         strength=TeamStrengthResponse.model_validate(
             strength,
@@ -267,6 +350,7 @@ async def get_team(
         leadership=await LeadershipService(session).team(team_id),
         form_context=await FormContextService(session).calculate(team_id, as_of, tournament_id),
         analyst_factors=[await analyst_factor_response(session, item) for item in analyst_factors],
+        team_strength_v3=strength_v3,
     )
 
 

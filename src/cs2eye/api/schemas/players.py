@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PlayerTeamResponse(BaseModel):
@@ -31,6 +31,14 @@ class PlayerResponse(BaseModel):
     player_strength_raw_score: float | None
     player_strength_reliability: float | None
     player_strength_model_version: str | None
+    mechanical_strength_v3: float | None
+    supporting_strength_v3: float | None
+    player_strength_v3: float | None
+    player_strength_v3_reliability: float | None
+    player_strength_v3_breakdown: dict[str, Any] | None
+    player_strength_v3_model_version: str | None
+    player_form_v3: dict = Field(default_factory=dict)
+    performance_profile: dict[str, Any]
     steam_id: str | None
     internal_rating: Decimal | None
     internal_rating_maps_count: int

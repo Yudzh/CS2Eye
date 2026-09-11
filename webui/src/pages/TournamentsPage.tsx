@@ -1,108 +1,1561 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { captureTournamentPredictionHistory, generateTournamentPredictions, getTournamentPredictions, getTournamentView, getTournaments, patchMatchSeries, patchTournament, updateMatchVeto, updateMatchVetoText } from "../api";
-import type { MatchEnvironment, MatchFormat, MatchResolution, MatchSeries, MatchStage, TournamentListItem, TournamentPredictionMatch, TournamentPredictions, TournamentStructure, TournamentView } from "../types";
-import {BettingRestrictionWarning} from "../components/BettingRestrictionWarning";
+import {
+  captureTournamentPredictionHistory,
+  generateTournamentPredictions,
+  getTournamentPredictions,
+  getTournamentView,
+  getTournaments,
+  patchMatchSeries,
+  patchTournament,
+  updateMatchVeto,
+  updateMatchVetoText,
+  getEffectiveTournamentRoster,
+  createTournamentRosterOverride,
+  disableTournamentRosterOverride,
+  checkTournamentRoster,
+} from "../api";
+import type {
+  EffectiveTournamentRoster,
+  MatchEnvironment,
+  MatchFormat,
+  MatchResolution,
+  MatchSeries,
+  MatchStage,
+  TournamentListItem,
+  TournamentPredictionMatch,
+  TournamentPredictions,
+  TournamentStructure,
+  TournamentView,
+} from "../types";
+import { BettingRestrictionWarning } from "../components/BettingRestrictionWarning";
 
-const stageLabels:Record<MatchStage,string>={group:"Группа",swiss:"Swiss",round_of_32:"1/32",round_of_16:"1/16",quarterfinal:"Четвертьфинал",semifinal:"Полуфинал",final:"Финал",unknown:"Неизвестно"};
-const playoffStages:MatchStage[]=["round_of_32","round_of_16","quarterfinal","semifinal","final"];
-const structures:Record<TournamentStructure,string>={single_elimination:"Single elimination",double_elimination:"Double elimination",swiss:"Swiss",groups:"Группы",groups_playoff:"Группы + playoff",mixed:"Смешанный",unknown:"Не определено"};
-const dateText=(value:string|null)=>value?new Date(`${value}T00:00:00Z`).toLocaleDateString("ru-RU"):"—";
-const errorText=(value:unknown)=>value instanceof Error?value.message:"Не удалось выполнить операцию.";
-const vetoText=(match:MatchSeries)=>match.veto.map(v=>v.action==="decider"?`${v.order_index}. ${v.map_name} was left over`:`${v.order_index}. ${v.team_name??"Team"} ${v.action==="ban"?"removed":"picked"} ${v.map_name}`).join("\n");
-const expectedMaps=(match:MatchSeries)=>Math.max(match.maps.length,match.status==="completed"?match.score.team_a+match.score.team_b:({bo1:1,bo3:3,bo5:5,unknown:match.maps.length}[match.format]));
+const stageLabels: Record<MatchStage, string> = {
+  group: "Группа",
+  swiss: "Swiss",
+  round_of_32: "1/32",
+  round_of_16: "1/16",
+  quarterfinal: "Четвертьфинал",
+  semifinal: "Полуфинал",
+  final: "Финал",
+  unknown: "Неизвестно",
+};
+const playoffStages: MatchStage[] = [
+  "round_of_32",
+  "round_of_16",
+  "quarterfinal",
+  "semifinal",
+  "final",
+];
+const structures: Record<TournamentStructure, string> = {
+  single_elimination: "Single elimination",
+  double_elimination: "Double elimination",
+  swiss: "Swiss",
+  groups: "Группы",
+  groups_playoff: "Группы + playoff",
+  mixed: "Смешанный",
+  unknown: "Не определено",
+};
+const dateText = (value: string | null) =>
+  value ? new Date(`${value}T00:00:00Z`).toLocaleDateString("ru-RU") : "—";
+const errorText = (value: unknown) =>
+  value instanceof Error ? value.message : "Не удалось выполнить операцию.";
+const vetoText = (match: MatchSeries) =>
+  match.veto
+    .map((v) =>
+      v.action === "decider"
+        ? `${v.order_index}. ${v.map_name} was left over`
+        : `${v.order_index}. ${v.team_name ?? "Team"} ${v.action === "ban" ? "removed" : "picked"} ${v.map_name}`,
+    )
+    .join("\n");
+const expectedMaps = (match: MatchSeries) =>
+  Math.max(
+    match.maps.length,
+    match.status === "completed"
+      ? match.score.team_a + match.score.team_b
+      : { bo1: 1, bo3: 3, bo5: 5, unknown: match.maps.length }[match.format],
+  );
 
-function DemoState({match}:{match:MatchSeries}){const expected=expectedMaps(match);const parsed=match.maps.filter(m=>m.parse_status==="success").length;return <span className={parsed===match.maps.length&&match.maps.length?"ok":"warning"}>Demo: {match.maps.length}/{expected} · parsed {parsed}</span>}
-
-function SeriesCard({match,onEdit}:{match:MatchSeries;onEdit:(match:MatchSeries)=>void}){const scheduled=match.status==="scheduled";const compare=match.team_a.id&&match.team_b.id?`/compare?team_a=${match.team_a.id}&team_b=${match.team_b.id}&format=${match.format}&series_id=${match.id}`:null;return <article className="tournament-match-card" onClick={()=>onEdit(match)} tabIndex={0}>
-  <div className="series-score"><span className={match.winner_team_id===match.team_a.id?"winner":""}>{match.team_a.name??"TBD"}{!scheduled&&<b>{match.score.team_a}</b>}</span><span className={match.winner_team_id===match.team_b.id?"winner":""}>{match.team_b.name??"TBD"}{!scheduled&&<b>{match.score.team_b}</b>}</span></div>
-  <small>{match.format.toUpperCase()} · {stageLabels[match.stage]} · {dateText(match.match_date)}</small>
-  <BettingRestrictionWarning restriction={match.betting_restrictions}/>
-  <ul>{match.maps.map(map=><li key={map.demo_file_id}><i className={`demo-dot demo-dot--${map.parse_status}`}/>{map.map_name??"Карта?"}<b>{map.team_a_score??"—"}:{map.team_b_score??"—"}</b>{map.source_deleted_at&&!map.source_available&&map.parse_status==="success"&&<em>данные сохранены</em>}</li>)}</ul>
-  <footer>{scheduled?<span>Запланировано</span>:<><DemoState match={match}/><span>Veto: {match.veto_data_status}</span></>}{compare&&<a className="button button--primary" href={compare} onClick={event=>event.stopPropagation()}>Сравнить команды</a>}<button className="button" onClick={event=>{event.stopPropagation();onEdit(match)}}>Изменить</button></footer>
-</article>}
-
-function MatchEditor({match,all,onClose,onSaved}:{match:MatchSeries;all:MatchSeries[];onClose:()=>void;onSaved:()=>Promise<void>}){
-  const [form,setForm]=useState({format:match.format,stage:match.stage,environment:match.environment,resolution_status:match.resolution_status,is_playoff:match.is_playoff,is_elimination:match.is_elimination,round_number:match.round_number?.toString()??"",round_label:match.round_label??"",group_name:match.group_name??"",bracket_section:match.bracket_section??"",bracket_position:match.bracket_position?.toString()??"",next_match_id:match.next_match_id?.toString()??"",next_match_slot:match.next_match_slot??""});
-  const [veto,setVeto]=useState(vetoText(match));const [vetoStatus,setVetoStatus]=useState(match.veto_data_status);const [busy,setBusy]=useState(false);const [error,setError]=useState<string|null>(null);
-  async function save(event:FormEvent){event.preventDefault();setBusy(true);setError(null);try{await patchMatchSeries(match.id,{format:form.format as MatchFormat,stage:form.stage as MatchStage,environment:form.environment as MatchEnvironment,resolution_status:form.resolution_status as MatchResolution,is_playoff:form.is_playoff,is_elimination:form.is_elimination,round_number:form.round_number?Number(form.round_number):null,round_label:form.round_label||null,group_name:form.group_name||null,bracket_section:(form.bracket_section||null) as MatchSeries["bracket_section"],bracket_position:form.bracket_position?Number(form.bracket_position):null,next_match_id:form.next_match_id?Number(form.next_match_id):null,next_match_slot:(form.next_match_slot||null) as MatchSeries["next_match_slot"]});if(veto!==vetoText(match)||vetoStatus!==match.veto_data_status){if(veto.trim())await updateMatchVetoText(match.id,veto,vetoStatus);else await updateMatchVeto(match.id,[],vetoStatus)}await onSaved();onClose()}catch(value){setError(errorText(value))}finally{setBusy(false)}}
-  return <div className="tournament-drawer-backdrop" onMouseDown={onClose}><aside className="tournament-drawer" onMouseDown={event=>event.stopPropagation()}><header><div><small>Серия #{match.id}</small><h2>{match.team_a.name} — {match.team_b.name}</h2></div><button className="button" onClick={onClose}>Закрыть</button></header><BettingRestrictionWarning restriction={match.betting_restrictions}/><div className="drawer-readonly"><span>Счёт <b>{match.score.team_a}:{match.score.team_b}</b></span>{match.maps.map(m=><span key={m.demo_file_id}>{m.map_name}: {m.team_a_score}:{m.team_b_score}</span>)}</div><form onSubmit={save}>
-    <h3>Основное</h3><div className="drawer-grid"><label>Формат<select value={form.format} onChange={e=>setForm({...form,format:e.target.value as MatchFormat})}>{["bo1","bo3","bo5","unknown"].map(x=><option key={x}>{x}</option>)}</select></label><label>Этап<select value={form.stage} onChange={e=>setForm({...form,stage:e.target.value as MatchStage})}>{Object.entries(stageLabels).map(([x,label])=><option value={x} key={x}>{label}</option>)}</select></label><label>Среда<select value={form.environment} onChange={e=>setForm({...form,environment:e.target.value as MatchEnvironment})}>{["lan","online","unknown"].map(x=><option key={x}>{x}</option>)}</select></label><label>Status<select value={form.resolution_status} onChange={e=>setForm({...form,resolution_status:e.target.value as MatchResolution})}>{["resolved","needs_review","unresolved"].map(x=><option key={x}>{x}</option>)}</select></label><label><input type="checkbox" checked={form.is_playoff} onChange={e=>setForm({...form,is_playoff:e.target.checked})}/> Playoff</label><label><input type="checkbox" checked={form.is_elimination} onChange={e=>setForm({...form,is_elimination:e.target.checked})}/> Elimination</label></div>
-    <h3>Положение в турнире</h3><div className="drawer-grid"><label>Раунд<input type="number" min="1" value={form.round_number} onChange={e=>setForm({...form,round_number:e.target.value})}/></label><label>Название раунда<input value={form.round_label} onChange={e=>setForm({...form,round_label:e.target.value})}/></label><label>Группа<input value={form.group_name} onChange={e=>setForm({...form,group_name:e.target.value})}/></label><label>Секция<select value={form.bracket_section} onChange={e=>setForm({...form,bracket_section:e.target.value})}><option value="">—</option>{["main","upper","lower","group","swiss"].map(x=><option key={x}>{x}</option>)}</select></label><label>Позиция<input type="number" min="1" value={form.bracket_position} onChange={e=>setForm({...form,bracket_position:e.target.value})}/></label><label>Следующий матч<select value={form.next_match_id} onChange={e=>setForm({...form,next_match_id:e.target.value,next_match_slot:e.target.value?form.next_match_slot:""})}><option value="">Не задан</option>{all.filter(x=>x.id!==match.id).map(x=><option value={x.id} key={x.id}>#{x.id} — {stageLabels[x.stage]} {x.team_a.name} vs {x.team_b.name}</option>)}</select></label><label>Слот следующего матча<select disabled={!form.next_match_id} value={form.next_match_slot} onChange={e=>setForm({...form,next_match_slot:e.target.value})}><option value="">—</option><option value="team_a">Team A</option><option value="team_b">Team B</option></select></label></div>
-    <h3>Фактическое veto</h3><label>Статус<select value={vetoStatus} onChange={e=>setVetoStatus(e.target.value as MatchSeries["veto_data_status"])}>{["complete","partial","needs_review","invalid","not_available"].map(x=><option key={x}>{x}</option>)}</select></label><textarea className="veto-editor" value={veto} onChange={e=>setVeto(e.target.value)} placeholder="1. Spirit removed Inferno"/>
-    {error&&<p className="map-warning">{error}</p>}<button className="button button--primary" disabled={busy}>{busy?"Сохраняю…":"Сохранить"}</button></form></aside></div>
+function DemoState({ match }: { match: MatchSeries }) {
+  const expected = expectedMaps(match);
+  const parsed = match.maps.filter((m) => m.parse_status === "success").length;
+  return (
+    <span
+      className={
+        parsed === match.maps.length && match.maps.length ? "ok" : "warning"
+      }
+    >
+      Demo: {match.maps.length}/{expected} · parsed {parsed}
+    </span>
+  );
 }
 
-function Bracket({view,onEdit}:{view:TournamentView;onEdit:(m:MatchSeries)=>void}){
-  const placementMatches=view.matches.filter(match=>match.is_playoff&&!match.is_elimination&&match.stage==="final");
-  const stages=playoffStages.filter(stage=>view.matches.some(m=>m.stage===stage&&!placementMatches.some(placement=>placement.id===m.id)));
-  if(stages.length===0)return placementMatches.length>0?<section className="tournament-group"><h2>Матч за третье место</h2><div>{placementMatches.map(match=><SeriesCard key={match.id} match={match} onEdit={onEdit}/>)}</div></section>:null;
-  const matches=view.matches.filter(match=>stages.includes(match.stage)&&!placementMatches.some(placement=>placement.id===match.id));
-  const byId=new Map(matches.map(match=>[match.id,match]));
-  const firstCount=Math.max(1,...stages.map(stage=>Math.max(matches.filter(match=>match.stage===stage).length,...matches.filter(match=>match.stage===stage).map(match=>match.bracket_position??0))));
-  const rowCount=Math.max(1,firstCount*2-1);const columnWidth=275;const columnGap=90;const rowHeight=160;const rowGap=24;const rowStep=rowHeight+rowGap;
-  const position=(match:MatchSeries)=>Math.max(1,match.bracket_position??matches.filter(item=>item.stage===match.stage).sort((a,b)=>a.id-b.id).findIndex(item=>item.id===match.id)+1);
-  const gridRow=(match:MatchSeries)=>{const depth=stages.indexOf(match.stage);return (position(match)-1)*2**(depth+1)+2**depth};
-  const width=stages.length*columnWidth+Math.max(0,stages.length-1)*columnGap;const height=(rowCount-1)*rowStep+rowHeight;
-  const links=view.bracket_links.filter(link=>byId.has(link.from_match_id)&&byId.has(link.to_match_id));
-  return <><div className="tournament-bracket"><div className="bracket-stage-headings" style={{width,gridTemplateColumns:`repeat(${stages.length}, ${columnWidth}px)`}}>{stages.map(stage=><h3 key={stage}>{stageLabels[stage]}</h3>)}</div><div className="bracket-canvas" style={{width,height}}>
-    <svg className="bracket-connectors" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">{links.map(link=>{const source=byId.get(link.from_match_id)!;const target=byId.get(link.to_match_id)!;const sourceDepth=stages.indexOf(source.stage);const targetDepth=stages.indexOf(target.stage);const x1=sourceDepth*(columnWidth+columnGap)+columnWidth;const x2=targetDepth*(columnWidth+columnGap);const y1=(gridRow(source)-1)*rowStep+rowHeight/2;const y2=(gridRow(target)-1)*rowStep+rowHeight/2;const mid=x1+(x2-x1)/2;return <path key={`${link.from_match_id}-${link.to_match_id}`} d={`M ${x1} ${y1} H ${mid} V ${y2} H ${x2}`} data-source={link.source}/>})}</svg>
-    {stages.map((stage,depth)=>matches.filter(match=>match.stage===stage).sort((a,b)=>position(a)-position(b)).map(match=><div className="bracket-card-slot" style={{left:depth*(columnWidth+columnGap),top:(gridRow(match)-1)*rowStep,width:columnWidth,height:rowHeight}} key={match.id}><SeriesCard match={match} onEdit={onEdit}/></div>))}
-  </div></div>{placementMatches.length>0&&<section className="tournament-group"><h2>Матч за третье место</h2><div>{placementMatches.map(match=><SeriesCard key={match.id} match={match} onEdit={onEdit}/>)}</div></section>}</>
+function TournamentRosters({ view }: { view: TournamentView }) {
+  const [items, setItems] = useState<Record<number, EffectiveTournamentRoster>>(
+    {},
+  );
+  const [form, setForm] = useState({
+    team_id: view.participants[0]?.team_id ?? 0,
+    player_out_id: 0,
+    player_in_id: 0,
+    notes: "",
+  });
+  const [message, setMessage] = useState("");
+  const load = () =>
+    Promise.all(
+      view.participants.map((p) =>
+        getEffectiveTournamentRoster(view.tournament.id, p.team_id),
+      ),
+    )
+      .then((rows) =>
+        setItems(Object.fromEntries(rows.map((x) => [x.team_id, x]))),
+      )
+      .catch((e) => setMessage(errorText(e)));
+  useEffect(() => {
+    void load();
+  }, [view.tournament.id]);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await createTournamentRosterOverride(view.tournament.id, form);
+      setMessage("Временная замена сохранена.");
+      await load();
+    } catch (x) {
+      setMessage(errorText(x));
+    }
+  };
+  return (
+    <section className="tournament-rosters">
+      <h2>Roster for tournament</h2>
+      {view.participants.map((p) => {
+        const r = items[p.team_id];
+        return (
+          <article key={p.team_id}>
+            <h3>{p.name}</h3>
+            {r && (
+              <>
+                <p>
+                  <b>Permanent:</b>{" "}
+                  {r.permanent_roster.map((x) => x.nickname).join(" / ") || "—"}
+                </p>
+                <p>
+                  <b>Effective:</b>{" "}
+                  {r.effective_roster.map((x) => x.nickname).join(" / ") || "—"}
+                </p>
+                {r.replacements.map((x) => (
+                  <p className="warning" key={x.id}>
+                    ⚠ {x.player_out.nickname} → {x.player_in.nickname} ·{" "}
+                    {x.status} · penalty {r.stand_in_penalty}{" "}
+                    <button
+                      onClick={() =>
+                        void disableTournamentRosterOverride(
+                          view.tournament.id,
+                          x.id,
+                        ).then(load)
+                      }
+                    >
+                      Отключить
+                    </button>
+                  </p>
+                ))}
+                {r.warnings.map((x) => (
+                  <p className="warning" key={x}>
+                    {x}
+                  </p>
+                ))}
+                <button
+                  className="button"
+                  onClick={() =>
+                    void checkTournamentRoster(view.tournament.id, p.team_id)
+                      .then((x) =>
+                        setMessage(
+                          x.status === "unavailable"
+                            ? "BO3.gg не предоставляет lineup турнира/серии."
+                            : `Проверка: ${x.status}`,
+                        ),
+                      )
+                      .then(load)
+                  }
+                >
+                  Проверить состав
+                </button>
+              </>
+            )}
+          </article>
+        );
+      })}
+      <form onSubmit={save}>
+        <h3>Добавить временную замену</h3>
+        <select
+          value={form.team_id}
+          onChange={(e) =>
+            setForm({ ...form, team_id: Number(e.target.value) })
+          }
+        >
+          {view.participants.map((p) => (
+            <option value={p.team_id} key={p.team_id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="number"
+          required
+          min="1"
+          placeholder="ID игрока OUT"
+          onChange={(e) =>
+            setForm({ ...form, player_out_id: Number(e.target.value) })
+          }
+        />
+        <input
+          type="number"
+          required
+          min="1"
+          placeholder="ID игрока IN"
+          onChange={(e) =>
+            setForm({ ...form, player_in_id: Number(e.target.value) })
+          }
+        />
+        <input
+          placeholder="Комментарий"
+          value={form.notes}
+          onChange={(e) => setForm({ ...form, notes: e.target.value })}
+        />
+        <button className="button button--primary">
+          Добавить временную замену
+        </button>
+      </form>
+      {message && <div className="notice">{message}</div>}
+    </section>
+  );
 }
 
-function GroupSectionBracket({matches,links,onEdit}:{matches:MatchSeries[];links:TournamentView["bracket_links"];onEdit:(m:MatchSeries)=>void}){
-  const rounds=Array.from(new Set(matches.map(match=>match.round_number).filter((round):round is number=>round!==null))).sort((a,b)=>a-b);
-  if(rounds.length===0)return null;
-  const byId=new Map(matches.map(match=>[match.id,match]));
-  const firstCount=Math.max(...rounds.map(round=>matches.filter(match=>match.round_number===round).length));
-  const columnWidth=275,columnGap=90,rowHeight=160,rowGap=24,rowStep=rowHeight+rowGap;
-  const position=(match:MatchSeries)=>Math.max(1,match.bracket_position??1);
-  const gridRow=(match:MatchSeries)=>{const count=Math.max(1,matches.filter(item=>item.round_number===match.round_number).length);const span=firstCount/count;return (position(match)-1)*2*span+span};
-  const width=rounds.length*columnWidth+Math.max(0,rounds.length-1)*columnGap;
-  const rowCount=Math.max(1,firstCount*2-1),height=(rowCount-1)*rowStep+rowHeight;
-  const visibleLinks=links.filter(link=>byId.has(link.from_match_id)&&byId.has(link.to_match_id));
-  const heading=(round:number)=>matches.find(match=>match.round_number===round)?.round_label?.replace(/^Group [^:]+:\s*/,"")??`Раунд ${round}`;
-  return <div className="tournament-bracket group-bracket"><div className="bracket-stage-headings" style={{width,gridTemplateColumns:`repeat(${rounds.length}, ${columnWidth}px)`}}>{rounds.map(round=><h3 key={round}>{heading(round)}</h3>)}</div><div className="bracket-canvas" style={{width,height}}>
-    <svg className="bracket-connectors" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">{visibleLinks.map(link=>{const source=byId.get(link.from_match_id)!;const target=byId.get(link.to_match_id)!;const sourceDepth=rounds.indexOf(source.round_number!);const targetDepth=rounds.indexOf(target.round_number!);const x1=sourceDepth*(columnWidth+columnGap)+columnWidth;const x2=targetDepth*(columnWidth+columnGap);const y1=(gridRow(source)-1)*rowStep+rowHeight/2;const y2=(gridRow(target)-1)*rowStep+rowHeight/2;const mid=x1+(x2-x1)/2;return <path key={`${link.from_match_id}-${link.to_match_id}`} d={`M ${x1} ${y1} H ${mid} V ${y2} H ${x2}`} data-source={link.source}/>})}</svg>
-    {rounds.map((round,depth)=>matches.filter(match=>match.round_number===round).sort((a,b)=>position(a)-position(b)).map(match=><div className="bracket-card-slot" style={{left:depth*(columnWidth+columnGap),top:(gridRow(match)-1)*rowStep,width:columnWidth,height:rowHeight}} key={match.id}><SeriesCard match={match} onEdit={onEdit}/></div>))}
-  </div></div>
+function SeriesCard({
+  match,
+  onEdit,
+}: {
+  match: MatchSeries;
+  onEdit: (match: MatchSeries) => void;
+}) {
+  const scheduled = match.status === "scheduled";
+  const compare =
+    match.team_a.id && match.team_b.id
+      ? `/compare?team_a=${match.team_a.id}&team_b=${match.team_b.id}&format=${match.format}&series_id=${match.id}`
+      : null;
+  return (
+    <article
+      className="tournament-match-card"
+      onClick={() => onEdit(match)}
+      tabIndex={0}
+    >
+      <div className="series-score">
+        <span
+          className={match.winner_team_id === match.team_a.id ? "winner" : ""}
+        >
+          {match.team_a.name ?? "TBD"}
+          {!scheduled && <b>{match.score.team_a}</b>}
+        </span>
+        <span
+          className={match.winner_team_id === match.team_b.id ? "winner" : ""}
+        >
+          {match.team_b.name ?? "TBD"}
+          {!scheduled && <b>{match.score.team_b}</b>}
+        </span>
+      </div>
+      <small>
+        {match.format.toUpperCase()} · {stageLabels[match.stage]} ·{" "}
+        {dateText(match.match_date)}
+      </small>
+      <BettingRestrictionWarning restriction={match.betting_restrictions} />
+      <ul>
+        {match.maps.map((map) => (
+          <li key={map.demo_file_id}>
+            <i className={`demo-dot demo-dot--${map.parse_status}`} />
+            {map.map_name ?? "Карта?"}
+            <b>
+              {map.team_a_score ?? "—"}:{map.team_b_score ?? "—"}
+            </b>
+            {map.source_deleted_at &&
+              !map.source_available &&
+              map.parse_status === "success" && <em>данные сохранены</em>}
+          </li>
+        ))}
+      </ul>
+      <footer>
+        {scheduled ? (
+          <span>Запланировано</span>
+        ) : (
+          <>
+            <DemoState match={match} />
+            <span>Veto: {match.veto_data_status}</span>
+          </>
+        )}
+        {compare && (
+          <a
+            className="button button--primary"
+            href={compare}
+            onClick={(event) => event.stopPropagation()}
+          >
+            Сравнить команды
+          </a>
+        )}
+        <button
+          className="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onEdit(match);
+          }}
+        >
+          Изменить
+        </button>
+      </footer>
+    </article>
+  );
 }
 
-export function GroupBracket({view,group,onEdit}:{view:TournamentView;group:string;onEdit:(m:MatchSeries)=>void}){
-  const matches=view.matches.filter(match=>match.stage==="group"&&match.group_name===group);
-  if(matches.length===0)return null;
-  return <section className="tournament-group-bracket" aria-label={`Группа ${group}`}><h2>Группа {group}</h2>{(["upper","lower"] as const).map(section=>{const sectionMatches=matches.filter(match=>match.bracket_section===section);return sectionMatches.length?<div key={section} className="group-bracket-section"><h3>{section==="upper"?"Верхняя сетка":"Нижняя сетка"}</h3><GroupSectionBracket matches={sectionMatches} links={view.bracket_links} onEdit={onEdit}/></div>:null})}</section>
+function MatchEditor({
+  match,
+  all,
+  onClose,
+  onSaved,
+}: {
+  match: MatchSeries;
+  all: MatchSeries[];
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [form, setForm] = useState({
+    format: match.format,
+    stage: match.stage,
+    environment: match.environment,
+    resolution_status: match.resolution_status,
+    is_playoff: match.is_playoff,
+    is_elimination: match.is_elimination,
+    round_number: match.round_number?.toString() ?? "",
+    round_label: match.round_label ?? "",
+    group_name: match.group_name ?? "",
+    bracket_section: match.bracket_section ?? "",
+    bracket_position: match.bracket_position?.toString() ?? "",
+    next_match_id: match.next_match_id?.toString() ?? "",
+    next_match_slot: match.next_match_slot ?? "",
+  });
+  const [veto, setVeto] = useState(vetoText(match));
+  const [vetoStatus, setVetoStatus] = useState(match.veto_data_status);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await patchMatchSeries(match.id, {
+        format: form.format as MatchFormat,
+        stage: form.stage as MatchStage,
+        environment: form.environment as MatchEnvironment,
+        resolution_status: form.resolution_status as MatchResolution,
+        is_playoff: form.is_playoff,
+        is_elimination: form.is_elimination,
+        round_number: form.round_number ? Number(form.round_number) : null,
+        round_label: form.round_label || null,
+        group_name: form.group_name || null,
+        bracket_section: (form.bracket_section ||
+          null) as MatchSeries["bracket_section"],
+        bracket_position: form.bracket_position
+          ? Number(form.bracket_position)
+          : null,
+        next_match_id: form.next_match_id ? Number(form.next_match_id) : null,
+        next_match_slot: (form.next_match_slot ||
+          null) as MatchSeries["next_match_slot"],
+      });
+      if (veto !== vetoText(match) || vetoStatus !== match.veto_data_status) {
+        if (veto.trim()) await updateMatchVetoText(match.id, veto, vetoStatus);
+        else await updateMatchVeto(match.id, [], vetoStatus);
+      }
+      await onSaved();
+      onClose();
+    } catch (value) {
+      setError(errorText(value));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="tournament-drawer-backdrop" onMouseDown={onClose}>
+      <aside
+        className="tournament-drawer"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <small>Серия #{match.id}</small>
+            <h2>
+              {match.team_a.name} — {match.team_b.name}
+            </h2>
+          </div>
+          <button className="button" onClick={onClose}>
+            Закрыть
+          </button>
+        </header>
+        <BettingRestrictionWarning restriction={match.betting_restrictions} />
+        <div className="drawer-readonly">
+          <span>
+            Счёт{" "}
+            <b>
+              {match.score.team_a}:{match.score.team_b}
+            </b>
+          </span>
+          {match.maps.map((m) => (
+            <span key={m.demo_file_id}>
+              {m.map_name}: {m.team_a_score}:{m.team_b_score}
+            </span>
+          ))}
+        </div>
+        <form onSubmit={save}>
+          <h3>Основное</h3>
+          <div className="drawer-grid">
+            <label>
+              Формат
+              <select
+                value={form.format}
+                onChange={(e) =>
+                  setForm({ ...form, format: e.target.value as MatchFormat })
+                }
+              >
+                {["bo1", "bo3", "bo5", "unknown"].map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Этап
+              <select
+                value={form.stage}
+                onChange={(e) =>
+                  setForm({ ...form, stage: e.target.value as MatchStage })
+                }
+              >
+                {Object.entries(stageLabels).map(([x, label]) => (
+                  <option value={x} key={x}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Среда
+              <select
+                value={form.environment}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    environment: e.target.value as MatchEnvironment,
+                  })
+                }
+              >
+                {["lan", "online", "unknown"].map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Status
+              <select
+                value={form.resolution_status}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    resolution_status: e.target.value as MatchResolution,
+                  })
+                }
+              >
+                {["resolved", "needs_review", "unresolved"].map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={form.is_playoff}
+                onChange={(e) =>
+                  setForm({ ...form, is_playoff: e.target.checked })
+                }
+              />{" "}
+              Playoff
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={form.is_elimination}
+                onChange={(e) =>
+                  setForm({ ...form, is_elimination: e.target.checked })
+                }
+              />{" "}
+              Elimination
+            </label>
+          </div>
+          <h3>Положение в турнире</h3>
+          <div className="drawer-grid">
+            <label>
+              Раунд
+              <input
+                type="number"
+                min="1"
+                value={form.round_number}
+                onChange={(e) =>
+                  setForm({ ...form, round_number: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Название раунда
+              <input
+                value={form.round_label}
+                onChange={(e) =>
+                  setForm({ ...form, round_label: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Группа
+              <input
+                value={form.group_name}
+                onChange={(e) =>
+                  setForm({ ...form, group_name: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Секция
+              <select
+                value={form.bracket_section}
+                onChange={(e) =>
+                  setForm({ ...form, bracket_section: e.target.value })
+                }
+              >
+                <option value="">—</option>
+                {["main", "upper", "lower", "group", "swiss"].map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Позиция
+              <input
+                type="number"
+                min="1"
+                value={form.bracket_position}
+                onChange={(e) =>
+                  setForm({ ...form, bracket_position: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Следующий матч
+              <select
+                value={form.next_match_id}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    next_match_id: e.target.value,
+                    next_match_slot: e.target.value ? form.next_match_slot : "",
+                  })
+                }
+              >
+                <option value="">Не задан</option>
+                {all
+                  .filter((x) => x.id !== match.id)
+                  .map((x) => (
+                    <option value={x.id} key={x.id}>
+                      #{x.id} — {stageLabels[x.stage]} {x.team_a.name} vs{" "}
+                      {x.team_b.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              Слот следующего матча
+              <select
+                disabled={!form.next_match_id}
+                value={form.next_match_slot}
+                onChange={(e) =>
+                  setForm({ ...form, next_match_slot: e.target.value })
+                }
+              >
+                <option value="">—</option>
+                <option value="team_a">Team A</option>
+                <option value="team_b">Team B</option>
+              </select>
+            </label>
+          </div>
+          <h3>Фактическое veto</h3>
+          <label>
+            Статус
+            <select
+              value={vetoStatus}
+              onChange={(e) =>
+                setVetoStatus(e.target.value as MatchSeries["veto_data_status"])
+              }
+            >
+              {[
+                "complete",
+                "partial",
+                "needs_review",
+                "invalid",
+                "not_available",
+              ].map((x) => (
+                <option key={x}>{x}</option>
+              ))}
+            </select>
+          </label>
+          <textarea
+            className="veto-editor"
+            value={veto}
+            onChange={(e) => setVeto(e.target.value)}
+            placeholder="1. Spirit removed Inferno"
+          />
+          {error && <p className="map-warning">{error}</p>}
+          <button className="button button--primary" disabled={busy}>
+            {busy ? "Сохраняю…" : "Сохранить"}
+          </button>
+        </form>
+      </aside>
+    </div>
+  );
 }
 
-function SwissBracket({matches,onEdit}:{matches:MatchSeries[];onEdit:(m:MatchSeries)=>void}){
-  const rounds=Array.from(new Set(matches.map(match=>match.round_number).filter((round):round is number=>round!==null))).sort((a,b)=>a-b);
-  if(rounds.length===0)return null;
-  return <div className="swiss-bracket" aria-label="Swiss-сетка">{rounds.map(round=><section key={round}><h2>Swiss Round {round}</h2><div>{matches.filter(match=>match.round_number===round).sort((a,b)=>a.match_date.localeCompare(b.match_date)||a.id-b.id).map(match=><SeriesCard key={match.id} match={match} onEdit={onEdit}/>)}</div></section>)}</div>
+function Bracket({
+  view,
+  onEdit,
+}: {
+  view: TournamentView;
+  onEdit: (m: MatchSeries) => void;
+}) {
+  const placementMatches = view.matches.filter(
+    (match) =>
+      match.is_playoff && !match.is_elimination && match.stage === "final",
+  );
+  const stages = playoffStages.filter((stage) =>
+    view.matches.some(
+      (m) =>
+        m.stage === stage &&
+        !placementMatches.some((placement) => placement.id === m.id),
+    ),
+  );
+  if (stages.length === 0)
+    return placementMatches.length > 0 ? (
+      <section className="tournament-group">
+        <h2>Матч за третье место</h2>
+        <div>
+          {placementMatches.map((match) => (
+            <SeriesCard key={match.id} match={match} onEdit={onEdit} />
+          ))}
+        </div>
+      </section>
+    ) : null;
+  const matches = view.matches.filter(
+    (match) =>
+      stages.includes(match.stage) &&
+      !placementMatches.some((placement) => placement.id === match.id),
+  );
+  const byId = new Map(matches.map((match) => [match.id, match]));
+  const firstCount = Math.max(
+    1,
+    ...stages.map((stage) =>
+      Math.max(
+        matches.filter((match) => match.stage === stage).length,
+        ...matches
+          .filter((match) => match.stage === stage)
+          .map((match) => match.bracket_position ?? 0),
+      ),
+    ),
+  );
+  const rowCount = Math.max(1, firstCount * 2 - 1);
+  const columnWidth = 275;
+  const columnGap = 90;
+  const rowHeight = 160;
+  const rowGap = 24;
+  const rowStep = rowHeight + rowGap;
+  const position = (match: MatchSeries) =>
+    Math.max(
+      1,
+      match.bracket_position ??
+        matches
+          .filter((item) => item.stage === match.stage)
+          .sort((a, b) => a.id - b.id)
+          .findIndex((item) => item.id === match.id) + 1,
+    );
+  const gridRow = (match: MatchSeries) => {
+    const depth = stages.indexOf(match.stage);
+    return (position(match) - 1) * 2 ** (depth + 1) + 2 ** depth;
+  };
+  const width =
+    stages.length * columnWidth + Math.max(0, stages.length - 1) * columnGap;
+  const height = (rowCount - 1) * rowStep + rowHeight;
+  const links = view.bracket_links.filter(
+    (link) => byId.has(link.from_match_id) && byId.has(link.to_match_id),
+  );
+  return (
+    <>
+      <div className="tournament-bracket">
+        <div
+          className="bracket-stage-headings"
+          style={{
+            width,
+            gridTemplateColumns: `repeat(${stages.length}, ${columnWidth}px)`,
+          }}
+        >
+          {stages.map((stage) => (
+            <h3 key={stage}>{stageLabels[stage]}</h3>
+          ))}
+        </div>
+        <div className="bracket-canvas" style={{ width, height }}>
+          <svg
+            className="bracket-connectors"
+            width={width}
+            height={height}
+            viewBox={`0 0 ${width} ${height}`}
+            aria-hidden="true"
+          >
+            {links.map((link) => {
+              const source = byId.get(link.from_match_id)!;
+              const target = byId.get(link.to_match_id)!;
+              const sourceDepth = stages.indexOf(source.stage);
+              const targetDepth = stages.indexOf(target.stage);
+              const x1 = sourceDepth * (columnWidth + columnGap) + columnWidth;
+              const x2 = targetDepth * (columnWidth + columnGap);
+              const y1 = (gridRow(source) - 1) * rowStep + rowHeight / 2;
+              const y2 = (gridRow(target) - 1) * rowStep + rowHeight / 2;
+              const mid = x1 + (x2 - x1) / 2;
+              return (
+                <path
+                  key={`${link.from_match_id}-${link.to_match_id}`}
+                  d={`M ${x1} ${y1} H ${mid} V ${y2} H ${x2}`}
+                  data-source={link.source}
+                />
+              );
+            })}
+          </svg>
+          {stages.map((stage, depth) =>
+            matches
+              .filter((match) => match.stage === stage)
+              .sort((a, b) => position(a) - position(b))
+              .map((match) => (
+                <div
+                  className="bracket-card-slot"
+                  style={{
+                    left: depth * (columnWidth + columnGap),
+                    top: (gridRow(match) - 1) * rowStep,
+                    width: columnWidth,
+                    height: rowHeight,
+                  }}
+                  key={match.id}
+                >
+                  <SeriesCard match={match} onEdit={onEdit} />
+                </div>
+              )),
+          )}
+        </div>
+      </div>
+      {placementMatches.length > 0 && (
+        <section className="tournament-group">
+          <h2>Матч за третье место</h2>
+          <div>
+            {placementMatches.map((match) => (
+              <SeriesCard key={match.id} match={match} onEdit={onEdit} />
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  );
 }
 
-const probabilityText=(value:number|null)=>value===null?"—":`${(value*100).toFixed(0)}%`;
-export function PredictionCard({match}:{match:TournamentPredictionMatch}){const compare=match.team_a.id&&match.team_b.id?`/compare?team_a=${match.team_a.id}&team_b=${match.team_b.id}&format=${match.format}${match.source_match_id?`&series_id=${match.source_match_id}`:""}`:null;const fallback=match.status==="comparison_fallback";const unavailable=!(["available","comparison_fallback"] as string[]).includes(match.status);const valueText=(probability:number|null,score:number|null)=>fallback?(score===null?"—":`${score.toFixed(1)} / 100`):probabilityText(probability);return <article className={`tournament-match-card prediction-card ${match.prediction_type==="projected_match"?"prediction-card--projected":""}`}>
-  <small>{match.prediction_type==="projected_match"?"Прогнозная пара · участники ещё не подтверждены":"Реальная запланированная пара"}</small>
-  <div className="series-score"><span className={match.predicted_winner_id===match.team_a.id?"winner":""}>{match.team_a.name??"TBD"}<b>{valueText(match.team_a_probability,match.team_a_score)}</b></span><span className={match.predicted_winner_id===match.team_b.id?"winner":""}>{match.team_b.name??"TBD"}<b>{valueText(match.team_b_probability,match.team_b_score)}</b></span></div>
-  {unavailable?<p className="prediction-status">{match.status==="model_not_trained"?"Модель не обучена":match.status==="actual_result"?"Используется фактический результат":"Недостаточно данных для прогноза"}</p>:<><p className="prediction-status">Прогноз: <b>{match.predicted_winner_name}</b></p><small>{fallback?"Matchup reliability":"Confidence"}: {probabilityText(match.confidence)}</small></>}
-  {compare&&<footer><a className="button button--primary" href={compare}>Сравнить команды</a></footer>}
-</article>}
+function GroupSectionBracket({
+  matches,
+  links,
+  onEdit,
+}: {
+  matches: MatchSeries[];
+  links: TournamentView["bracket_links"];
+  onEdit: (m: MatchSeries) => void;
+}) {
+  const rounds = Array.from(
+    new Set(
+      matches
+        .map((match) => match.round_number)
+        .filter((round): round is number => round !== null),
+    ),
+  ).sort((a, b) => a - b);
+  if (rounds.length === 0) return null;
+  const byId = new Map(matches.map((match) => [match.id, match]));
+  const firstCount = Math.max(
+    ...rounds.map(
+      (round) => matches.filter((match) => match.round_number === round).length,
+    ),
+  );
+  const columnWidth = 275,
+    columnGap = 90,
+    rowHeight = 160,
+    rowGap = 24,
+    rowStep = rowHeight + rowGap;
+  const position = (match: MatchSeries) =>
+    Math.max(1, match.bracket_position ?? 1);
+  const gridRow = (match: MatchSeries) => {
+    const count = Math.max(
+      1,
+      matches.filter((item) => item.round_number === match.round_number).length,
+    );
+    const span = firstCount / count;
+    return (position(match) - 1) * 2 * span + span;
+  };
+  const width =
+    rounds.length * columnWidth + Math.max(0, rounds.length - 1) * columnGap;
+  const rowCount = Math.max(1, firstCount * 2 - 1),
+    height = (rowCount - 1) * rowStep + rowHeight;
+  const visibleLinks = links.filter(
+    (link) => byId.has(link.from_match_id) && byId.has(link.to_match_id),
+  );
+  const heading = (round: number) =>
+    matches
+      .find((match) => match.round_number === round)
+      ?.round_label?.replace(/^Group [^:]+:\s*/, "") ?? `Раунд ${round}`;
+  return (
+    <div className="tournament-bracket group-bracket">
+      <div
+        className="bracket-stage-headings"
+        style={{
+          width,
+          gridTemplateColumns: `repeat(${rounds.length}, ${columnWidth}px)`,
+        }}
+      >
+        {rounds.map((round) => (
+          <h3 key={round}>{heading(round)}</h3>
+        ))}
+      </div>
+      <div className="bracket-canvas" style={{ width, height }}>
+        <svg
+          className="bracket-connectors"
+          width={width}
+          height={height}
+          viewBox={`0 0 ${width} ${height}`}
+          aria-hidden="true"
+        >
+          {visibleLinks.map((link) => {
+            const source = byId.get(link.from_match_id)!;
+            const target = byId.get(link.to_match_id)!;
+            const sourceDepth = rounds.indexOf(source.round_number!);
+            const targetDepth = rounds.indexOf(target.round_number!);
+            const x1 = sourceDepth * (columnWidth + columnGap) + columnWidth;
+            const x2 = targetDepth * (columnWidth + columnGap);
+            const y1 = (gridRow(source) - 1) * rowStep + rowHeight / 2;
+            const y2 = (gridRow(target) - 1) * rowStep + rowHeight / 2;
+            const mid = x1 + (x2 - x1) / 2;
+            return (
+              <path
+                key={`${link.from_match_id}-${link.to_match_id}`}
+                d={`M ${x1} ${y1} H ${mid} V ${y2} H ${x2}`}
+                data-source={link.source}
+              />
+            );
+          })}
+        </svg>
+        {rounds.map((round, depth) =>
+          matches
+            .filter((match) => match.round_number === round)
+            .sort((a, b) => position(a) - position(b))
+            .map((match) => (
+              <div
+                className="bracket-card-slot"
+                style={{
+                  left: depth * (columnWidth + columnGap),
+                  top: (gridRow(match) - 1) * rowStep,
+                  width: columnWidth,
+                  height: rowHeight,
+                }}
+                key={match.id}
+              >
+                <SeriesCard match={match} onEdit={onEdit} />
+              </div>
+            )),
+        )}
+      </div>
+    </div>
+  );
+}
 
-function PredictionBracket({prediction}:{prediction:TournamentPredictions}){const stages=(Object.keys(stageLabels) as MatchStage[]).filter(stage=>prediction.matches.some(match=>match.stage===stage));const fallback=prediction.matches.some(match=>match.prediction_basis==="matchup_score");return <>{prediction.model_status==="experimental"&&<div className="notice"><b>Экспериментальная ML-модель</b><br/>Модель активирована вручную и пока не прошла проверку качества.</div>}{fallback&&<div className="notice">Win Probability модель не обучена. Используется аналитический Matchup Score — это сравнительный балл, не вероятность.</div>}<div className="prediction-bracket">{stages.map(stage=><section key={stage}><h3>{stageLabels[stage]}</h3>{prediction.matches.filter(match=>match.stage===stage).sort((a,b)=>(a.round_number??0)-(b.round_number??0)||(a.bracket_position??a.id)-(b.bracket_position??b.id)).map(match=><PredictionCard key={match.id} match={match}/>)}</section>)}</div></>}
+export function GroupBracket({
+  view,
+  group,
+  onEdit,
+}: {
+  view: TournamentView;
+  group: string;
+  onEdit: (m: MatchSeries) => void;
+}) {
+  const matches = view.matches.filter(
+    (match) => match.stage === "group" && match.group_name === group,
+  );
+  if (matches.length === 0) return null;
+  return (
+    <section
+      className="tournament-group-bracket"
+      aria-label={`Группа ${group}`}
+    >
+      <h2>Группа {group}</h2>
+      {(["upper", "lower"] as const).map((section) => {
+        const sectionMatches = matches.filter(
+          (match) => match.bracket_section === section,
+        );
+        return sectionMatches.length ? (
+          <div key={section} className="group-bracket-section">
+            <h3>{section === "upper" ? "Верхняя сетка" : "Нижняя сетка"}</h3>
+            <GroupSectionBracket
+              matches={sectionMatches}
+              links={view.bracket_links}
+              onEdit={onEdit}
+            />
+          </div>
+        ) : null;
+      })}
+    </section>
+  );
+}
 
-export function TournamentsPage({tournamentId}:{tournamentId?:number}){const [items,setItems]=useState<TournamentListItem[]>([]);const [period,setPeriod]=useState<"future"|"past"|"all">("future");const [view,setView]=useState<TournamentView|null>(null);const [tab,setTab]=useState<"bracket"|"all"|"problems">("bracket");const [bracketMode,setBracketMode]=useState<"actual"|"prediction">("actual");const [prediction,setPrediction]=useState<TournamentPredictions|null>(null);const [predictionBusy,setPredictionBusy]=useState(false);const [editing,setEditing]=useState<MatchSeries|null>(null);const [error,setError]=useState<string|null>(null);const [filters,setFilters]=useState({stage:"",team:"",date:"",missingDemo:false,missingVeto:false,review:false});
-  const [historyBusy,setHistoryBusy]=useState(false);const [historyMessage,setHistoryMessage]=useState<string|null>(null);
-  async function load(){try{setError(null);if(tournamentId){const [actual,predicted]=await Promise.all([getTournamentView(tournamentId),getTournamentPredictions(tournamentId)]);setView(actual);setPrediction(predicted)}else setItems((await getTournaments()).items)}catch(value){setError(errorText(value))}}
-  async function generatePrediction(){if(!tournamentId)return;setPredictionBusy(true);setError(null);try{setPrediction(await generateTournamentPredictions(tournamentId));setBracketMode("prediction")}catch(value){setError(errorText(value))}finally{setPredictionBusy(false)}}
-  async function captureHistory(){if(!tournamentId)return;setHistoryBusy(true);setError(null);try{const result=await captureTournamentPredictionHistory(tournamentId);setHistoryMessage(`Prediction History: создано ${result.created}, уже существовало ${result.existing}, ошибок ${result.errors.length}.`)}catch(value){setError(errorText(value))}finally{setHistoryBusy(false)}}
-  useEffect(()=>{void load()},[tournamentId]);
-  const filtered=useMemo(()=>view?.matches.filter(m=>(!filters.stage||m.stage===filters.stage)&&(!filters.team||`${m.team_a.name} ${m.team_b.name}`.toLowerCase().includes(filters.team.toLowerCase()))&&(!filters.date||m.match_date===filters.date)&&(!filters.missingDemo||m.maps.length<expectedMaps(m))&&(!filters.missingVeto||m.veto_data_status==="not_available")&&(!filters.review||m.resolution_status!=="resolved"))??[],[view,filters]);
-  const today=new Date().toISOString().slice(0,10);const visibleItems=items.filter(x=>period==="all"||(period==="future"?(x.end_date??"")>=today:(x.end_date??"")<today));
-  if(!tournamentId)return <main className="page tournaments-page"><nav className="page-links"><a className="back-link" href="/demos">← Demo</a><strong>CS2Eye · турниры</strong></nav><header className="compare-heading"><p className="eyebrow">Tournament view</p><h1>Турниры</h1><p className="lead">Выберите турнир, чтобы увидеть серии, сетку, demo и veto.</p><a className="button button--primary" href="/tournaments/new">Добавить турнир</a></header><div className="tournament-tabs"><button className={period==="future"?"active":""} onClick={()=>setPeriod("future")}>Будущие</button><button className={period==="past"?"active":""} onClick={()=>setPeriod("past")}>Прошедшие</button><button className={period==="all"?"active":""} onClick={()=>setPeriod("all")}>Все</button></div>{error&&<div className="empty-state empty-state--error">{error}</div>}<div className="tournament-list">{visibleItems.map(item=><a href={`/tournaments/${item.id}`} key={item.id}><div><h2>{item.name} {item.year}</h2><span>{dateText(item.start_date)} — {dateText(item.end_date)} · {structures[item.structure_type]}</span></div><dl><div><dt>Участников</dt><dd>{item.summary.participant_count}</dd></div><div><dt>Запланировано</dt><dd>{item.summary.scheduled_series}</dd></div><div><dt>Распарсено</dt><dd>{item.summary.parsed_maps}/{item.summary.map_count}</dd></div><div><dt>Проверить</dt><dd>{item.summary.review_series}</dd></div><div><dt>Без veto</dt><dd>{item.summary.missing_veto_series}</dd></div></dl></a>)}</div></main>;
-  if(!view)return <main className="page"><div className="empty-state">{error??"Загружаю турнир…"}</div></main>;
-  const groups=Array.from(new Set(view.matches.filter(match=>match.stage==="group"&&match.group_name).map(match=>match.group_name!))).sort();
-  return <main className="page tournaments-page"><nav className="page-links"><a className="back-link" href="/tournaments">← Турниры</a><a className="button button--primary" href={`/tournaments/${view.tournament.id}/matches/new`}>+ Добавить серию</a><button className="button" disabled={historyBusy} onClick={()=>void captureHistory()}>{historyBusy?"Сохраняю snapshots…":"Snapshot всего турнира"}</button><a className="back-link" href="/prediction-history">Prediction History →</a><a className="back-link" href="/demos">Demo →</a></nav><header className="tournament-hero"><div><p className="eyebrow">{view.tournament.environment}</p><h1>{view.tournament.name} {view.tournament.year}</h1><p>{dateText(view.tournament.start_date)} — {dateText(view.tournament.end_date)}</p></div><label>Структура<select value={view.tournament.structure_type} onChange={e=>void patchTournament(view.tournament.id,{structure_type:e.target.value as TournamentStructure}).then(load)}>{Object.entries(structures).map(([x,label])=><option value={x} key={x}>{label}</option>)}</select></label></header>{historyMessage&&<div className="notice">{historyMessage}</div>}<div className="tournament-summary"><span>Серий <b>{view.summary.series_count}</b></span><span>Карт <b>{view.summary.map_count}</b></span><span>Распарсено <b>{view.summary.parsed_maps}/{view.summary.map_count}</b></span><span>Veto заполнено <b>{view.summary.series_count-view.summary.missing_veto_series}/{view.summary.series_count}</b></span><span>Проверить <b>{view.summary.review_series}</b></span></div><div className="tournament-tabs"><button onClick={()=>setTab("bracket")} className={tab==="bracket"?"active":""}>Сетка</button><button onClick={()=>setTab("all")} className={tab==="all"?"active":""}>Все серии</button><button onClick={()=>setTab("problems")} className={tab==="problems"?"active":""}>Проблемы ({view.problems.length})</button></div>{error&&<div className="empty-state empty-state--error">{error}</div>}
-  {tab==="bracket"&&<><div className="prediction-toolbar"><div className="tournament-tabs"><button className={bracketMode==="actual"?"active":""} onClick={()=>setBracketMode("actual")}>Фактическая сетка</button><button className={bracketMode==="prediction"?"active":""} onClick={()=>setBracketMode("prediction")}>Прогноз CS2Eye</button></div><div>{prediction&&<small>Последний прогноз: {new Date(prediction.generated_at).toLocaleString("ru-RU")}</small>}<button className="button button--primary" disabled={predictionBusy} onClick={()=>void generatePrediction()}>{predictionBusy?"Рассчитываю…":prediction?"Пересчитать":"Рассчитать прогноз турнира"}</button></div></div>{prediction?.outdated&&bracketMode==="prediction"&&<div className="notice notice--error">Результаты турнира изменились. Прогнозная сетка требует пересчёта.</div>}{bracketMode==="actual"?<><Bracket view={view} onEdit={setEditing}/>{groups.map(group=><GroupBracket key={group} view={view} group={group} onEdit={setEditing}/>) }{view.matches.some(match=>match.stage==="swiss")&&<SwissBracket matches={view.matches.filter(match=>match.stage==="swiss")} onEdit={setEditing}/>}</>:prediction?<PredictionBracket prediction={prediction}/>:<div className="empty-state">Прогноз ещё не рассчитан.</div>}</>}
-  {tab==="all"&&<><div className="tournament-filters"><select value={filters.stage} onChange={e=>setFilters({...filters,stage:e.target.value})}><option value="">Все этапы</option>{Object.entries(stageLabels).map(([x,label])=><option value={x} key={x}>{label}</option>)}</select><input placeholder="Команда" value={filters.team} onChange={e=>setFilters({...filters,team:e.target.value})}/><input type="date" value={filters.date} onChange={e=>setFilters({...filters,date:e.target.value})}/><label><input type="checkbox" checked={filters.missingDemo} onChange={e=>setFilters({...filters,missingDemo:e.target.checked})}/> missing demo</label><label><input type="checkbox" checked={filters.missingVeto} onChange={e=>setFilters({...filters,missingVeto:e.target.checked})}/> missing veto</label><label><input type="checkbox" checked={filters.review} onChange={e=>setFilters({...filters,review:e.target.checked})}/> needs review</label></div><div className="tournament-table"><div className="head"><span>Дата</span><span>Этап</span><span>Серия</span><span>Формат</span><span>Счёт</span><span>Demo</span><span>Veto</span><span>Status</span></div>{filtered.map(m=><button key={m.id} onClick={()=>setEditing(m)}><span>{dateText(m.match_date)}</span><span>{stageLabels[m.stage]}</span><span>{m.team_a.name} — {m.team_b.name}</span><span>{m.format.toUpperCase()}</span><span>{m.score.team_a}:{m.score.team_b}</span><DemoState match={m}/><span>{m.veto_data_status}</span><span>{m.resolution_status}</span></button>)}</div></>}
-  {tab==="problems"&&<div className="tournament-problems">{view.problems.map((p,index)=><button key={`${p.match_id}-${p.code}-${index}`} onClick={()=>setEditing(view.matches.find(m=>m.id===p.match_id)??null)}><b>⚠ {view.matches.find(m=>m.id===p.match_id)?.team_a.name} vs {view.matches.find(m=>m.id===p.match_id)?.team_b.name}</b><span>{p.message}</span></button>)}</div>}
-  {editing&&<MatchEditor match={editing} all={view.matches} onClose={()=>setEditing(null)} onSaved={load}/>}</main>}
+function SwissBracket({
+  matches,
+  onEdit,
+}: {
+  matches: MatchSeries[];
+  onEdit: (m: MatchSeries) => void;
+}) {
+  const rounds = Array.from(
+    new Set(
+      matches
+        .map((match) => match.round_number)
+        .filter((round): round is number => round !== null),
+    ),
+  ).sort((a, b) => a - b);
+  if (rounds.length === 0) return null;
+  return (
+    <div className="swiss-bracket" aria-label="Swiss-сетка">
+      {rounds.map((round) => (
+        <section key={round}>
+          <h2>Swiss Round {round}</h2>
+          <div>
+            {matches
+              .filter((match) => match.round_number === round)
+              .sort(
+                (a, b) =>
+                  a.match_date.localeCompare(b.match_date) || a.id - b.id,
+              )
+              .map((match) => (
+                <SeriesCard key={match.id} match={match} onEdit={onEdit} />
+              ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+const probabilityText = (value: number | null) =>
+  value === null ? "—" : `${(value * 100).toFixed(0)}%`;
+export function PredictionCard({
+  match,
+}: {
+  match: TournamentPredictionMatch;
+}) {
+  const compare =
+    match.team_a.id && match.team_b.id
+      ? `/compare?team_a=${match.team_a.id}&team_b=${match.team_b.id}&format=${match.format}${match.source_match_id ? `&series_id=${match.source_match_id}` : ""}`
+      : null;
+  const fallback = match.status === "comparison_fallback";
+  const unavailable = !(
+    ["available", "comparison_fallback"] as string[]
+  ).includes(match.status);
+  const valueText = (probability: number | null, score: number | null) =>
+    fallback
+      ? score === null
+        ? "—"
+        : `${score.toFixed(1)} / 100`
+      : probabilityText(probability);
+  return (
+    <article
+      className={`tournament-match-card prediction-card ${match.prediction_type === "projected_match" ? "prediction-card--projected" : ""}`}
+    >
+      <small>
+        {match.prediction_type === "projected_match"
+          ? "Прогнозная пара · участники ещё не подтверждены"
+          : "Реальная запланированная пара"}
+      </small>
+      <div className="series-score">
+        <span
+          className={
+            match.predicted_winner_id === match.team_a.id ? "winner" : ""
+          }
+        >
+          {match.team_a.name ?? "TBD"}
+          <b>{valueText(match.team_a_probability, match.team_a_score)}</b>
+        </span>
+        <span
+          className={
+            match.predicted_winner_id === match.team_b.id ? "winner" : ""
+          }
+        >
+          {match.team_b.name ?? "TBD"}
+          <b>{valueText(match.team_b_probability, match.team_b_score)}</b>
+        </span>
+      </div>
+      {unavailable ? (
+        <p className="prediction-status">
+          {match.status === "model_not_trained"
+            ? "Модель не обучена"
+            : match.status === "actual_result"
+              ? "Используется фактический результат"
+              : "Недостаточно данных для прогноза"}
+        </p>
+      ) : (
+        <>
+          <p className="prediction-status">
+            Прогноз: <b>{match.predicted_winner_name}</b>
+          </p>
+          <small>
+            {fallback ? "Matchup reliability" : "Confidence"}:{" "}
+            {probabilityText(match.confidence)}
+          </small>
+        </>
+      )}
+      {compare && (
+        <footer>
+          <a className="button button--primary" href={compare}>
+            Сравнить команды
+          </a>
+        </footer>
+      )}
+    </article>
+  );
+}
+
+function PredictionBracket({
+  prediction,
+}: {
+  prediction: TournamentPredictions;
+}) {
+  const stages = (Object.keys(stageLabels) as MatchStage[]).filter((stage) =>
+    prediction.matches.some((match) => match.stage === stage),
+  );
+  const fallback = prediction.matches.some(
+    (match) => match.prediction_basis === "matchup_score",
+  );
+  return (
+    <>
+      {prediction.model_status === "experimental" && (
+        <div className="notice">
+          <b>Экспериментальная ML-модель</b>
+          <br />
+          Модель активирована вручную и пока не прошла проверку качества.
+        </div>
+      )}
+      {fallback && (
+        <div className="notice">
+          Win Probability модель не обучена. Используется аналитический Matchup
+          Score — это сравнительный балл, не вероятность.
+        </div>
+      )}
+      <div className="prediction-bracket">
+        {stages.map((stage) => (
+          <section key={stage}>
+            <h3>{stageLabels[stage]}</h3>
+            {prediction.matches
+              .filter((match) => match.stage === stage)
+              .sort(
+                (a, b) =>
+                  (a.round_number ?? 0) - (b.round_number ?? 0) ||
+                  (a.bracket_position ?? a.id) - (b.bracket_position ?? b.id),
+              )
+              .map((match) => (
+                <PredictionCard key={match.id} match={match} />
+              ))}
+          </section>
+        ))}
+      </div>
+    </>
+  );
+}
+
+export function TournamentsPage({ tournamentId }: { tournamentId?: number }) {
+  const [items, setItems] = useState<TournamentListItem[]>([]);
+  const [period, setPeriod] = useState<"future" | "past" | "all">("future");
+  const [view, setView] = useState<TournamentView | null>(null);
+  const [tab, setTab] = useState<"bracket" | "all" | "problems">("bracket");
+  const [bracketMode, setBracketMode] = useState<"actual" | "prediction">(
+    "actual",
+  );
+  const [prediction, setPrediction] = useState<TournamentPredictions | null>(
+    null,
+  );
+  const [predictionBusy, setPredictionBusy] = useState(false);
+  const [editing, setEditing] = useState<MatchSeries | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState({
+    stage: "",
+    team: "",
+    date: "",
+    missingDemo: false,
+    missingVeto: false,
+    review: false,
+  });
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyMessage, setHistoryMessage] = useState<string | null>(null);
+  async function load() {
+    try {
+      setError(null);
+      if (tournamentId) {
+        const [actual, predicted] = await Promise.all([
+          getTournamentView(tournamentId),
+          getTournamentPredictions(tournamentId),
+        ]);
+        setView(actual);
+        setPrediction(predicted);
+      } else setItems((await getTournaments()).items);
+    } catch (value) {
+      setError(errorText(value));
+    }
+  }
+  async function generatePrediction() {
+    if (!tournamentId) return;
+    setPredictionBusy(true);
+    setError(null);
+    try {
+      setPrediction(await generateTournamentPredictions(tournamentId));
+      setBracketMode("prediction");
+    } catch (value) {
+      setError(errorText(value));
+    } finally {
+      setPredictionBusy(false);
+    }
+  }
+  async function captureHistory() {
+    if (!tournamentId) return;
+    setHistoryBusy(true);
+    setError(null);
+    try {
+      const result = await captureTournamentPredictionHistory(tournamentId);
+      setHistoryMessage(
+        `Prediction History: создано ${result.created}, уже существовало ${result.existing}, ошибок ${result.errors.length}.`,
+      );
+    } catch (value) {
+      setError(errorText(value));
+    } finally {
+      setHistoryBusy(false);
+    }
+  }
+  useEffect(() => {
+    void load();
+  }, [tournamentId]);
+  const filtered = useMemo(
+    () =>
+      view?.matches.filter(
+        (m) =>
+          (!filters.stage || m.stage === filters.stage) &&
+          (!filters.team ||
+            `${m.team_a.name} ${m.team_b.name}`
+              .toLowerCase()
+              .includes(filters.team.toLowerCase())) &&
+          (!filters.date || m.match_date === filters.date) &&
+          (!filters.missingDemo || m.maps.length < expectedMaps(m)) &&
+          (!filters.missingVeto || m.veto_data_status === "not_available") &&
+          (!filters.review || m.resolution_status !== "resolved"),
+      ) ?? [],
+    [view, filters],
+  );
+  const today = new Date().toISOString().slice(0, 10);
+  const visibleItems = items.filter(
+    (x) =>
+      period === "all" ||
+      (period === "future"
+        ? (x.end_date ?? "") >= today
+        : (x.end_date ?? "") < today),
+  );
+  if (!tournamentId)
+    return (
+      <main className="page tournaments-page">
+        <nav className="page-links">
+          <a className="back-link" href="/demos">
+            ← Demo
+          </a>
+          <strong>CS2Eye · турниры</strong>
+        </nav>
+        <header className="compare-heading">
+          <p className="eyebrow">Tournament view</p>
+          <h1>Турниры</h1>
+          <p className="lead">
+            Выберите турнир, чтобы увидеть серии, сетку, demo и veto.
+          </p>
+          <a className="button button--primary" href="/tournaments/new">
+            Добавить турнир
+          </a>
+        </header>
+        <div className="tournament-tabs">
+          <button
+            className={period === "future" ? "active" : ""}
+            onClick={() => setPeriod("future")}
+          >
+            Будущие
+          </button>
+          <button
+            className={period === "past" ? "active" : ""}
+            onClick={() => setPeriod("past")}
+          >
+            Прошедшие
+          </button>
+          <button
+            className={period === "all" ? "active" : ""}
+            onClick={() => setPeriod("all")}
+          >
+            Все
+          </button>
+        </div>
+        {error && <div className="empty-state empty-state--error">{error}</div>}
+        <div className="tournament-list">
+          {visibleItems.map((item) => (
+            <a href={`/tournaments/${item.id}`} key={item.id}>
+              <div>
+                <h2>
+                  {item.name} {item.year}
+                </h2>
+                <span>
+                  {dateText(item.start_date)} — {dateText(item.end_date)} ·{" "}
+                  {structures[item.structure_type]}
+                </span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Участников</dt>
+                  <dd>{item.summary.participant_count}</dd>
+                </div>
+                <div>
+                  <dt>Запланировано</dt>
+                  <dd>{item.summary.scheduled_series}</dd>
+                </div>
+                <div>
+                  <dt>Распарсено</dt>
+                  <dd>
+                    {item.summary.parsed_maps}/{item.summary.map_count}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Проверить</dt>
+                  <dd>{item.summary.review_series}</dd>
+                </div>
+                <div>
+                  <dt>Без veto</dt>
+                  <dd>{item.summary.missing_veto_series}</dd>
+                </div>
+              </dl>
+            </a>
+          ))}
+        </div>
+      </main>
+    );
+  if (!view)
+    return (
+      <main className="page">
+        <div className="empty-state">{error ?? "Загружаю турнир…"}</div>
+      </main>
+    );
+  const groups = Array.from(
+    new Set(
+      view.matches
+        .filter((match) => match.stage === "group" && match.group_name)
+        .map((match) => match.group_name!),
+    ),
+  ).sort();
+  return (
+    <main className="page tournaments-page">
+      <nav className="page-links">
+        <a className="back-link" href="/tournaments">
+          ← Турниры
+        </a>
+        <a
+          className="button button--primary"
+          href={`/tournaments/${view.tournament.id}/matches/new`}
+        >
+          + Добавить серию
+        </a>
+        <button
+          className="button"
+          disabled={historyBusy}
+          onClick={() => void captureHistory()}
+        >
+          {historyBusy ? "Сохраняю snapshots…" : "Snapshot всего турнира"}
+        </button>
+        <a className="back-link" href="/prediction-history">
+          Prediction History →
+        </a>
+        <a className="back-link" href="/demos">
+          Demo →
+        </a>
+      </nav>
+      <header className="tournament-hero">
+        <div>
+          <p className="eyebrow">{view.tournament.environment}</p>
+          <h1>
+            {view.tournament.name} {view.tournament.year}
+          </h1>
+          <p>
+            {dateText(view.tournament.start_date)} —{" "}
+            {dateText(view.tournament.end_date)}
+          </p>
+        </div>
+        <label>
+          Структура
+          <select
+            value={view.tournament.structure_type}
+            onChange={(e) =>
+              void patchTournament(view.tournament.id, {
+                structure_type: e.target.value as TournamentStructure,
+              }).then(load)
+            }
+          >
+            {Object.entries(structures).map(([x, label]) => (
+              <option value={x} key={x}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </header>
+      {historyMessage && <div className="notice">{historyMessage}</div>}
+      <div className="tournament-summary">
+        <span>
+          Серий <b>{view.summary.series_count}</b>
+        </span>
+        <span>
+          Карт <b>{view.summary.map_count}</b>
+        </span>
+        <span>
+          Распарсено{" "}
+          <b>
+            {view.summary.parsed_maps}/{view.summary.map_count}
+          </b>
+        </span>
+        <span>
+          Veto заполнено{" "}
+          <b>
+            {view.summary.series_count - view.summary.missing_veto_series}/
+            {view.summary.series_count}
+          </b>
+        </span>
+        <span>
+          Проверить <b>{view.summary.review_series}</b>
+        </span>
+      </div>
+      <div className="tournament-tabs">
+        <button
+          onClick={() => setTab("bracket")}
+          className={tab === "bracket" ? "active" : ""}
+        >
+          Сетка
+        </button>
+        <button
+          onClick={() => setTab("all")}
+          className={tab === "all" ? "active" : ""}
+        >
+          Все серии
+        </button>
+        <button
+          onClick={() => setTab("problems")}
+          className={tab === "problems" ? "active" : ""}
+        >
+          Проблемы ({view.problems.length})
+        </button>
+      </div>
+      {error && <div className="empty-state empty-state--error">{error}</div>}
+      {tab === "bracket" && (
+        <>
+          <div className="prediction-toolbar">
+            <div className="tournament-tabs">
+              <button
+                className={bracketMode === "actual" ? "active" : ""}
+                onClick={() => setBracketMode("actual")}
+              >
+                Фактическая сетка
+              </button>
+              <button
+                className={bracketMode === "prediction" ? "active" : ""}
+                onClick={() => setBracketMode("prediction")}
+              >
+                Прогноз CS2Eye
+              </button>
+            </div>
+            <div>
+              {prediction && (
+                <small>
+                  Последний прогноз:{" "}
+                  {new Date(prediction.generated_at).toLocaleString("ru-RU")}
+                </small>
+              )}
+              <button
+                className="button button--primary"
+                disabled={predictionBusy}
+                onClick={() => void generatePrediction()}
+              >
+                {predictionBusy
+                  ? "Рассчитываю…"
+                  : prediction
+                    ? "Пересчитать"
+                    : "Рассчитать прогноз турнира"}
+              </button>
+            </div>
+          </div>
+          {prediction?.outdated && bracketMode === "prediction" && (
+            <div className="notice notice--error">
+              Результаты турнира изменились. Прогнозная сетка требует пересчёта.
+            </div>
+          )}
+          {bracketMode === "actual" ? (
+            <>
+              <Bracket view={view} onEdit={setEditing} />
+              {groups.map((group) => (
+                <GroupBracket
+                  key={group}
+                  view={view}
+                  group={group}
+                  onEdit={setEditing}
+                />
+              ))}
+              {view.matches.some((match) => match.stage === "swiss") && (
+                <SwissBracket
+                  matches={view.matches.filter(
+                    (match) => match.stage === "swiss",
+                  )}
+                  onEdit={setEditing}
+                />
+              )}
+            </>
+          ) : prediction ? (
+            <PredictionBracket prediction={prediction} />
+          ) : (
+            <div className="empty-state">Прогноз ещё не рассчитан.</div>
+          )}
+        </>
+      )}
+      {tab === "all" && (
+        <>
+          <div className="tournament-filters">
+            <select
+              value={filters.stage}
+              onChange={(e) =>
+                setFilters({ ...filters, stage: e.target.value })
+              }
+            >
+              <option value="">Все этапы</option>
+              {Object.entries(stageLabels).map(([x, label]) => (
+                <option value={x} key={x}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <input
+              placeholder="Команда"
+              value={filters.team}
+              onChange={(e) => setFilters({ ...filters, team: e.target.value })}
+            />
+            <input
+              type="date"
+              value={filters.date}
+              onChange={(e) => setFilters({ ...filters, date: e.target.value })}
+            />
+            <label>
+              <input
+                type="checkbox"
+                checked={filters.missingDemo}
+                onChange={(e) =>
+                  setFilters({ ...filters, missingDemo: e.target.checked })
+                }
+              />{" "}
+              missing demo
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={filters.missingVeto}
+                onChange={(e) =>
+                  setFilters({ ...filters, missingVeto: e.target.checked })
+                }
+              />{" "}
+              missing veto
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={filters.review}
+                onChange={(e) =>
+                  setFilters({ ...filters, review: e.target.checked })
+                }
+              />{" "}
+              needs review
+            </label>
+          </div>
+          <div className="tournament-table">
+            <div className="head">
+              <span>Дата</span>
+              <span>Этап</span>
+              <span>Серия</span>
+              <span>Формат</span>
+              <span>Счёт</span>
+              <span>Demo</span>
+              <span>Veto</span>
+              <span>Status</span>
+            </div>
+            {filtered.map((m) => (
+              <button key={m.id} onClick={() => setEditing(m)}>
+                <span>{dateText(m.match_date)}</span>
+                <span>{stageLabels[m.stage]}</span>
+                <span>
+                  {m.team_a.name} — {m.team_b.name}
+                </span>
+                <span>{m.format.toUpperCase()}</span>
+                <span>
+                  {m.score.team_a}:{m.score.team_b}
+                </span>
+                <DemoState match={m} />
+                <span>{m.veto_data_status}</span>
+                <span>{m.resolution_status}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {tab === "problems" && (
+        <div className="tournament-problems">
+          {view.problems.map((p, index) => (
+            <button
+              key={`${p.match_id}-${p.code}-${index}`}
+              onClick={() =>
+                setEditing(
+                  view.matches.find((m) => m.id === p.match_id) ?? null,
+                )
+              }
+            >
+              <b>
+                ⚠ {view.matches.find((m) => m.id === p.match_id)?.team_a.name}{" "}
+                vs {view.matches.find((m) => m.id === p.match_id)?.team_b.name}
+              </b>
+              <span>{p.message}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {editing && (
+        <MatchEditor
+          match={editing}
+          all={view.matches}
+          onClose={() => setEditing(null)}
+          onSaved={load}
+        />
+      )}
+    </main>
+  );
+}

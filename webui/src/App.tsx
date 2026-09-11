@@ -1,3 +1,5 @@
+import { MapsV3Panel, MapV3Page } from "./components/MapsV3";
+
 import {
   useCallback,
   useEffect,
@@ -8,6 +10,8 @@ import {
   getLatestRun,
   getTeams,
   getTeam,
+  getTeamStrengthV3,
+  getTeamFormV3,
   updatePlayerRole,
   probeTopTeams,
   refreshTopTeams,
@@ -32,6 +36,7 @@ import type {
   TeamMatchStats,
   TeamVetoProfile,
   LeadershipScore,
+  PerformanceProfile,
 } from "./types";
 import { TeamComparePage } from "./pages/TeamComparePage";
 import { DemosPage } from "./pages/DemosPage";
@@ -54,6 +59,22 @@ type LoadState =
   | { kind: "error"; message: string };
 
 function LeadershipFactors({value}:{value:LeadershipScore}) { return <details><summary>Breakdown · model {value.model_version}</summary>{value.factors.map(f=><div className="factor" key={f.key}><span className={`factor__impact factor__impact--${f.impact>0?"positive":f.impact<0?"negative":"neutral"}`}>{f.impact>0?"+":""}{f.impact.toFixed(2)}</span><div><strong>{f.label}: {f.available?f.normalized_score?.toFixed(1):"нет данных"}</strong><small>Вес {(f.effective_weight*100).toFixed(1)}% · sample {f.sample_size??"—"}</small></div></div>)}</details> }
+
+function StrengthScale({label,value,reliability}:{label:string;value:number|null|undefined;reliability?:number|null}){const safe=value==null?0:Math.max(0,Math.min(100,Number(value)));return <div className="strength-scale"><div><strong>{label}</strong><span>{value==null?"—":safe.toFixed(1)}</span></div><div className={`strength-scale__track${value==null?" strength-scale__track--empty":""}`}><i style={{left:`${safe}%`}}/></div><small>{value==null?"нет данных":reliability==null?"reliability —":`reliability ${(Number(reliability)*100).toFixed(0)}%`}</small></div>}
+
+const performanceLabels={firepower:"Firepower",entrying:"Entrying",trading:"Trading",opening:"Opening",clutching:"Clutching",sniping:"Sniping",utility:"Utility"} as const;
+const performanceHelp={firepower:"KPR, ADR и выживаемость.",entrying:"Частота и успех первых T-side контактов.",trading:"Качество разменов, а не общий объём убийств.",opening:"Качество и частота первых дуэлей.",clutching:"Реализация 1vX с весом сложности.",sniping:"AWP-составляющая; низкий балл не является штрафом для rifler.",utility:"Качество flash support и utility damage со штрафом за friendly flashes."} as const;
+function PerformanceProfilePanel({profile,title}:{profile:PerformanceProfile;title:string}){const [scope,setScope]=useState<"overall"|"ct"|"t">("overall");const values=profile.scopes[scope];return <section className="strength-panel performance-profile"><div className="section-heading"><div><p className="eyebrow">{profile.model_version} · standalone V3</p><h2>{title}</h2></div><span>{profile.normalization_version}</span></div><div className="performance-tabs" role="tablist">{([['overall','Both Sides'],['ct','CT Side'],['t','T Side']] as const).map(([key,label])=><button key={key} className={scope===key?"button button--primary":"button"} onClick={()=>setScope(key)}>{label}</button>)}</div><div className="performance-profile__list">{(Object.keys(performanceLabels) as Array<keyof typeof performanceLabels>).map(key=>{const item=values[key];return <details className="performance-row" key={key}><summary title={performanceHelp[key]}><div><strong>{performanceLabels[key]}</strong><small>{performanceHelp[key]}</small></div><div className={`performance-track${item.score==null?" performance-track--empty":""}`}><i style={{width:`${item.score??0}%`}}/><b style={{left:`${item.score??0}%`}}/></div><span>{item.score==null?"—":`${item.score.toFixed(1)}/100`}</span></summary><div className="performance-breakdown"><p>Reliability: <b>{item.reliability.toFixed(0)}%</b> · sample {item.sample_size}</p>{item.unavailable_reason&&<p>{item.unavailable_reason}</p>}{item.limitation&&<p>{item.limitation}</p>}{item.breakdown.map(f=><div key={f.key}><span>{f.key.replaceAll('_',' ')}</span><span>raw {f.raw_value?.toFixed(3)??"—"}</span><b>score {f.normalized_score?.toFixed(1)??"—"}</b><small>weight {(f.effective_weight*100).toFixed(0)}%</small></div>)}</div></details>})}</div><p className="formula">Score и reliability независимы. CT/T не подменяются overall.</p></section>}
+
+function TeamStrengthV3Panel({team}:{team:TeamDetail}){const value=team.team_strength_v3;const roster=value.components.roster_quality;const execution=value.components.team_execution;const results=value.components.results_quality;return <section className="strength-panel team-strength-v3"><div className="section-heading"><div><p className="eyebrow">{value.model_version} · baseline candidate</p><h2>Team Strength V3</h2></div><small>Legacy Team Strength V2: {team.strength.team_strength_score.toFixed(1)}</small></div><div className="player-v3-scales"><StrengthScale label="Team Strength V3" value={value.score} reliability={value.reliability/100}/><StrengthScale label="Roster Quality" value={roster.score} reliability={roster.reliability/100}/><StrengthScale label="Team Execution" value={execution.score} reliability={execution.reliability/100}/><StrengthScale label="Results Quality" value={results.score} reliability={results.reliability/100}/></div><div className="team-v3-details"><details><summary>Roster Quality breakdown</summary>{roster.players.map(player=><div className="team-v3-row" key={player.id}><b>{player.nickname}</b><span>Player {player.player_strength_v3?.toFixed(1)??"—"}</span><span>Mechanical {player.mechanical_strength?.toFixed(1)??"—"}</span><span>Supporting {player.supporting_strength?.toFixed(1)??"—"}</span></div>)}<p>Average {roster.avg_all?.toFixed(1)??"—"} · Top 2 {roster.avg_top_2?.toFixed(1)??"—"} · Bottom 2 {roster.avg_bottom_2?.toFixed(1)??"—"}</p></details><details><summary>Team Execution breakdown</summary>{Object.entries(execution.metrics).map(([key,item])=><div className="team-v3-row" key={key}><b>{key.replaceAll('_',' ')}</b><span>{item.score?.toFixed(1)??"—"}</span><span>reliability {item.reliability.toFixed(0)}%</span><span>weight {(item.weight*100).toFixed(0)}%</span></div>)}</details><details><summary>Results Quality breakdown</summary><p>Overall: {results.overall.maps} maps · {results.overall.wins}–{results.overall.losses} · adjusted {results.overall.adjusted_score?.toFixed(1)??"—"}</p>{Object.entries(results.groups).map(([key,item])=><div className="team-v3-row" key={key}><b>{{top_1_10:"Top 1–10",top_11_20:"Top 11–20",top_21_30:"Top 21–30",others:"Others",unknown:"Unknown"}[key]??key}</b><span>{item.maps} maps</span><span>{item.wins}–{item.losses}</span><span>adjusted {item.adjusted_score?.toFixed(1)??"—"}</span></div>)}<p>Historical ranking coverage {results.sample.ranking_coverage.toFixed(0)}% · current roster maps {results.sample.current_roster_maps}/{results.sample.total_maps}</p></details></div><p className="formula">45% Roster Quality + 25% Team Execution + 30% Results Quality. Form, maps, veto, H2H, Firepower и Sniping исключены.</p></section>}
+
+function signed(value:number|null|undefined){return value==null?"—":`${value>0?"+":""}${value.toFixed(1)}`}
+function FormScale({value}:{value:number|null|undefined}){const left=value==null?50:Math.max(0,Math.min(100,(value+20)*2.5));return <div className={`form-scale${value==null?" form-scale--empty":""}`}><div className="form-scale__labels"><span>−20</span><span>0</span><span>+20</span></div><div className="form-scale__track"><i className="form-scale__center"/>{value!=null&&<b style={{left:`${left}%`}}/>}</div><strong>{signed(value)}</strong></div>}
+function PlayerForm({value}:{value:Player["player_form_v3"]|TeamParticipant["player_form_v3"]}){return <div className="player-form"><FormScale value={value.delta}/><small>Player Form {signed(value.delta)} · reliability {value.reliability.toFixed(0)}%</small><span>Mechanical {signed(value.mechanical_form.delta)} · Supporting {signed(value.supporting_form.delta)}</span></div>}
+
+function FormEvents({events}:{events:TeamDetail["form_v3"]["events"]}){return <div>{events.map(event=><div className="team-v3-row" key={event.series_key}><b>vs {event.opponent??`Team ${event.opponent_id??"?"}`} {event.opponent_rank?`(#${event.opponent_rank})`:""}</b><span>{event.actual_result==="win"?"W":"L"} {event.round_score}</span><span className={event.form_contribution>=0?"positive":"negative"}>{signed(event.form_contribution)}</span><small>{event.expectation_source.replaceAll('_',' ')} · expected {(event.expected*100).toFixed(0)}%</small></div>)}</div>}
+
+function TeamFormV3CurrentPanel({team}:{team:TeamDetail}){const value=team.form_v3;const scopes=[{key:"current",label:"Current Tournament",value:value.current_tournament},{key:"recent",label:"Previous 60 days",value:value.recent_60d}];const state=value.form_delta==null?"UNAVAILABLE":value.form_delta>=5?"GOOD FORM":value.form_delta<=-5?"POOR FORM":"NEUTRAL FORM";return <section className="strength-panel form-v3"><div className="section-heading"><div><p className="eyebrow">{value.model_version} · current roster only</p><h2>Form V3</h2></div><small>Team Strength V3 {team.team_strength_v3?.score?.toFixed(1)??"—"}</small></div><FormScale value={value.form_delta}/><div className="form-v3__summary"><span><b>{state}</b></span><span>Form Score <b>{value.form_score==null?"—":`${value.form_score.toFixed(1)}/100`}</b></span><span>Reliability <b>{value.reliability.toFixed(0)}%</b></span></div>{scopes.map(scope=><details key={scope.key}><summary>{scope.label} · {signed(scope.value.delta)} · {scope.value.series} series · reliability {scope.value.reliability.toFixed(0)}% · weight {(scope.value.effective_weight*100).toFixed(0)}%</summary><FormEvents events={scope.value.events}/></details>)}<details><summary>Opponent ranking breakdown</summary>{Object.entries(value.opponent_breakdown).map(([key,item])=><div className="team-v3-row" key={key}><b>{{top_1_10:"Top 1–10",top_11_20:"Top 11–20",top_21_30:"Top 21–30",others:"Others",unknown:"Unknown"}[key]??key}</b><span>{item.series} series</span><span>{signed(item.delta)}</span></div>)}</details><p className="formula">Каждая серия создаёт один Performance vs Expectation event. Current Tournament исключён из Recent 60d.</p></section>}
 
 type ActionState =
   | { kind: "idle" }
@@ -188,6 +209,21 @@ function TeamCard({ team }: { team: Team }) {
         )}
       </div>
 
+      {team.analyst_factors.length > 0 && (
+        <div className="team-card__factors">
+          <small>Аналитические факторы</small>
+          {team.analyst_factors.map((factor) => (
+            <div className={`team-card__factor team-card__factor--${factor.factor_type}`} key={factor.id}>
+              <b>{factor.factor_type === "negative" ? "−" : "+"}</b>
+              <span>
+                {factor.text}
+                {factor.valid_until && <small>Действует до {formatDate(factor.valid_until)}</small>}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <footer className="team-card__footer">
         <span>{team.bo3_slug}</span>
         <span>Синхронизация: {formatDate(team.roster_synced_at)}</span>
@@ -247,6 +283,9 @@ function PlayerPage({ id }: { id: number }) {
         {player.igl&&<><article className="metric-card"><span>IGL Strength</span><strong>{player.igl.score.toFixed(1)}<small>/100</small></strong><small>Отдельно от индивидуальной силы · confidence {(player.igl.reliability*100).toFixed(0)}%</small></article><article className="metric-card"><span>Captain Strength</span><strong>{player.captain_strength?.toFixed(1)??"—"}<small>/100</small></strong><small>35% Player + 65% IGL</small></article></>}
         <article className="metric-card"><span>Последнее обновление</span><strong className="metric-date">{formatDate(player.stats_synced_at)}</strong></article>
       </section>
+      <section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">player_strength.v3 · candidate</p><h2>Player Strength V3</h2></div><small>Legacy V2.1: {player.player_strength??"—"}</small></div><div className="player-v3-scales"><StrengthScale label="Mechanical" value={player.mechanical_strength_v3} reliability={player.player_strength_v3_breakdown?.mechanical.reliability}/><StrengthScale label="Supporting" value={player.supporting_strength_v3} reliability={player.player_strength_v3_breakdown?.supporting.reliability}/><StrengthScale label="Player Strength" value={player.player_strength_v3} reliability={player.player_strength_v3_reliability}/><StrengthScale label="Round Impact" value={player.round_swing.score} reliability={player.round_swing.confidence}/></div>{player.player_strength_v3_breakdown&&<details><summary>Breakdown и группы соперников</summary>{Object.entries(player.player_strength_v3_breakdown.scopes).filter(([key])=>key!=="unknown").map(([key,scope])=><div className="player-v3-scope" key={key}><strong>{{overall:"Overall",top_1_10:"Top 1–10",top_11_20:"Top 11–20",top_21_30:"Top 21–30",others:"Others"}[key]||key}</strong><span>Mechanical {scope.mechanical.score?.toFixed(1)??"—"}</span><span>Supporting {scope.supporting.score?.toFixed(1)??"—"}</span><small>{scope.sample.maps} карт · {scope.sample.rounds} раундов</small></div>)}</details>}</section>
+      <section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">player_form.v3 · standalone</p><h2>Current Player Form</h2></div></div><PlayerForm value={player.player_form_v3}/><details><summary>Metric deltas vs own baseline</summary>{Object.entries(player.player_form_v3.metrics).map(([key,item])=><div className="team-v3-row" key={key}><b>{key.replaceAll('_',' ')}</b><span>{signed(item.delta)}</span><small>{item.sample_size} samples</small></div>)}</details></section>
+      <PerformanceProfilePanel profile={player.performance_profile} title="Performance Profile"/>
       {player.igl&&<section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">In-game leadership</p><h2>IGL Strength breakdown</h2></div></div><LeadershipFactors value={player.igl}/><p className="formula">Actual {player.igl.actual_performance?.toFixed(1)??"—"} vs expected {player.igl.expected_performance?.toFixed(1)??"—"}; residual {player.igl.management_residual?.toFixed(1)??"—"}. Корреляция, не доказательство причинности.</p></section>}
       <section className="strength-panel"><div className="section-heading"><div><p className="eyebrow">Win probability impact</p><h2>Round Swing</h2></div><span>model {player.round_swing.model?.round_swing_model_version??"—"}</span></div>{player.round_swing.overall?<><div className="team-map-rates"><span>Swing score <strong>{player.round_swing.score?.toFixed(1)??"—"}</strong><small>50 = historical reference median</small></span><span>Swing / round <strong>{player.round_swing.adjusted_per_round?.toFixed(2)??"—"}</strong><small>raw {player.round_swing.raw_per_round?.toFixed(2)} п.п. · confidence {((player.round_swing.confidence??0)*100).toFixed(0)}%</small></span><span>CT / T <strong>{player.round_swing.ct?.toFixed(2)??"—"} / {player.round_swing.t?.toFixed(2)??"—"}</strong><small>{player.round_swing.rounds} rounds</small></span></div><details><summary>Context breakdown</summary><div className="team-map-rates">{(["opening","trade","clutch","postplant","retake"] as const).map(key=><span key={key}>{key}<strong>{player.round_swing[key]?.toFixed(2)??"—"}</strong></span>)}</div></details><details><summary>Maps / opponent rank / recent</summary><div className="map-pool-table"><div className="map-pool-row map-pool-row--head"><span>Scope</span><span>Score</span><span>Adjusted / round</span><span>Rounds</span><span>Confidence</span></div>{Object.entries({...player.round_swing.maps,...player.round_swing.rank_scopes,...player.round_swing.recent}).map(([name,value])=><div className="map-pool-row" key={name}><strong>{name.replaceAll('_',' ')}</strong><span>{value?.score?.toFixed(1)??"—"}</span><span>{value?.adjusted_per_round?.toFixed(2)??"—"}</span><span>{value?.rounds??"—"}</span><span>{value?.confidence===undefined?"—":`${(value.confidence*100).toFixed(0)}%`}</span></div>)}</div></details></>:<div className="empty-state">Round Swing: {player.round_swing.status.replaceAll("_"," ")}</div>}</section>
       <section className="strength-panel">
@@ -291,6 +330,9 @@ const mapWarningLabels: Record<string, string> = {
 
 function TeamPage({ id }: { id: number }) {
   const [team, setTeam] = useState<TeamDetail | null>(null);
+  const [teamStrength, setTeamStrength] = useState<TeamDetail["team_strength_v3"] | null>(null);
+  const [teamStrengthError, setTeamStrengthError] = useState<string | null>(null);
+  const [teamForm, setTeamForm] = useState<TeamDetail["form_v3"] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [roleError, setRoleError] = useState<string | null>(null);
   const [savingPlayerId, setSavingPlayerId] = useState<number | null>(null);
@@ -306,9 +348,16 @@ function TeamPage({ id }: { id: number }) {
   const [opponentContext,setOpponentContext]=useState<any>(null);
 
   useEffect(() => {
-    getTeam(id).then(setTeam).catch((value: unknown) => {
-      setError(value instanceof Error ? value.message : "Не удалось загрузить команду.");
+    let active = true;
+    setTeam(null); setError(null); setTeamStrength(null); setTeamStrengthError(null); setTeamForm(null);
+    getTeam(id).then((value)=>{if(active)setTeam(value)}).catch((value: unknown) => {
+      if(active)setError(value instanceof Error ? value.message : "Не удалось загрузить команду.");
     });
+    void getTeamStrengthV3(id).then((value)=>{if(active)setTeamStrength(value)}).catch((value:unknown) => {
+      if(active)setTeamStrengthError(value instanceof Error?value.message:"Team Strength V3 недоступен.");
+    });
+    void getTeamFormV3(id).then((value)=>{if(active)setTeamForm(value)}).catch(() => undefined);
+    return ()=>{active=false};
   }, [id]);
 
   useEffect(() => {
@@ -391,7 +440,14 @@ function TeamPage({ id }: { id: number }) {
         <article className="metric-card"><span>Исходная → итоговая</span><strong className="metric-adjustment">{strength.raw_score.toFixed(2)} → {strength.final_score.toFixed(2)}</strong></article>
       </section>
 
+      {teamStrength?.components&&<TeamStrengthV3Panel team={{...team,team_strength_v3:teamStrength}}/>}
+      {!teamStrength&&!teamStrengthError&&<section className="strength-panel"><div className="empty-state">Загружаю Team Strength V3…</div></section>}
+      {teamStrengthError&&<section className="strength-panel"><div className="empty-state empty-state--error">{teamStrengthError}</div></section>}
+      {teamForm?.recent_60d&&<TeamFormV3CurrentPanel team={{...team,team_strength_v3:teamStrength??team.team_strength_v3,form_v3:teamForm}}/>}
+
       <TeamFormContextBlock context={team.form_context}/>
+
+      <MapsV3Panel teamId={id} legacy={mapStats}/>
 
       <AnalystFactorsPanel teamId={team.id} roster={team.roster} initial={team.analyst_factors} />
 
@@ -416,7 +472,7 @@ function TeamPage({ id }: { id: number }) {
           return <details className="team-map-card" key={item.map_name} onToggle={(event) => event.currentTarget.open && loadMapDetail(item.map_name)}>
             <summary><strong>{item.map_name[0].toUpperCase() + item.map_name.slice(1)}</strong><span>{item.all.maps_won}–{item.all.maps_lost} · {percent(item.all.map_win_rate)}</span></summary>
             <div className="map-strength-heading">
-              <div>{item.strength.map_strength_score === null ? <><strong>Сила карты: недостаточно данных</strong><small>Нужно минимум 3 полностью распарсенные карты.</small></> : <strong>Сила карты: {item.strength.map_strength_score.toFixed(2)} / 100</strong>}</div>
+              <div>{item.strength.map_strength_score === null ? <><strong>Legacy Map Strength: недостаточно данных</strong><small>Нужно минимум 3 полностью распарсенные карты.</small></> : <strong>Legacy Map Strength: {item.strength.map_strength_score.toFixed(2)} / 100</strong>}</div>
               <span className={`confidence-badge confidence-badge--${item.strength.confidence_level}`}>{confidenceLabels[item.strength.confidence_level]} · {item.strength.confidence_score.toFixed(2)}</span>
             </div>
             <div className="team-map-rates"><span>CT <strong>{percent(item.all.ct.win_rate)}</strong></span><span>T <strong>{percent(item.all.t.win_rate)}</strong></span><span>Раунды <strong>{item.all.rounds_won}–{item.all.rounds_lost}</strong></span></div>
@@ -450,6 +506,7 @@ function TeamPage({ id }: { id: number }) {
                   <small>{player.role ? roleLabels[player.role] ?? "Роль не назначена" : "Роль не назначена"}</small>
                   <small className="joined-at">{joinedAtLabel(player.joined_at)}</small>
                 </div>
+                <div className="team-player-v3"><StrengthScale label="Mechanical" value={player.mechanical_strength_v3} reliability={player.player_strength_v3_breakdown?.mechanical.reliability}/><StrengthScale label="Supporting" value={player.supporting_strength_v3} reliability={player.player_strength_v3_breakdown?.supporting.reliability}/><StrengthScale label="Player Strength V3" value={player.player_strength_v3} reliability={player.player_strength_v3_reliability}/><StrengthScale label="Round Impact" value={player.round_impact} reliability={player.round_impact_reliability}/><small>Legacy V2.1: {player.player_strength??"—"}</small>{player.player_strength_v3_breakdown&&<details><summary>Opponent breakdown</summary>{([['overall','Overall'],['top_1_10','Top 1–10'],['top_11_20','Top 11–20'],['top_21_30','Top 21–30'],['others','Others']] as const).map(([key,label])=>{const scope=player.player_strength_v3_breakdown!.scopes[key];return <p key={key}><b>{label}</b>: M {scope?.mechanical.score?.toFixed(1)??"—"} · S {scope?.supporting.score?.toFixed(1)??"—"} <small>{scope?.sample.maps??0} maps</small></p>})}</details>}</div>
                 <label className="role-picker">
                   <span>Роль</span>
                   <select
@@ -531,6 +588,8 @@ function rankChangeLabel(
 
 
 export default function App() {
+  const mapV3Match = window.location.pathname.match(/^\/teams\/(\d+)\/maps\/([^/]+)\/?$/);
+  if (mapV3Match) return <MapV3Page teamId={Number(mapV3Match[1])} mapName={decodeURIComponent(mapV3Match[2])}/>;
   if (/^\/model-sandbox\/?$/.test(window.location.pathname)) return <ModelSandboxPage />;
   if (/^\/matchup-calibration\/?$/.test(window.location.pathname)) return <MatchupCalibrationPage />;
   if (/^\/prediction-history\/?$/.test(window.location.pathname)) return <PredictionHistoryPage />;
