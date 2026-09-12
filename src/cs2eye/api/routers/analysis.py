@@ -329,7 +329,7 @@ async def matchup_score(
     format:str=Query("bo3",pattern="^(bo1|bo3|bo5)$"),
     analysis_mode:str=Query("pre_veto",pattern="^(pre_veto|post_veto)$"),
     as_of:date|None=None, series_id:int|None=None,
-    model_version:str|None=Query(None,pattern="^(matchup_v1|matchup_v2_candidate)$"),
+    model_version:str|None=Query(None,pattern="^(matchup_v1|matchup_v2_candidate|matchup_v3)$"),
     session:AsyncSession=Depends(get_db_session),
 )->dict:
     try:return await MatchupService(session).calculate(team_a_id,team_b_id,format,analysis_mode,as_of,series_id,model_version)
