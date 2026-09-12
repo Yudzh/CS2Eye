@@ -24,6 +24,7 @@ import type {
   HEKillBacktestReport,
   HEKillByMapPrediction,
   MapConfidenceLevel,
+  MatchSeries,
   MatchupScore,
   Team,
   TeamComparison,
@@ -957,6 +958,16 @@ function MatchupBlock({ matchup }: { matchup: MatchupScore }) {
         Оценки обеих команд симметричны и в сумме дают 100. Это аналитическая
         шкала соответствия сопернику, а не процент победы.
       </p>
+      {matchup.limitations.length > 0 && (
+        <details>
+          <summary>Ограничения данных</summary>
+          <ul>
+            {matchup.limitations.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </details>
+      )}
     </section>
   );
 }
@@ -1178,6 +1189,12 @@ export function TeamComparePage() {
     "pre_veto",
   );
   const [seriesId, setSeriesId] = useState(0);
+  const [matchupModelVersion, setMatchupModelVersion] = useState<
+    "" | "matchup_v1" | "matchup_v2_candidate" | "matchup_v3"
+  >("");
+  const [seriesTournament, setSeriesTournament] = useState<
+    MatchSeries["tournament"] | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [analystMode, setAnalystMode] = useState<"relevant" | "all">(
     "relevant",
@@ -1220,17 +1237,22 @@ export function TeamComparePage() {
           mode = "pre_veto";
           setSeriesId(0);
           setAnalysisMode("pre_veto");
+          setSeriesTournament(null);
           const query = new URLSearchParams(window.location.search);
           query.delete("series_id");
           query.set("team_a", String(a));
           query.set("team_b", String(b));
           query.set("format", fmt);
           window.history.replaceState(null, "", `/compare?${query.toString()}`);
-        } else
+        } else {
+          setSeriesTournament(selectedMatch.tournament);
           await capturePredictionHistory(
             series,
             selectedMatch.status === "completed",
           );
+        }
+      } else {
+        setSeriesTournament(null);
       }
       const [
         organization,
@@ -1247,7 +1269,14 @@ export function TeamComparePage() {
         compareTeamMaps(a, b),
         compareTeamVeto(a, b),
         getCalculatedVeto(a, b),
-        getMatchupScore(a, b, fmt, mode, series || undefined),
+        getMatchupScore(
+          a,
+          b,
+          fmt,
+          mode,
+          series || undefined,
+          matchupModelVersion || undefined,
+        ),
         getWinProbability(a, b, fmt, mode, series || undefined),
         mode === "post_veto"
           ? getWinProbability(a, b, fmt, "pre_veto", series || undefined)
@@ -1491,17 +1520,31 @@ export function TeamComparePage() {
               <option value="post_veto">После вето</option>
             </select>
           </label>
-          {analysisMode === "post_veto" && (
-            <label>
-              ID серии
-              <input
-                type="number"
-                min="1"
-                value={seriesId || ""}
-                onChange={(event) => setSeriesId(Number(event.target.value))}
-              />
-            </label>
-          )}
+          <label>
+            Модель матчапа
+            <select
+              value={matchupModelVersion}
+              onChange={(event) =>
+                setMatchupModelVersion(
+                  event.target.value as typeof matchupModelVersion,
+                )
+              }
+            >
+              <option value="">Production (matchup_v1)</option>
+              <option value="matchup_v2_candidate">matchup_v2_candidate</option>
+              <option value="matchup_v3">matchup_v3 (experimental)</option>
+            </select>
+          </label>
+          <label>
+            ID серии (турнирный контекст)
+            <input
+              type="number"
+              min="1"
+              value={seriesId || ""}
+              placeholder="без привязки к турниру"
+              onChange={(event) => setSeriesId(Number(event.target.value))}
+            />
+          </label>
           <button
             className="button button--primary"
             disabled={
@@ -1529,6 +1572,11 @@ export function TeamComparePage() {
       ) : comparison ? (
         <>
           <BettingRestrictionWarning restriction={bettingRestrictions} />
+          <p className="formula">
+            {seriesTournament
+              ? `Сравнение в рамках турнира: ${seriesTournament.name}${seriesTournament.year ? ` (${seriesTournament.year})` : ""}.`
+              : "Без привязки к турниру — форма считается отдельно для каждой команды по последним 60 дням и её собственному текущему турниру."}
+          </p>
           <section className="comparison-hero">
             <TeamComparisonSide side={comparison.team_a} />
             <div className="comparison-advantage">

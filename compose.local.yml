@@ -79,7 +79,7 @@ services:
       - ./src:/app/src
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini:ro
-      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD30/demos}:/app/storage
+      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD31/demos}:/app/storage
     depends_on:
       db:
         condition: service_healthy

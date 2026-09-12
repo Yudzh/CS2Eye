@@ -10,7 +10,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cs2eye.analytics.matchup_config import MATCHUP_WEIGHTS, TACTICAL_WEIGHTS
+from cs2eye.analytics.matchup_config import MATCHUP_V3_CONFIG, MATCHUP_WEIGHTS, TACTICAL_WEIGHTS
+from cs2eye.analytics.matchup_engine import calculate_matchup
 from cs2eye.analytics.scoring.core import FactorInput, regress_rate, score_factors
 from cs2eye.analytics.win_probability_config import MIN_HISTORICAL_MAPS_PER_TEAM, WIN_PROBABILITY_FEATURES
 from cs2eye.models.demo import (DemoMapResult,DemoPlayerStat,DemoTeamBombStat,DemoTeamCombatStat,
@@ -18,9 +19,11 @@ from cs2eye.models.demo import (DemoMapResult,DemoPlayerStat,DemoTeamBombStat,De
 from cs2eye.models.demo_file import DemoFile
 from cs2eye.models.match import Match,MatchVetoAction
 from cs2eye.models.team import Team,TeamRankingSnapshot,TeamRosterMember
-from cs2eye.services.matchup_service import advantage_level,confidence_level
+from cs2eye.services.map_strength_v3_service import MapStrengthV3Service
+from cs2eye.services.matchup_service import advantage_level,aggregate_maps_v3,confidence_level,form_context_input
 from cs2eye.services.player_service import calculate_player_strength
 from cs2eye.services.team_strength_service import TeamPerformanceInput,calculate_team_strength
+from cs2eye.services.team_strength_v3_service import TeamStrengthV3Service
 from cs2eye.services.form_context_service import FormContextService
 
 def clamp(x:float)->float:return max(0,min(100,x))
@@ -92,6 +95,47 @@ class AnalyticsAsOfService:
         positives=sum(item.target for item in examples)
         return examples,{"total_series":total,"eligible":len(examples),"excluded":total-len(examples),"coverage":len(examples)/total if total else 0,"excluded_reasons":dict(excluded),"target_distribution":{"team_a_wins":positives,"team_b_wins":len(examples)-positives},"date_range":{"first":examples[0].match_date.isoformat() if examples else None,"last":examples[-1].match_date.isoformat() if examples else None},"bulk_queries":13,"analysis_mode":analysis_mode,"cutoff_policy":"strictly_before_match_date; same-day series are added after all predictions for that date"}
 
+    async def build_dataset_v3(self,analysis_mode:str="pre_veto")->tuple[list[HistoricalExample],dict]:
+        """matchup_v3 backtest dataset. Reuses the same chronological state/eligibility/H2H
+        machinery as build_dataset (v1), but scores team_strength/map_veto/tactical_matchup
+        with real MapStrengthV3Service/TeamStrengthV3Service calls at as_of=match.match_date,
+        instead of a from-scratch legacy approximation. Those V3 services already enforce
+        their own temporal safety (roster-before-cutoff, ranking-before-cutoff, no future
+        observations), which is why this does not need its own bulk feature reconstruction
+        the way v1 did when legacy Team/Map Strength had no as_of support at all.
+        """
+        data=await self._preload();state=HistoricalState();examples=[];excluded=defaultdict(int)
+        rankings=self._ranking_index(data["rankings"]);members=defaultdict(list)
+        for member in data["members"]:
+            if member.player_id is not None:members[member.roster_id].append(member.player_id)
+        maps_by_match=defaultdict(list)
+        for item in data["maps"]:maps_by_match[item.match_id].append(item)
+        self._annotate_opponent_ranks(data["maps"],rankings)
+        veto_by_match=defaultdict(list)
+        for action in data["veto"]:veto_by_match[action.match_series_id].append(action)
+        stats_by_demo=defaultdict(list)
+        for stat in data["player_stats"]:stats_by_demo[stat.demo_file_id].append(stat)
+        map_service=MapStrengthV3Service(self.session);strength_service=TeamStrengthV3Service(self.session)
+        total=0;by_date=defaultdict(list)
+        for match in data["matches"]:by_date[match.match_date].append(match)
+        for day in sorted(by_date):
+            for match in by_date[day]:
+                total+=1;maps=maps_by_match[match.id];reason=self._eligibility(match,maps,state)
+                if reason:excluded[reason]+=1
+                else:
+                    actual=veto_by_match[match.id] if analysis_mode=="post_veto" else None
+                    form_pair=await FormContextService(self.session).compare(
+                        match.team_a_id,match.team_b_id,match.match_date,match.tournament_id,match.id)
+                    context=await self._matchup_v3(match,state,actual,form_pair,map_service,strength_service)
+                    if context["reliability"]<.15:excluded["insufficient_reliability"]+=1
+                    else:
+                        context["form_context"]=form_pair
+                        features=self.features(context,match.format,rankings,match.match_date,match.team_a_id,match.team_b_id)
+                        examples.append(HistoricalExample(match.id,match.match_date,match.team_a_id,match.team_b_id,int(match.winner_team_id==match.team_a_id),features,context,context["reliability"]))
+            for match in by_date[day]:self._update(match,maps_by_match[match.id],veto_by_match[match.id],stats_by_demo,state)
+        positives=sum(item.target for item in examples)
+        return examples,{"total_series":total,"eligible":len(examples),"excluded":total-len(examples),"coverage":len(examples)/total if total else 0,"excluded_reasons":dict(excluded),"target_distribution":{"team_a_wins":positives,"team_b_wins":len(examples)-positives},"date_range":{"first":examples[0].match_date.isoformat() if examples else None,"last":examples[-1].match_date.isoformat() if examples else None},"analysis_mode":analysis_mode,"model_version":"matchup_v3","cutoff_policy":"strictly_before_match_date; same-day series are added after all predictions for that date"}
+
     async def calculate(self,a:int,b:int,as_of:date,format:str="bo3",analysis_mode:str="pre_veto",series_id:int|None=None)->dict:
         data=await self._preload();state=HistoricalState();rankings=self._ranking_index(data["rankings"]);members=defaultdict(list)
         team_names={team.id:team.name for team in data["teams"]}
@@ -149,6 +193,34 @@ class AnalyticsAsOfService:
         available=[x for x in inputs if x.available and x.normalized_score is not None];reliability=sum((x.confidence or 0)*x.weight for x in available)/sum(x.weight for x in available) if available else 0;result=score_factors(inputs,reliability);score=result.final_score
         return {"model_version":"matchup_v1","score_semantics":"analytical_score_0_100_not_probability","team_a":{"id":a,"score":score,"advantage":round(score-50,2)},"team_b":{"id":b,"score":round(100-score,2),"advantage":round(50-score,2)},"team_strength":{"team_a_score":sa,"team_b_score":sb},"raw_score":result.raw_score,"reliability":result.reliability,"confidence_level":confidence_level(result.reliability),"advantage":{"team_id":a if score>53 else b if score<47 else None,"level":advantage_level(score)},"factors":[{**x.__dict__,"score":x.normalized_score,"sample":x.sample_size} for x in result.factors],"maps":map_rows,"tactical":tactical_detail,"veto":{"basis":"actual_veto" if actual_veto else "historical_calculated_veto","series_id":getattr(match,"id",None)},"roster_as_of":{"team_a":state.roster_id.get(a),"team_b":state.roster_id.get(b)},"ranking_as_of":{"team_a":self._rank(rankings,a,match.match_date),"team_b":self._rank(rankings,b,match.match_date)},"strict_historical":True,"limitations":["Round Swing excluded from strict historical features: active v1 artifact was trained using future matches relative to historical rows.","Historical Leadership excluded: role tenure snapshots are not reliable.","Match Series stores a date but no exact start time; same-day matches are conservatively hidden from one another."]}
 
+    async def _matchup_v3(self,match,state,actual_veto,form_pair,map_service:MapStrengthV3Service,strength_service:TeamStrengthV3Service)->dict:
+        a,b=match.team_a_id,match.team_b_id;cutoff=match.match_date
+        strength_a=await strength_service.calculate(a,cutoff);strength_b=await strength_service.calculate(b,cutoff)
+        sa,ca=strength_a["score"],(strength_a["reliability"] or 0)/100
+        sb,cb=strength_b["score"],(strength_b["reliability"] or 0)/100
+        chosen=self._select_maps(a,b,state,match.format,actual_veto)
+        weights={row["map"]:(row["playability_weight"],row["role"]) for row in chosen}
+        maps_v3={}
+        for row in chosen:
+            maps_v3[(a,row["map"])]=await map_service.calculate(a,row["map"],cutoff)
+            maps_v3[(b,row["map"])]=await map_service.calculate(b,row["map"],cutoff)
+        map_score,map_rows,tactical=aggregate_maps_v3(a,b,weights,maps_v3)
+        h2h=self._h2h(a,b,state);hcount=len(state.h2h[frozenset((a,b))])
+        map_conf=sum(row["confidence"]*row["playability_weight"] for row in map_rows) if map_rows else 0
+        tactical_conf=map_conf*sum(v["weight"] for v in tactical.values() if isinstance(v,dict) and v.get("available"))
+        inputs=[
+            FactorInput("map_veto","Карты и вето (V3 delta)",None,map_score,MATCHUP_V3_CONFIG.factors["map_veto"].weight,len(map_rows),map_conf,"Historical Map Strength V3 delta_vs_team, strictly before match date."),
+            FactorInput("team_strength","Сила команд (V3)",None,cross(sa,sb),MATCHUP_V3_CONFIG.factors["team_strength"].weight,confidence=min(ca,cb),reason="Historical Team Strength V3, strictly before match date."),
+            form_context_input(form_pair,MATCHUP_V3_CONFIG.factors["form_context"].weight),
+            FactorInput("tactical_matchup","Тактика (V3)",tactical,tactical["score"],MATCHUP_V3_CONFIG.factors["tactical_matchup"].weight,confidence=tactical_conf,reason="CT/T и postplant/retake cross-matchup из historical Map Strength V3."),
+            FactorInput("h2h","Личные встречи",None,h2h,MATCHUP_V3_CONFIG.factors["h2h"].weight,hcount,min(1,hcount/5),"Только предыдущие серии.",h2h is not None),
+            FactorInput("leadership_context","Лидерство",None,None,MATCHUP_V3_CONFIG.factors["leadership_context"].weight,available=False,reason="Исторические роли IGL/Coach недостаточно надёжны."),
+        ]
+        available=[x for x in inputs if x.available and x.normalized_score is not None]
+        reliability=sum((x.confidence or 0)*x.weight for x in available)/sum(x.weight for x in available) if available else 0
+        result=calculate_matchup(inputs,reliability,MATCHUP_V3_CONFIG);score=result.final_score
+        return {"model_version":"matchup_v3","score_semantics":"analytical_score_0_100_not_probability","team_a":{"id":a,"score":score,"advantage":round(score-50,2)},"team_b":{"id":b,"score":round(100-score,2),"advantage":round(50-score,2)},"team_strength":{"team_a_score":sa,"team_b_score":sb},"raw_score":result.raw_score,"reliability":result.reliability,"confidence_level":confidence_level(result.reliability),"advantage":{"team_id":a if score>53 else b if score<47 else None,"level":advantage_level(score)},"factors":[{**x.__dict__,"score":x.normalized_score,"sample":x.sample_size} for x in result.factors],"maps":map_rows,"tactical":tactical,"veto":{"basis":"actual_veto" if actual_veto else "historical_calculated_veto","series_id":getattr(match,"id",None)},"strict_historical":True,"limitations":["map_veto playability selection (which maps matter) still comes from historical win-rate/ban-rate tendency, not a V3-native veto engine.","Historical Leadership excluded: role tenure snapshots are not reliable."]}
+
     def _team_strength(self,team_id,state,members,as_of):
         maps=state.maps[team_id];roster=state.roster_id.get(team_id);player_scores=[]
         for player_id in members.get(roster,[]):
@@ -166,17 +238,31 @@ class AnalyticsAsOfService:
         fake=[(SimpleNamespace(player_strength=value),SimpleNamespace(participant_type="player",is_active=True,left_at=None,joined_at=None,role=None)) for value in player_scores]
         result=calculate_team_strength(fake,performance=p);return result.final_score,result.reliability
 
-    def _map_veto(self,a,b,state,format,actual):
-        names=sorted({x.map_name for x in state.maps[a]+state.maps[b]});rows=[]
+    def _select_maps(self,a,b,state,format,actual):
+        """Which maps are relevant and how playable, strictly from historical state/veto
+        tendency. Shared by matchup_v1 (legacy win-rate score) and matchup_v3 (Map Strength
+        V3 delta score) so both backtests agree on *which* maps matter and differ only on
+        *how map quality is scored* on them.
+        """
+        names=sorted({x.map_name for x in state.maps[a]+state.maps[b]});candidates=[]
         for name in names:
             aa=[x for x in state.maps[a] if x.map_name==name];bb=[x for x in state.maps[b] if x.map_name==name]
             if not aa or not bb:continue
-            ar,_=regress_rate(sum(x.won for x in aa),len(aa),prior_size=5);br,_=regress_rate(sum(x.won for x in bb),len(bb),prior_size=5);score=clamp(50+(ar-br)*50);rows.append({"map":name,"score":score,"sample":min(len(aa),len(bb))})
+            candidates.append({"map":name,"sample":min(len(aa),len(bb))})
         actual_roles={x.map_name:x.action for x in actual or []};veto_a=state.veto[a];veto_b=state.veto[b]
-        for row in rows:
+        for row in candidates:
             bans=sum(x.action=="ban" and x.map_name==row["map"] for x in veto_a+veto_b);total=max(1,len(veto_a)+len(veto_b));row["playability"]=.02 if actual_roles.get(row["map"])=="ban" else 1 if actual_roles.get(row["map"]) in {"pick","decider"} else max(.05,1-bans/total);row["role"]=actual_roles.get(row["map"],"calculated")
-        count={"bo1":1,"bo3":3,"bo5":5}.get(format,3);chosen=sorted(rows,key=lambda x:(x["role"] in {"pick","decider"},x["playability"]),reverse=True)[:count];total=sum(x["playability"] for x in chosen)
-        for row in chosen:row["playability_weight"]=row["playability"]/total if total else 0;row["contribution"]=(row["score"]-50)*row["playability_weight"]
+        count={"bo1":1,"bo3":3,"bo5":5}.get(format,3);chosen=sorted(candidates,key=lambda x:(x["role"] in {"pick","decider"},x["playability"]),reverse=True)[:count]
+        total=sum(x["playability"] for x in chosen)
+        for row in chosen:row["playability_weight"]=row["playability"]/total if total else 0.
+        return chosen
+
+    def _map_veto(self,a,b,state,format,actual):
+        chosen=self._select_maps(a,b,state,format,actual)
+        for row in chosen:
+            name=row["map"];aa=[x for x in state.maps[a] if x.map_name==name];bb=[x for x in state.maps[b] if x.map_name==name]
+            ar,_=regress_rate(sum(x.won for x in aa),len(aa),prior_size=5);br,_=regress_rate(sum(x.won for x in bb),len(bb),prior_size=5)
+            row["score"]=clamp(50+(ar-br)*50);row["contribution"]=(row["score"]-50)*row["playability_weight"]
         score=50+sum(x["contribution"] for x in chosen) if chosen else None;conf=min(1,sum(x["sample"] for x in chosen)/15) if chosen else 0
         return score,chosen,conf
 
