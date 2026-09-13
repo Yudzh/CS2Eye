@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
-from cs2eye.api.schemas.match_explanation_plan import MatchExplanationPlan
 from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
 from cs2eye.api.schemas.match_llm_runtime import MatchLLMRuntimeMetadata
 from cs2eye.models.match_llm_analysis_run import MatchLLMAnalysisRun
@@ -42,7 +41,7 @@ class SQLAlchemyMatchLLMAnalysisRepository:
         match_id: int | None, tournament_id: int | None, as_of: datetime,
         analysis_mode: str, language: str, model: str | None,
         provider: str | None = "ollama", source_run_id: int | None = None,
-        explanation_plan: MatchExplanationPlan | MatchExplanationPlanV2 | None = None,
+        explanation_plan: MatchExplanationPlanV2 | None = None,
     ) -> MatchLLMAnalysisRun:
         run = MatchLLMAnalysisRun(
             source_run_id=source_run_id, match_id=match_id,

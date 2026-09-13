@@ -2,7 +2,7 @@ from cs2eye.api.schemas.llm_quality import (
     LLMQualityAggregateReport, LLMQualityComparison, LLMQualityConfiguration,
     LLMQualityDataset, LLMQualityRunResult,
 )
-from cs2eye.api.schemas.match_llm_analysis_v2 import MatchLLMAnalysisV2
+from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
 from cs2eye.services.match_llm_quality_evaluator import MatchLLMQualityEvaluator
 
 
@@ -19,9 +19,9 @@ class LLMQualityEvaluationService:
         try:
             for case in dataset.cases:
                 try:
-                    response = await provider.generate_plan(case.explanation_plan_snapshot)
-                    if not isinstance(response.analysis, MatchLLMAnalysisV2):
-                        raise TypeError("provider returned non-v2 output")
+                    response = await provider.generate_fixed_plan(case.explanation_plan_snapshot)
+                    if not isinstance(response.analysis, MatchLLMAnalysisV3):
+                        raise TypeError("provider returned non-v3 output")
                     metrics = self.evaluator.evaluate(case, response.analysis)
                     result = LLMQualityRunResult(
                         case_id=case.case_id, dataset_version=dataset.schema_version,

@@ -2,14 +2,13 @@ import re
 from difflib import SequenceMatcher
 
 from cs2eye.api.schemas.llm_quality import LLMQualityCase, LLMQualityMetrics
-from cs2eye.api.schemas.match_llm_analysis_v2 import MatchLLMAnalysisV2
-from cs2eye.services.match_llm_analysis_v2_validator import (
-    MatchLLMAnalysisV2Validator, MatchLLMV2ValidationError,
+from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
+from cs2eye.services.match_llm_analysis_v3_validator import (
+    MatchLLMAnalysisV3Validator, MatchLLMV3ValidationError,
 )
 
 
 WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")
-NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,]\d+)?\s*%?")
 CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 LATIN_RE = re.compile(r"[A-Za-z]")
 FORBIDDEN_RE = re.compile(
@@ -21,57 +20,48 @@ GENERIC_RE = re.compile(
     r"следует учитывать некоторые факторы|имеются определенные преимущества)[.!]?\s*$",
     re.IGNORECASE,
 )
-GENERIC_SUMMARY_RE = re.compile(
-    r"^(?:небольшое|малое|умеренное|явное)\s+преимущество\s+(?:оста[её]тся\s+)?"
-    r"(?:в\s+пользу|за)\s+\S+[.!]?\s*$", re.IGNORECASE,
+
+SECTION_FIELDS = (
+    "expected_winner_text", "conclusion_text", "form_text", "maps_text",
+    "teamplay_text", "manual_text",
 )
 
 
 class MatchLLMQualityEvaluator:
-    """Transparent, deterministic evaluation. No LLM or external services."""
+    """Transparent, deterministic evaluation of MatchLLMAnalysis v3 wording.
 
-    SUMMARY_MAX = 180
-    ITEM_MAX = 180
-    TOTAL_MAX = 1200
+    Structural grounding (no hallucinated facts, no reversed favorite/edges, no
+    unauthorized numbers or entities) is delegated to MatchLLMAnalysisV3Validator
+    — the same validator production uses before accepting a generation. This
+    evaluator adds the softer, presentation-quality checks that validator does
+    not: repetition, specificity, conciseness, language, and case-specific
+    coverage of facts the case expects the wording to surface.
+    """
+
+    ITEM_MAX = 600
+    TOTAL_MAX = 2200
     REPETITION_THRESHOLD = .88
 
     def __init__(self, validator=None):
-        self.validator = validator or MatchLLMAnalysisV2Validator()
+        self.validator = validator or MatchLLMAnalysisV3Validator()
 
-    def evaluate(self, case: LLMQualityCase, output: MatchLLMAnalysisV2) -> LLMQualityMetrics:
-        texts_by_group = {
-            "signal": {**output.advantage_texts, **output.counter_argument_texts},
-            "contradiction": output.contradiction_texts,
-            "risk": output.risk_texts,
-            "limitation": output.limitation_texts,
-        }
+    def evaluate(self, case: LLMQualityCase, output: MatchLLMAnalysisV3) -> LLMQualityMetrics:
         expected = case.expectations
-        required = {
-            "signal": expected.must_cover_signal_ids,
-            "contradiction": expected.must_cover_contradiction_ids,
-            "risk": expected.must_cover_risk_ids,
-            "limitation": expected.must_cover_limitation_ids,
-        }
-        total_required = sum(len(ids) for ids in required.values())
-        covered = sum(
-            1 for group, ids in required.items() for identifier in ids
-            if texts_by_group[group].get(identifier, "").strip()
-        )
-        coverage = covered / total_required if total_required else 1.0
+        texts = [getattr(output, field) or "" for field in SECTION_FIELDS]
+        joined = " ".join(texts).casefold()
+        mentioned = sum(1 for fact in expected.must_mention if fact.casefold() in joined)
+        coverage = mentioned / len(expected.must_mention) if expected.must_mention else 1.0
 
         failed = []
         try:
             self.validator.validate(case.explanation_plan_snapshot, output)
             grounding = True
-        except MatchLLMV2ValidationError as error:
+        except MatchLLMV3ValidationError as error:
             grounding = False
             failed.extend(f"grounding:{code}" for code in error.codes)
 
-        all_items = [
-            text.strip() for group in texts_by_group.values() for text in group.values()
-            if text.strip()
-        ]
-        normalized = [self._normalize(text) for text in all_items]
+        non_empty = [text for text in texts if text.strip()]
+        normalized = [self._normalize(text) for text in non_empty]
         duplicate_pairs = 0
         comparisons = 0
         for index, left in enumerate(normalized):
@@ -79,50 +69,35 @@ class MatchLLMQualityEvaluator:
                 comparisons += 1
                 if self._similarity(left, right) >= self.REPETITION_THRESHOLD:
                     duplicate_pairs += 1
-        summary_normalized = self._normalize(output.summary)
-        summary_copies = sum(
-            self._similarity(summary_normalized, item) >= self.REPETITION_THRESHOLD
-            for item in normalized
-        )
-        repetition = max(0.0, 1 - (duplicate_pairs + summary_copies) / max(1, comparisons + 1))
-        if duplicate_pairs or summary_copies:
+        repetition = max(0.0, 1 - duplicate_pairs / max(1, comparisons))
+        if duplicate_pairs:
             failed.append("repetition")
 
-        generic_count = sum(bool(GENERIC_RE.match(text)) for text in all_items)
-        specific_count = sum(self._is_specific(text, case) for text in all_items)
-        item_specificity = (max(0.0, (specific_count - generic_count) / len(all_items))
-                            if all_items else (1.0 if not total_required else 0.0))
-        summary_specificity = 0.0 if GENERIC_SUMMARY_RE.match(output.summary.strip()) else (
-            1.0 if self._is_specific(output.summary, case) else .5
-        )
-        specificity = .8 * item_specificity + .2 * summary_specificity
+        generic_count = sum(bool(GENERIC_RE.match(text.strip())) for text in non_empty)
+        specific_count = sum(self._is_specific(text) for text in non_empty)
+        specificity = (max(0.0, (specific_count - generic_count) / len(non_empty))
+                      if non_empty else 0.0)
         if specificity < .6:
             failed.append("specificity")
 
-        total_length = len(output.summary) + sum(map(len, all_items))
+        total_length = sum(map(len, texts))
         length_penalties = (
-            max(0, len(output.summary) - self.SUMMARY_MAX)
-            + sum(max(0, len(text) - self.ITEM_MAX) for text in all_items)
+            sum(max(0, len(text) - self.ITEM_MAX) for text in texts)
             + max(0, total_length - self.TOTAL_MAX)
         )
         conciseness = max(0.0, 1 - length_penalties / 1000)
         if length_penalties:
             failed.append("conciseness")
 
-        readable = [output.summary, *all_items]
-        language_pass = all(self._russian(text) for text in readable)
+        language_pass = bool(non_empty) and all(self._russian(text) for text in non_empty)
         if not language_pass:
             failed.append("language")
-        forbidden = any(FORBIDDEN_RE.search(text) for text in readable) or any(
-            fact.casefold() in " ".join(readable).casefold()
-            for fact in expected.forbidden_facts
+        forbidden = any(FORBIDDEN_RE.search(text) for text in texts) or any(
+            fact.casefold() in joined for fact in expected.forbidden_facts
         )
         if forbidden:
             failed.append("forbidden_wording")
-        numeric_restatement = any(NUMBER_RE.search(text) for text in readable)
-        if numeric_restatement:
-            failed.append("numeric_restatement")
-        format_pass = bool(output.summary.strip()) and coverage == 1.0 and not numeric_restatement
+        format_pass = all(text.strip() for text in texts) and coverage == 1.0
         if not format_pass:
             failed.append("format")
 
@@ -161,12 +136,12 @@ class MatchLLMQualityEvaluator:
         return cyrillic >= 3 and cyrillic >= latin
 
     @staticmethod
-    def _is_specific(text, case):
-        if GENERIC_RE.match(text):
+    def _is_specific(text):
+        if GENERIC_RE.match(text.strip()):
             return False
         concrete_terms = {
-            "форма", "карта", "состав", "расписание", "matchup", "матчап", "h2h", "вето",
-            "данн", "аналитик", "противореч", "риск", "турнир",
+            "форма", "карта", "состав", "matchup", "матчап", "данн", "аналитик",
+            "турнир", "тимплей", "сторон", "победител",
         }
         lowered = text.casefold()
         return any(term in lowered for term in concrete_terms)

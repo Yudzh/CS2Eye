@@ -92,17 +92,21 @@ def analysis_payload(*, run_id: int = 101) -> dict:
         "created_at": "2026-08-29T14:30:00Z",
         "runtime": {
             "provider": "ollama", "model": "qwen3:8b",
-            "prompt_version": "match_analysis_prompt.v3",
+            "prompt_version": "match_analysis_prompt.v5",
         },
-        "rendered_analysis": {
-            "summary": "FURIA имеет небольшое преимущество.",
-            "advantages": [{"text": "Более сильная текущая форма."}],
-            "counter_arguments": [{"text": "Legacy может навязать борьбу."}],
-            "contradictions": [],
-            "risks": [{"text": "Небольшая выборка."}],
-            "limitations": [],
+        "explanation_plan": {
+            "schema_version": "match_explanation_plan.v2",
+            "expected_winner": {"team_id": 1, "team_name": "FURIA", "win_probability": .58},
         },
-        "analysis": None,
+        "analysis": {
+            "schema_version": "match_llm_analysis.v3",
+            "expected_winner_text": "По расчётам должна выиграть FURIA — 58%.",
+            "conclusion_text": "FURIA имеет небольшое преимущество по внутренней статистике CS2Eye.",
+            "form_text": "Более сильная текущая форма поддерживает FURIA.",
+            "maps_text": "Legacy может навязать борьбу на отдельных картах.",
+            "teamplay_text": "Выборка данных пока небольшая.",
+            "manual_text": "Ручных комментариев по этому матчу нет.",
+        },
     }
 
 
@@ -187,7 +191,7 @@ def test_navi_warning_is_at_top_of_telegram_ai_presentation() -> None:
     payload = {**analysis_payload(), "context": context_payload(navi=True)}
     text = format_llm_analysis(payload)
     assert text.startswith("⚠️ <b>NAVI RULE</b>")
-    assert "Кратко:" in text
+    assert "📌 <b>Итог</b>" in text
 
 
 def test_group_warning_is_shown_in_telegram_match_and_ai_presentations() -> None:
@@ -355,14 +359,14 @@ async def test_api_client_uses_long_timeout_for_llm_generation() -> None:
         await http_client.aclose()
 
 
-def test_llm_formatter_hides_empty_sections() -> None:
+def test_llm_formatter_renders_expected_winner_and_fixed_sections() -> None:
     text = format_llm_analysis(analysis_payload())
-    assert "Кратко:" in text
-    assert "Преимущества:" in text
-    assert "Контраргументы:" in text
-    assert "Риски:" in text
-    assert "Противоречия:" not in text
-    assert "Ограничения:" not in text
+    assert "🏆 <b>По расчётам должна выиграть FURIA — 58%</b>" in text
+    assert "📌 <b>Итог</b>" in text
+    assert "📈 <b>Форма</b>" in text
+    assert "🗺 <b>Карты</b>" in text
+    assert "🎯 <b>Тимплей и свинги</b>" in text
+    assert "📝 <b>Ручная аналитика</b>" in text
 
 
 def test_llm_v3_formatter_always_renders_five_fixed_sections() -> None:
@@ -433,7 +437,7 @@ async def test_generate_analysis_uses_backend_and_displays_new_run() -> None:
     )
     assert event.message.edit_text.await_count == 2
     assert event.message.edit_text.await_args_list[0].args[0] == "Генерирую анализ..."
-    assert "Кратко:" in event.message.edit_text.await_args_list[1].args[0]
+    assert "📌 <b>Итог</b>" in event.message.edit_text.await_args_list[1].args[0]
     assert client.generate_llm_analysis.await_args.kwargs["match_id"] == 42
 
 

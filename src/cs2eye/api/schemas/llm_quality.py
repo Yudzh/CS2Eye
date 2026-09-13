@@ -3,8 +3,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from cs2eye.api.schemas.match_explanation_plan import MatchExplanationPlan
-from cs2eye.api.schemas.match_llm_analysis_v2 import MatchLLMAnalysisV2
+from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
+from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
 
 
 class QualityModel(BaseModel):
@@ -12,10 +12,14 @@ class QualityModel(BaseModel):
 
 
 class LLMQualityExpectations(QualityModel):
-    must_cover_signal_ids: list[str] = Field(default_factory=list)
-    must_cover_contradiction_ids: list[str] = Field(default_factory=list)
-    must_cover_risk_ids: list[str] = Field(default_factory=list)
-    must_cover_limitation_ids: list[str] = Field(default_factory=list)
+    """Literal facts (map names, key phrases) that a case's wording must surface.
+
+    Structural correctness (grounding, no hallucinated facts, no reversed
+    favorites/edges) is already fully covered by MatchLLMAnalysisV3Validator,
+    which every case is validated against regardless of these expectations.
+    """
+
+    must_mention: list[str] = Field(default_factory=list)
     forbidden_facts: list[str] = Field(default_factory=list)
     expected_favored_team: Literal["team_a", "team_b", "none"]
     expected_confidence: Literal["high", "medium", "low", "insufficient"]
@@ -25,7 +29,7 @@ class LLMQualityCase(QualityModel):
     case_id: str
     name: str
     description: str
-    explanation_plan_snapshot: MatchExplanationPlan
+    explanation_plan_snapshot: MatchExplanationPlanV2
     expectations: LLMQualityExpectations
     tags: Annotated[list[str], Field(min_length=1)]
     golden: bool = False
@@ -33,7 +37,7 @@ class LLMQualityCase(QualityModel):
 
 
 class LLMQualityDataset(QualityModel):
-    schema_version: Literal["llm_quality_dataset.v1"] = "llm_quality_dataset.v1"
+    schema_version: Literal["llm_quality_dataset.v2"] = "llm_quality_dataset.v2"
     cases: Annotated[list[LLMQualityCase], Field(min_length=1)]
 
 
@@ -63,8 +67,8 @@ class LLMQualityRunResult(QualityModel):
     case_id: str
     dataset_version: str
     configuration: LLMQualityConfiguration
-    explanation_plan_snapshot: MatchExplanationPlan
-    llm_output_snapshot: MatchLLMAnalysisV2 | None = None
+    explanation_plan_snapshot: MatchExplanationPlanV2
+    llm_output_snapshot: MatchLLMAnalysisV3 | None = None
     deterministic_metrics: LLMQualityMetrics | None = None
     quality_score: float | None = None
     status: Literal["completed", "failed"]

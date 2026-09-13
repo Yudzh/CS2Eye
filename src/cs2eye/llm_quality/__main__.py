@@ -5,7 +5,7 @@ import json
 from cs2eye.api.schemas.llm_quality import LLMQualityConfiguration
 from cs2eye.core.config import settings
 from cs2eye.db.session import AsyncSessionLocal, dispose_engine
-from cs2eye.llm_quality.dataset_v1 import DATASET_V1
+from cs2eye.llm_quality.dataset_v2 import DATASET_V2
 from cs2eye.services.llm_quality_evaluation_service import LLMQualityEvaluationService
 from cs2eye.services.llm_quality_repository import SQLAlchemyLLMQualityRepository
 from cs2eye.services.ollama_match_analysis_client import OllamaMatchAnalysisClient
@@ -15,13 +15,13 @@ def parser():
     result = argparse.ArgumentParser(prog="python -m cs2eye.llm_quality")
     commands = result.add_subparsers(dest="command", required=True)
     evaluate = commands.add_parser("evaluate")
-    evaluate.add_argument("--dataset", default="llm_quality_dataset.v1")
+    evaluate.add_argument("--dataset", default="llm_quality_dataset.v2")
     evaluate.add_argument("--provider", default="ollama")
     evaluate.add_argument("--model", required=True)
     evaluate.add_argument("--prompt", required=True)
     evaluate.add_argument("--think", action="store_true")
     inspect = commands.add_parser("inspect")
-    inspect.add_argument("--dataset", default="llm_quality_dataset.v1")
+    inspect.add_argument("--dataset", default="llm_quality_dataset.v2")
     inspect.add_argument("--provider", default="ollama")
     inspect.add_argument("--model", required=True)
     inspect.add_argument("--prompt", required=True)
@@ -30,7 +30,7 @@ def parser():
 
 
 async def run(arguments):
-    if arguments.dataset != DATASET_V1.schema_version:
+    if arguments.dataset != DATASET_V2.schema_version:
         raise SystemExit(f"unknown dataset: {arguments.dataset}")
     if arguments.provider != "ollama":
         raise SystemExit(f"unsupported provider: {arguments.provider}")
@@ -52,13 +52,13 @@ async def run(arguments):
                 ),
             )
             if arguments.command == "evaluate":
-                runs = await service.evaluate(DATASET_V1, configuration)
+                runs = await service.evaluate(DATASET_V2, configuration)
                 await session.commit()
-                report = await service.report(DATASET_V1.schema_version, configuration, runs)
+                report = await service.report(DATASET_V2.schema_version, configuration, runs)
                 print(json.dumps(report.model_dump(mode="json"), ensure_ascii=False, indent=2))
             else:
-                runs = await repository.list_runs(DATASET_V1.schema_version, configuration)
-                report = await service.report(DATASET_V1.schema_version, configuration, runs)
+                runs = await repository.list_runs(DATASET_V2.schema_version, configuration)
+                report = await service.report(DATASET_V2.schema_version, configuration, runs)
                 failures = [{
                     "case_id": item.case_id,
                     "failed_checks": (item.deterministic_metrics.failed_checks

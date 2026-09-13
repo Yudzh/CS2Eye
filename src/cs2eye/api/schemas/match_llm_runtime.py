@@ -1,13 +1,11 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
-from cs2eye.api.schemas.match_explanation_plan import MatchExplanationPlan
 from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
 from cs2eye.api.schemas.match_llm_analysis import MatchLLMAnalysis
-from cs2eye.api.schemas.match_llm_analysis_v2 import MatchLLMAnalysisV2
 from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
 
 
@@ -46,31 +44,12 @@ class MatchLLMRuntimeMetadata(BaseModel):
     grounding_error_codes: list[str] = Field(default_factory=list)
 
 
-class RenderedExplanationItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str
-    text: str
-    metadata: dict[str, Any]
-
-
-class RenderedMatchExplanation(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    conclusion: dict[str, Any]
-    summary: str
-    advantages: list[RenderedExplanationItem]
-    counter_arguments: list[RenderedExplanationItem]
-    contradictions: list[RenderedExplanationItem]
-    risks: list[RenderedExplanationItem]
-    limitations: list[RenderedExplanationItem]
-
-
 class MatchLLMAnalysisResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     context: MatchAnalysisContext
-    explanation_plan: MatchExplanationPlan | MatchExplanationPlanV2 | None = None
-    rendered_analysis: RenderedMatchExplanation | None = None
-    analysis: MatchLLMAnalysis | MatchLLMAnalysisV2 | MatchLLMAnalysisV3
+    explanation_plan: MatchExplanationPlanV2 | None = None
+    analysis: MatchLLMAnalysis | MatchLLMAnalysisV3
     runtime: MatchLLMRuntimeMetadata
 
 
@@ -81,9 +60,8 @@ class MatchLLMStoredAnalysisResponse(BaseModel):
     source_run_id: int | None = None
     status: Literal["pending", "completed", "failed", "skipped_insufficient_data"]
     context: MatchAnalysisContext
-    explanation_plan: MatchExplanationPlan | MatchExplanationPlanV2 | None = None
-    rendered_analysis: RenderedMatchExplanation | None = None
-    analysis: MatchLLMAnalysis | MatchLLMAnalysisV2 | MatchLLMAnalysisV3 | None
+    explanation_plan: MatchExplanationPlanV2 | None = None
+    analysis: MatchLLMAnalysis | MatchLLMAnalysisV3 | None
     runtime: MatchLLMRuntimeMetadata
     error_code: str | None = None
     error_message: str | None = None

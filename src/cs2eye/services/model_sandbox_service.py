@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cs2eye.analytics.matchup_config import ACTIVE_MATCHUP_CONFIG, MATCHUP_V2_CONFIG, FactorConfig, MatchupModelConfig
+from cs2eye.analytics.matchup_config import ACTIVE_MATCHUP_CONFIG, MATCHUP_CONFIGS, MATCHUP_V2_CONFIG, MATCHUP_V3_CONFIG, FactorConfig, MatchupModelConfig
 from cs2eye.analytics.matchup_engine import apply_config_to_payload
 from cs2eye.analytics.win_probability import WinProbabilityModel, probability_metrics, temporal_split
 from cs2eye.analytics.win_probability_config import WIN_PROBABILITY_FEATURES, WIN_PROBABILITY_FEATURE_REGISTRY
@@ -22,10 +22,15 @@ FACTOR_HINTS={"map_veto":"Преимущество по ожидаемым ка�
 
 
 def sandbox_config(raw:dict)->tuple[MatchupModelConfig,dict]:
-    unknown=set(raw.get("factors",{}))-set(ACTIVE_MATCHUP_CONFIG.factors)
+    # "version" here means the template a sandbox edit starts from (as returned by
+    # bootstrap()'s *_config payloads), not the resulting sandbox config's own version.
+    base_version=raw.get("version") or ACTIVE_MATCHUP_CONFIG.version
+    base=MATCHUP_CONFIGS.get(base_version)
+    if base is None:raise ValueError(f"Unknown base matchup config version: {base_version}")
+    unknown=set(raw.get("factors",{}))-set(base.factors)
     if unknown:raise ValueError(f"Unknown matchup factors: {', '.join(sorted(unknown))}")
     normalize=bool(raw.get("normalize_weights",True));items={};raw_weights={}
-    for key,production in ACTIVE_MATCHUP_CONFIG.factors.items():
+    for key,production in base.factors.items():
         value=raw.get("factors",{}).get(key,{})
         weight=float(value.get("weight",production.weight));minimum=float(value.get("min_reliability",production.min_reliability));maximum=float(value.get("max_effect",production.max_effect));mode=value.get("reliability_mode",production.reliability_mode)
         mode={"threshold":"thresholded"}.get(mode,mode)
@@ -38,8 +43,8 @@ def sandbox_config(raw:dict)->tuple[MatchupModelConfig,dict]:
     if normalize:
         if total<=0:raise ValueError("Weight sum must be greater than zero when normalization is enabled.")
         items={key:FactorConfig(value.weight/total,value.reliability_mode,value.min_reliability,value.max_effect) for key,value in items.items()}
-    config=MatchupModelConfig("matchup_sandbox",items,bool(raw.get("redistribute_missing_weight",ACTIVE_MATCHUP_CONFIG.redistribute_missing_weight)),raw.get("overall_mode",ACTIVE_MATCHUP_CONFIG.overall_mode),float(raw.get("coverage_floor",ACTIVE_MATCHUP_CONFIG.coverage_floor)),float(raw.get("agreement_floor",ACTIVE_MATCHUP_CONFIG.agreement_floor)))
-    return config,{"raw_weight_sum":total,"normalized":normalize,"raw_weights":raw_weights,"effective_weights":{k:v.weight for k,v in items.items()}}
+    config=MatchupModelConfig("matchup_sandbox",items,bool(raw.get("redistribute_missing_weight",base.redistribute_missing_weight)),raw.get("overall_mode",base.overall_mode),float(raw.get("coverage_floor",base.coverage_floor)),float(raw.get("agreement_floor",base.agreement_floor)))
+    return config,{"base_version":base.version,"raw_weight_sum":total,"normalized":normalize,"raw_weights":raw_weights,"effective_weights":{k:v.weight for k,v in items.items()}}
 
 
 class ModelSandboxService:
@@ -48,7 +53,7 @@ class ModelSandboxService:
     async def bootstrap(self)->dict:
         matches=list((await self.session.scalars(select(Match).where(Match.team_a_id.is_not(None),Match.team_b_id.is_not(None)).order_by(Match.match_date.desc(),Match.id.desc()).limit(100))).all())
         active=await active_model(self.session)
-        return {"production_config":self._config_payload(ACTIVE_MATCHUP_CONFIG),"conservative_config":self._config_payload(MATCHUP_V2_CONFIG),"conservative_available":True,"matches":[{"id":x.id,"match_date":x.match_date,"status":x.status,"format":x.format,"team_a_id":x.team_a_id,"team_b_id":x.team_b_id} for x in matches],"ml":{"current_schema":active.feature_schema_version if active else None,"features":[{"key":key,**WIN_PROBABILITY_FEATURE_REGISTRY[key]} for key in WIN_PROBABILITY_FEATURES]}}
+        return {"production_config":self._config_payload(ACTIVE_MATCHUP_CONFIG),"conservative_config":self._config_payload(MATCHUP_V2_CONFIG),"conservative_available":True,"v3_config":self._config_payload(MATCHUP_V3_CONFIG),"v3_available":True,"matches":[{"id":x.id,"match_date":x.match_date,"status":x.status,"format":x.format,"team_a_id":x.team_a_id,"team_b_id":x.team_b_id} for x in matches],"ml":{"current_schema":active.feature_schema_version if active else None,"features":[{"key":key,**WIN_PROBABILITY_FEATURE_REGISTRY[key]} for key in WIN_PROBABILITY_FEATURES]}}
 
     @staticmethod
     def _config_payload(config):

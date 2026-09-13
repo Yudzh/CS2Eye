@@ -23,22 +23,23 @@ async def test_real_ollama_aurora_g2_pipeline() -> None:
     )
     try:
         async with AsyncSessionLocal() as session:
-            response = await MatchLLMAnalysisService(
-                MatchAnalysisContextBuilder(session),
-                client,
-                enabled=True,
-                model=model,
-            ).analyze(
+            builder = MatchAnalysisContextBuilder(session)
+            context = await builder.build(
                 8,
                 9,
                 as_of=datetime(2026, 8, 26, tzinfo=UTC),
                 match_id=160,
-                language="ru",
             )
+            response = await MatchLLMAnalysisService(
+                builder,
+                client,
+                enabled=True,
+                model=model,
+            ).explain_context(context)
     finally:
         await client.close()
 
-    prediction = response.context.prediction
+    prediction = context.prediction
     assert prediction.status == "available"
     assert prediction.team_a_probability is not None
     assert prediction.team_b_probability is not None
@@ -47,15 +48,7 @@ async def test_real_ollama_aurora_g2_pipeline() -> None:
         if prediction.team_a_probability > prediction.team_b_probability
         else "team_b"
     )
-    assert response.analysis.conclusion.favored_team == expected_favorite
-    matchup = response.context.matchup
+    assert response.explanation_plan.conclusion.favored_team == expected_favorite
+    matchup = context.matchup
     assert matchup.team_a_score is not None
     assert matchup.team_b_score is not None
-    matchup_favorite = (
-        "team_a" if matchup.team_a_score > matchup.team_b_score else "team_b"
-    )
-    if matchup_favorite != expected_favorite:
-        assert any(
-            {"prediction", "matchup"}.issubset(item.evidence_refs)
-            for item in response.analysis.contradictions
-        )

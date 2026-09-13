@@ -176,12 +176,26 @@ class AnalyticsAsOfService:
 
     @staticmethod
     def features(context,format,rankings,as_of,a,b):
-        factors={x["key"]:x for x in context["factors"]};strength=(factors.get("team_strength") or {}).get("score") or 50
+        factors={x["key"]:x for x in context["factors"]}
+        def centered(key):
+            # Must match win_probability_service._feature_vector's centered() exactly:
+            # an is-None check, not `or 50`, since a legitimate score of 0 is falsy
+            # and would otherwise be misread as "missing" and rounded up to neutral.
+            score=(factors.get(key) or {}).get("score")
+            return 0.0 if score is None else (float(score)-50.0)/50.0
+        strength_delta=centered("team_strength")
         rank_a=AnalyticsAsOfService._rank(rankings,a,as_of);rank_b=AnalyticsAsOfService._rank(rankings,b,as_of);rank_adv=0 if not rank_a or not rank_b else max(-30,min(30,rank_b-rank_a))/30
-        strength_delta=(strength-50)/50
         form=context.get("form_context",{});fa=form.get("team_a_form_context",{});fb=form.get("team_b_form_context",{})
         def delta(key):return 0 if fa.get(key) is None or fb.get(key) is None else (float(fa[key])-float(fb[key]))/100
-        values={"matchup_score_centered":(context["team_a"]["score"]-50)/50,"raw_matchup_centered":(context["raw_score"]-50)/50,"matchup_reliability_advantage":(context["team_a"]["score"]-50)/50*context["reliability"],"team_strength_difference":strength_delta,"map_pool_advantage":(((factors.get("map_veto") or {}).get("score") or 50)-50)/50,"current_roster_advantage":(((factors.get("current_roster_form") or {}).get("score") or 50)-50)/50,"tactical_advantage":(((factors.get("tactical_matchup") or {}).get("score") or 50)-50)/50,"h2h_advantage":(((factors.get("h2h") or {}).get("score") or 50)-50)/50,"leadership_advantage":0,"ranking_advantage":rank_adv,"format_bo1_strength":strength_delta if format=="bo1" else 0,"format_bo3_strength":strength_delta if format=="bo3" else 0,"format_bo5_strength":strength_delta if format=="bo5" else 0,"tournament_form_advantage":delta("tournament_form_score"),"recent_60d_adjusted_form_advantage":delta("recent_60d_adjusted_form_score"),"strength_of_schedule_advantage":delta("strength_of_schedule_score"),"performance_vs_expectation_advantage":delta("performance_vs_expectation_score")}
+        # leadership_advantage is fixed at 0 here (unlike win_probability_service's live
+        # _feature_vector, which computes it from a real leadership_context factor):
+        # historical role-tenure snapshots aren't reliable (see calculate()'s limitations),
+        # so the model is trained with zero variance on this feature. Given zero-initialized
+        # weights and L2-regularized gradient descent (see WinProbabilityModel.train), its
+        # learned coefficient is provably always exactly 0, so a nonzero live value has no
+        # effect on predictions today — but this is fragile and must stay covered by
+        # tests/test_win_probability_feature_parity.py rather than silently relied upon.
+        values={"matchup_score_centered":(context["team_a"]["score"]-50)/50,"raw_matchup_centered":(context["raw_score"]-50)/50,"matchup_reliability_advantage":(context["team_a"]["score"]-50)/50*context["reliability"],"team_strength_difference":strength_delta,"map_pool_advantage":centered("map_veto"),"current_roster_advantage":centered("current_roster_form"),"tactical_advantage":centered("tactical_matchup"),"h2h_advantage":centered("h2h"),"leadership_advantage":0,"ranking_advantage":rank_adv,"format_bo1_strength":strength_delta if format=="bo1" else 0,"format_bo3_strength":strength_delta if format=="bo3" else 0,"format_bo5_strength":strength_delta if format=="bo5" else 0,"tournament_form_advantage":delta("tournament_form_score"),"recent_60d_adjusted_form_advantage":delta("recent_60d_adjusted_form_score"),"strength_of_schedule_advantage":delta("strength_of_schedule_score"),"performance_vs_expectation_advantage":delta("performance_vs_expectation_score")}
         return {key:float(values[key]) for key in WIN_PROBABILITY_FEATURES}
 
     def _matchup(self,match,state,rankings,members,actual_veto):

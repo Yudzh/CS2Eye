@@ -1,11 +1,11 @@
 from copy import deepcopy
 from datetime import datetime
 
+from pydantic import ValidationError
+
 from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
 from cs2eye.api.schemas.match_llm_analysis import MatchLLMAnalysis
-from cs2eye.api.schemas.match_explanation_plan import MatchExplanationPlan
 from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
-from cs2eye.api.schemas.match_llm_analysis_v2 import MatchLLMAnalysisV2
 from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
 from cs2eye.api.schemas.match_llm_runtime import (
     MatchLLMAnalysisResponse,
@@ -15,7 +15,6 @@ from cs2eye.api.schemas.match_llm_runtime import (
 )
 from cs2eye.models.match_llm_analysis_run import MatchLLMAnalysisRun
 from cs2eye.services.match_llm_analysis_repository import MatchLLMAnalysisRunRepository
-from cs2eye.services.match_explanation_assembler import assemble_match_explanation
 from cs2eye.services.match_llm_analysis_service import MatchLLMAnalysisService, MatchLLMServiceError
 
 
@@ -48,7 +47,7 @@ class MatchLLMAnalysisRunService:
         self, context: MatchAnalysisContext, *, team_a_id: int, team_b_id: int,
         as_of: datetime, match_id: int | None, tournament_id: int | None,
         analysis_mode: str, language: str, source_run_id: int | None = None,
-        explanation_plan: MatchExplanationPlan | MatchExplanationPlanV2 | None = None,
+        explanation_plan: MatchExplanationPlanV2 | None = None,
     ) -> MatchLLMStoredAnalysisResponse:
         plan = explanation_plan or self.analysis_service.explanation_builder.build(context)
         run = await self.repository.create_run(
@@ -80,14 +79,15 @@ class MatchLLMAnalysisRunService:
         if reuse_explanation_plan:
             if source.explanation_plan_snapshot is None:
                 raise ValueError("Source run has no stored explanation plan")
+            if source.explanation_plan_schema_version != "match_explanation_plan.v2":
+                raise ValueError(
+                    "Source run's explanation plan uses a retired schema version "
+                    f"({source.explanation_plan_schema_version}) and can no longer be reused",
+                )
             context = MatchAnalysisContext.model_validate(source.context_snapshot)
-            plan = (
-                MatchExplanationPlanV2.model_validate(_compatible_v2_plan_snapshot(
-                    source.explanation_plan_snapshot, source.context_snapshot,
-                ))
-                if source.explanation_plan_schema_version == "match_explanation_plan.v2"
-                else MatchExplanationPlan.model_validate(source.explanation_plan_snapshot)
-            )
+            plan = MatchExplanationPlanV2.model_validate(_compatible_v2_plan_snapshot(
+                source.explanation_plan_snapshot, source.context_snapshot,
+            ))
             return await self.generate_context(
                 context, team_a_id=source.team_a_id, team_b_id=source.team_b_id,
                 as_of=source.as_of, match_id=source.match_id,
@@ -127,31 +127,31 @@ class MatchLLMAnalysisRunService:
             grounding_error_codes=run.grounding_error_codes or [],
         )
         plan = None
-        if run.explanation_plan_snapshot is not None:
-            plan = (
-                MatchExplanationPlanV2.model_validate(_compatible_v2_plan_snapshot(
+        if (
+            run.explanation_plan_snapshot is not None
+            and run.explanation_plan_schema_version == "match_explanation_plan.v2"
+        ):
+            try:
+                plan = MatchExplanationPlanV2.model_validate(_compatible_v2_plan_snapshot(
                     run.explanation_plan_snapshot, run.context_snapshot,
                 ))
-                if run.explanation_plan_schema_version == "match_explanation_plan.v2"
-                else MatchExplanationPlan.model_validate(run.explanation_plan_snapshot)
-            )
+            except ValidationError:
+                plan = None
         analysis = None
         if run.analysis_snapshot is not None:
-            analysis = (
-                MatchLLMAnalysisV3.model_validate(run.analysis_snapshot)
-                if run.analysis_schema_version == "match_llm_analysis.v3"
-                else MatchLLMAnalysisV2.model_validate(run.analysis_snapshot)
-                if run.analysis_schema_version == "match_llm_analysis.v2"
-                else MatchLLMAnalysis.model_validate(run.analysis_snapshot)
-            )
+            try:
+                analysis = (
+                    MatchLLMAnalysisV3.model_validate(run.analysis_snapshot)
+                    if run.analysis_schema_version == "match_llm_analysis.v3"
+                    else MatchLLMAnalysis.model_validate(run.analysis_snapshot)
+                )
+            except ValidationError:
+                analysis = None
         return MatchLLMStoredAnalysisResponse(
             analysis_run_id=run.id, source_run_id=run.source_run_id,
             status=run.status,
             context=MatchAnalysisContext.model_validate(run.context_snapshot),
             explanation_plan=plan,
-            rendered_analysis=(assemble_match_explanation(plan, analysis)
-                               if plan is not None and isinstance(analysis, MatchLLMAnalysisV2)
-                               else None),
             analysis=analysis,
             runtime=runtime, error_code=run.error_code,
             error_message=run.error_message,

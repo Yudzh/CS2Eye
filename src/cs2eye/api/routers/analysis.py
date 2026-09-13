@@ -17,7 +17,6 @@ from cs2eye.api.schemas.match_analysis_context import HEKillByMapPrediction, Mat
 from cs2eye.api.schemas.match_llm_runtime import (
     MatchLLMHistoryItem,
     MatchLLMAnalysisRequest,
-    MatchLLMAnalysisResponse,
     MatchLLMRegenerateRequest,
     MatchLLMStoredAnalysisResponse,
 )
@@ -155,53 +154,6 @@ async def betting_restrictions(
     return await resolve_betting_restrictions(
         session, (team_a_id, team_b_id), is_playoff=is_playoff,
     )
-
-
-@router.post("/llm-match-analysis", response_model=MatchLLMAnalysisResponse)
-async def llm_match_analysis(
-    body: MatchLLMAnalysisRequest,
-    session: AsyncSession = Depends(get_db_session),
-    provider: MatchAnalysisProvider | None = Depends(get_ollama_match_analysis_client),
-) -> MatchLLMAnalysisResponse:
-    service = MatchLLMAnalysisService(
-        MatchAnalysisContextBuilder(session),
-        provider,
-        enabled=settings.match_llm_enabled,
-        model=settings.match_llm_model,
-    )
-    try:
-        return await service.analyze(
-            body.team_a_id,
-            body.team_b_id,
-            as_of=body.as_of,
-            match_id=body.match_id,
-            tournament_id=body.tournament_id,
-            match_format=body.match_format,
-            analysis_mode=body.analysis_mode,
-            language=body.language,
-        )
-    except LookupError as error:
-        raise HTTPException(404, str(error)) from error
-    except MatchLLMServiceError as error:
-        status = {
-            "llm_not_configured": 503,
-            "llm_timeout": 504,
-            "llm_provider_error": 502,
-            "llm_invalid_response": 502,
-            "llm_validation_failed": 502,
-            "llm_grounding_failed": 502,
-        }.get(error.code, 500)
-        raise HTTPException(
-            status_code=status,
-            detail={
-                "code": error.code,
-                "message": str(error),
-                **({"grounding_error_codes": [item.code for item in error.grounding_errors]}
-                   if settings.debug and error.grounding_errors else {}),
-            },
-        ) from error
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
 
 
 def _run_service(session, provider) -> tuple[MatchLLMAnalysisRunService, SQLAlchemyMatchLLMAnalysisRepository]:

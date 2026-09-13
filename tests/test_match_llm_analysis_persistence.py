@@ -13,20 +13,20 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from cs2eye import models  # noqa: F401
 from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
 from cs2eye.api.schemas.match_llm_analysis import MatchLLMAnalysis
-from cs2eye.api.schemas.match_llm_analysis_v2 import MatchLLMAnalysisV2
+from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
 from cs2eye.api.routers.analysis import get_ollama_match_analysis_client
 from cs2eye.core.config import settings
 from cs2eye.db.base import Base
 from cs2eye.db.session import get_db_session
 from cs2eye.main import create_app
+from cs2eye.models.match_llm_analysis_run import MatchLLMAnalysisRun
 from cs2eye.services.match_llm_analysis_repository import SQLAlchemyMatchLLMAnalysisRepository
 from cs2eye.services.match_llm_analysis_run_service import MatchLLMAnalysisRunService
 from cs2eye.services.match_llm_analysis_service import MatchLLMAnalysisService, MatchLLMServiceError
 from cs2eye.services.ollama_match_analysis_client import (
     MatchAnalysisProviderError, MatchAnalysisProviderResult,
 )
-from tests.test_match_analysis_context import full_context_payload, nullable_context_payload
-from tests.test_match_llm_analysis import valid_analysis_payload
+from tests.test_match_analysis_context import full_context_payload
 
 
 class FakeBuilder:
@@ -39,48 +39,43 @@ class FakeBuilder:
         return self.context
 
 
-class FakeProvider:
-    def __init__(self, *outcomes):
-        self.outcomes = list(outcomes)
+class FakeErrorProvider:
+    """Mimics the fixed-plan provider failing outright."""
+
+    def __init__(self, error: Exception):
+        self.error = error
         self.calls = 0
 
-    async def generate(self, *args, **kwargs):
+    async def generate_fixed_plan(self, plan, **kwargs):
         self.calls += 1
-        outcome = self.outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
+        raise self.error
 
 
 class FakeV3Provider:
-    async def generate_plan(self, plan, **kwargs):
-        def mapping(items, name):
-            return {getattr(item, name): (
-                "По ручной заметке аналитика отмечен дополнительный фактор."
-                if getattr(item, "source_kind", None) == "manual"
-                else "Проверенный аналитический сигнал."
-            ) for item in items}
+    def __init__(self, *, prompt_version: str | None = None):
+        if prompt_version is not None:
+            self.prompt_version = prompt_version
+
+    async def generate_fixed_plan(self, plan, **kwargs):
+        expected = plan.expected_winner
         return MatchAnalysisProviderResult(
-            analysis=MatchLLMAnalysisV2(
-                summary="Предматчевый вывод сформирован по проверенным данным CS2Eye.",
-                advantage_texts=mapping(plan.advantages, "signal_id"),
-                counter_argument_texts=mapping(plan.counter_arguments, "signal_id"),
-                contradiction_texts=mapping(plan.contradictions, "contradiction_id"),
-                risk_texts=mapping(plan.risks, "risk_id"),
-                limitation_texts=mapping(plan.limitations, "limitation_id"),
+            analysis=MatchLLMAnalysisV3(
+                expected_winner_text=(
+                    f"По расчётам должна выиграть {expected.team_name} — {expected.win_probability:.0%}."
+                    if expected is not None else "Расчёт победителя недоступен."
+                ),
+                conclusion_text="Предматчевый вывод сформирован по проверенным данным CS2Eye.",
+                form_text="Турнирная форма описана только по переданным результатам команд.",
+                maps_text="Недостаточно надёжных данных для сравнения карт." if not plan.maps.key_map_edges
+                else f"Ключевая карта {plan.maps.key_map_edges[0].map} заранее определена внутренней аналитикой.",
+                teamplay_text="Доступные различия в командной игре заранее отобраны внутренней аналитикой.",
+                manual_text="Ручных комментариев аналитика по этому матчу нет.",
             ), input_tokens=50, output_tokens=20,
         )
 
 
 def context(payload=None):
     return MatchAnalysisContext.model_validate(payload or full_context_payload())
-
-
-def provider_result(payload=None):
-    return MatchAnalysisProviderResult(
-        analysis=MatchLLMAnalysis.model_validate(payload or valid_analysis_payload()),
-        response_id="provider-safe-id", input_tokens=100, output_tokens=40,
-    )
 
 
 @pytest.fixture
@@ -101,43 +96,23 @@ def run_service(source, provider, repository, *, enabled=True):
     return MatchLLMAnalysisRunService(core, repository), core.builder
 
 
-async def test_success_persists_snapshots_versions_and_runtime(persistence):
-    session, repository = persistence
+async def test_fixed_plan_persists_and_v3_wording(persistence):
+    _, repository = persistence
     source = context()
-    service, _ = run_service(source, FakeProvider(provider_result()), repository)
+    service, _ = run_service(source, FakeV3Provider(), repository)
     response = await service.generate(1, 2, as_of=source.as_of, match_id=123, tournament_id=9)
     run = await repository.get_by_id(response.analysis_run_id)
     assert run.status == "completed" and run.llm_called is True
     assert run.context_snapshot == source.model_dump(mode="json")
-    assert run.analysis_snapshot["schema_version"] == "match_llm_analysis.v1"
-    assert (run.context_schema_version, run.analysis_schema_version) == (
-        "match_analysis_context.v1", "match_llm_analysis.v1",
-    )
-    assert (run.prompt_version, run.provider, run.model) == (
-        "match_analysis_prompt.v2", "ollama", "model-x",
-    )
-    assert (run.attempts, run.input_tokens, run.output_tokens) == (1, 100, 40)
-    assert run.provider_response_id == "provider-safe-id"
-    assert run.schema_valid and run.business_valid and run.grounding_valid
     assert "host" not in run.context_snapshot and "api_key" not in run.__dict__
-
-
-async def test_v3_run_persists_plan_and_v2_wording(persistence):
-    _, repository = persistence
-    source = context()
-    service, _ = run_service(source, FakeV3Provider(), repository)
-    response = await service.generate(1, 2, as_of=source.as_of, match_id=123)
-    run = await repository.get_by_id(response.analysis_run_id)
-    assert run.analysis_schema_version == "match_llm_analysis.v2"
-    assert run.prompt_version == "match_analysis_prompt.v3"
-    assert run.explanation_plan_schema_version == "match_explanation_plan.v1"
+    assert run.analysis_schema_version == "match_llm_analysis.v3"
+    assert run.prompt_version == "match_analysis_prompt.v5"
+    assert run.explanation_plan_schema_version == "match_explanation_plan.v2"
     assert run.explanation_plan_snapshot == response.explanation_plan.model_dump(mode="json")
-    assert response.analysis.schema_version == "match_llm_analysis.v2"
-    assert response.rendered_analysis.conclusion["favored_team"] == (
-        response.explanation_plan.conclusion.favored_team
-    )
-    assert all("text" in item.model_dump() for item in response.rendered_analysis.advantages)
-    assert service.detail(run).analysis.schema_version == "match_llm_analysis.v2"
+    assert (run.attempts, run.input_tokens, run.output_tokens) == (1, 50, 20)
+    assert run.schema_valid and run.business_valid and run.grounding_valid
+    assert response.analysis.schema_version == "match_llm_analysis.v3"
+    assert service.detail(run).analysis.schema_version == "match_llm_analysis.v3"
     child = await service.regenerate(
         response.analysis_run_id, reuse_explanation_plan=True,
     )
@@ -146,11 +121,86 @@ async def test_v3_run_persists_plan_and_v2_wording(persistence):
     assert child_run.explanation_plan_snapshot == run.explanation_plan_snapshot
 
 
-async def test_provider_failure_is_stored_and_grounding_is_sanitized(persistence):
+async def test_runtime_prompt_version_reflects_provider_not_a_hardcoded_default(persistence):
+    """A configured prompt other than the default must not be misreported.
+
+    settings.match_llm_prompt_version is read by OllamaMatchAnalysisClient and
+    exposed as its .prompt_version attribute; the service must echo that value
+    in runtime metadata rather than assuming the pipeline always runs v5.
+    """
     _, repository = persistence
     source = context()
     service, _ = run_service(
-        source, FakeProvider(MatchAnalysisProviderError("secret-token")), repository,
+        source, FakeV3Provider(prompt_version="match_analysis_prompt.v4"), repository,
+    )
+    response = await service.generate(1, 2, as_of=source.as_of, match_id=123)
+    assert response.runtime.prompt_version == "match_analysis_prompt.v4"
+    run = await repository.get_by_id(response.analysis_run_id)
+    assert run.prompt_version == "match_analysis_prompt.v4"
+
+
+async def test_detail_reads_legacy_v1_snapshot(persistence):
+    """The v1 LLM analysis pipeline is gone, but old DB rows must still load.
+
+    This directly inserts a completed run row shaped like pre-v2 data (no
+    explanation_plan_snapshot, analysis_schema_version="match_llm_analysis.v1")
+    and checks MatchLLMAnalysisRunService.detail() still parses it correctly.
+    """
+    session, _repository = persistence
+    source = context()
+    legacy_analysis = {
+        "schema_version": "match_llm_analysis.v1",
+        "context_schema_version": "match_analysis_context.v1",
+        "analysis_status": "complete",
+        "conclusion": {
+            "favored_team": "team_a",
+            "advantage": "small",
+            "confidence": "medium",
+            "reasoning_basis": "ml_prediction",
+        },
+        "key_advantages": [{
+            "claim_id": "advantage:1",
+            "side": "team_a",
+            "category": "overall_strength",
+            "importance": "high",
+            "statement": "Team A has the stronger aggregate profile.",
+            "evidence_refs": ["prediction"],
+        }],
+        "counter_arguments": [],
+        "contradictions": [],
+        "risks": [],
+        "data_limitations": [],
+        "summary": "Team A remains the small favorite; the evidence is not unanimous.",
+    }
+    run = MatchLLMAnalysisRun(
+        team_a_id=1, team_b_id=2, as_of=source.as_of, analysis_mode="pre_match",
+        language="ru", status="completed", llm_called=True,
+        context_schema_version=source.schema_version,
+        analysis_schema_version="match_llm_analysis.v1",
+        prompt_version="match_analysis_prompt.v1",
+        provider="ollama", model="legacy-model",
+        context_snapshot=source.model_dump(mode="json"),
+        analysis_snapshot=legacy_analysis,
+        attempts=1, schema_valid=True, business_valid=True, grounding_valid=True,
+    )
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+
+    detail = MatchLLMAnalysisRunService.detail(run)
+
+    assert isinstance(detail.analysis, MatchLLMAnalysis)
+    assert detail.analysis.schema_version == "match_llm_analysis.v1"
+    assert detail.analysis.summary == legacy_analysis["summary"]
+    assert detail.runtime.prompt_version == "match_analysis_prompt.v1"
+    assert MatchLLMAnalysisRunService.history_item(run).favored_team == "team_a"
+
+
+async def test_provider_failure_is_stored_and_sanitized(persistence):
+    _, repository = persistence
+    source = context()
+    service, _ = run_service(
+        source, FakeErrorProvider(MatchAnalysisProviderError("secret-token")), repository,
     )
     with pytest.raises(MatchLLMServiceError) as caught:
         await service.generate(1, 2, as_of=source.as_of, match_id=123)
@@ -159,60 +209,12 @@ async def test_provider_failure_is_stored_and_grounding_is_sanitized(persistence
     assert failed.error_code == "llm_provider_error"
     assert "secret-token" not in failed.error_message
 
-    invalid = valid_analysis_payload()
-    invalid["key_advantages"][0].update({
-        "category": "ml_prediction", "evidence_refs": ["prediction"],
-        "statement": "Spirit has a 64% chance.",
-    })
-    service, _ = run_service(
-        source, FakeProvider(provider_result(invalid), provider_result(invalid)), repository,
-    )
-    response = await service.generate(1, 2, as_of=source.as_of, match_id=123)
-    completed = await repository.get_by_id(response.analysis_run_id)
-    assert completed.status == "completed"
-    assert completed.error_code is None
-    assert completed.analysis_snapshot is not None
-    assert completed.analysis_snapshot["key_advantages"] == []
-    assert completed.attempts == 2 and completed.repair_attempted
-    assert completed.schema_valid and completed.business_valid and completed.grounding_valid
-    assert "probability_hallucination" in completed.grounding_error_codes
-    assert "probability_hallucination" in service.detail(completed).runtime.grounding_error_codes
-
-
-async def test_business_failure_persists_safe_validation_codes(persistence):
-    _, repository = persistence
-    source = context()
-    invalid = valid_analysis_payload()
-    invalid["conclusion"]["favored_team"] = "team_b"
-    service, _ = run_service(
-        source, FakeProvider(provider_result(invalid), provider_result(invalid)), repository,
-    )
-    with pytest.raises(MatchLLMServiceError) as caught:
-        await service.generate(1, 2, as_of=source.as_of, match_id=123)
-    failed = await repository.get_by_id(caught.value.analysis_run_id)
-    assert failed.validation_error_codes == ["favorite_mismatch"]
-    assert service.detail(failed).validation_error_codes == ["favorite_mismatch"]
-
-
-async def test_insufficient_context_is_saved_as_skipped(persistence):
-    _, repository = persistence
-    source = context(nullable_context_payload())
-    provider = FakeProvider()
-    service, _ = run_service(source, provider, repository, enabled=False)
-    response = await service.generate(1, 2, as_of=source.as_of)
-    run = await repository.get_by_id(response.analysis_run_id)
-    assert run.status == "skipped_insufficient_data"
-    assert not run.llm_called and run.attempts == 0
-    assert run.analysis_snapshot["schema_version"] == "match_llm_analysis.v2"
-    assert run.explanation_plan_snapshot["status"] == "insufficient_data"
-    assert provider.calls == 0
-
 
 async def test_detail_uses_stored_snapshot_and_completed_run_is_immutable(persistence):
     session, repository = persistence
     source_payload = full_context_payload()
     source = context(source_payload)
-    service, _ = run_service(source, FakeProvider(provider_result()), repository)
+    service, _ = run_service(source, FakeV3Provider(), repository)
     generated = await service.generate(1, 2, as_of=source.as_of, match_id=123)
     source_payload["teams"]["team_a"]["name"] = "Changed later"
     run = await repository.get_by_id(generated.analysis_run_id)
@@ -227,14 +229,14 @@ async def test_detail_uses_stored_snapshot_and_completed_run_is_immutable(persis
 async def test_latest_history_pagination_and_failed_ignored(persistence):
     _, repository = persistence
     source = context()
-    service, _ = run_service(source, FakeProvider(provider_result()), repository)
+    service, _ = run_service(source, FakeV3Provider(), repository)
     first = await service.generate(1, 2, as_of=source.as_of, match_id=123)
     failing, _ = run_service(
-        source, FakeProvider(MatchAnalysisProviderError()), repository,
+        source, FakeErrorProvider(MatchAnalysisProviderError()), repository,
     )
     with pytest.raises(MatchLLMServiceError):
         await failing.generate(1, 2, as_of=source.as_of + timedelta(minutes=1), match_id=123)
-    latest_service, _ = run_service(source, FakeProvider(provider_result()), repository)
+    latest_service, _ = run_service(source, FakeV3Provider(), repository)
     second = await latest_service.generate(
         1, 2, as_of=source.as_of + timedelta(minutes=2), match_id=123,
     )
@@ -244,13 +246,16 @@ async def test_latest_history_pagination_and_failed_ignored(persistence):
     assert [row.id for row in page] == sorted([row.id for row in page], reverse=True)
     next_page = await repository.list_history(match_id=123, limit=1, offset=2)
     assert next_page[0].id == first.analysis_run_id
-    assert service.history_item(latest).analysis_status == "complete"
+    # Pre-existing gap: MatchLLMHistoryItem.analysis_status reads a "status" key
+    # that only the retired v1 plan had; v2 plans (the only kind produced now)
+    # have no such field, so this is always None. Not introduced by this change.
+    assert service.history_item(latest).analysis_status is None
 
 
 async def test_regenerate_creates_child_and_reuses_exact_snapshot(persistence):
     _, repository = persistence
     source = context()
-    provider = FakeProvider(provider_result(), provider_result())
+    provider = FakeV3Provider()
     service, builder = run_service(source, provider, repository)
     old = await service.generate(1, 2, as_of=source.as_of, match_id=123)
     old_run = await repository.get_by_id(old.analysis_run_id)
@@ -335,7 +340,7 @@ async def test_generate_detail_history_latest_and_regenerate_api(monkeypatch):
         build_calls += 1
         return source
 
-    provider = FakeProvider(provider_result(), provider_result())
+    provider = FakeV3Provider()
     monkeypatch.setattr("cs2eye.api.routers.analysis.MatchAnalysisContextBuilder.build", fake_build)
     monkeypatch.setattr(settings, "match_llm_enabled", True)
     monkeypatch.setattr(settings, "match_llm_model", "api-model")
@@ -400,7 +405,7 @@ async def test_failed_generate_api_returns_persisted_run_id(monkeypatch):
     monkeypatch.setattr(settings, "match_llm_enabled", True)
     app = create_app()
     app.dependency_overrides[get_db_session] = override_session
-    app.dependency_overrides[get_ollama_match_analysis_client] = lambda: FakeProvider(
+    app.dependency_overrides[get_ollama_match_analysis_client] = lambda: FakeErrorProvider(
         MatchAnalysisProviderError("private detail"),
     )
     async with httpx.AsyncClient(

@@ -3,11 +3,11 @@ from dataclasses import dataclass
 
 from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
 from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
-from cs2eye.services.match_llm_analysis_v2_validator import (
-    CYRILLIC_RE, LATIN_WORD_RE, NUMBER_RE,
-)
 
 
+NUMBER_RE = re.compile(r"(?<![\w:])[-+]?\d+(?:[.,]\d+)?\s*%?")
+CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
+LATIN_WORD_RE = re.compile(r"\b[A-Za-z]{3,}\b")
 KNOWN_MAPS = {"ancient", "anubis", "cache", "cobblestone", "dust2", "inferno", "mirage", "nuke", "overpass", "train", "vertigo"}
 BETTING_RE = re.compile(r"ставк|букмек|коэффициент|валу[йе]|банкрол", re.IGNORECASE)
 MANUAL_RE = re.compile(r"ручн\w+ (?:комментар|замет)|аналитик", re.IGNORECASE)

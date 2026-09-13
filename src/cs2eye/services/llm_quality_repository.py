@@ -72,17 +72,17 @@ class SQLAlchemyLLMQualityRepository:
     @staticmethod
     def _result(row):
         from cs2eye.api.schemas.llm_quality import LLMQualityMetrics
-        from cs2eye.api.schemas.match_explanation_plan import MatchExplanationPlan
-        from cs2eye.api.schemas.match_llm_analysis_v2 import MatchLLMAnalysisV2
+        from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
+        from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
         return LLMQualityRunResult(
             id=row.id, case_id=row.case_id, dataset_version=row.dataset_version,
             configuration=LLMQualityConfiguration(
                 provider=row.provider, model=row.model, prompt_version=row.prompt_version,
                 reasoning=row.reasoning_config,
             ),
-            explanation_plan_snapshot=MatchExplanationPlan.model_validate(
+            explanation_plan_snapshot=MatchExplanationPlanV2.model_validate(
                 row.explanation_plan_snapshot),
-            llm_output_snapshot=(MatchLLMAnalysisV2.model_validate(row.llm_output_snapshot)
+            llm_output_snapshot=(MatchLLMAnalysisV3.model_validate(row.llm_output_snapshot)
                                  if row.llm_output_snapshot else None),
             deterministic_metrics=(LLMQualityMetrics.model_validate(row.deterministic_metrics)
                                    if row.deterministic_metrics else None),

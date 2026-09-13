@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from cs2eye.analytics.matchup_config import ACTIVE_MATCHUP_CONFIG
+from cs2eye.analytics.matchup_config import ACTIVE_MATCHUP_CONFIG, MATCHUP_V3_CONFIG
 from cs2eye.analytics.matchup_engine import calculate_matchup
 from cs2eye.analytics.scoring.core import FactorInput
 from cs2eye.api.routers.model_sandbox import MLTrainBody
@@ -39,3 +39,33 @@ def test_sandbox_threshold_zero_weight_and_max_effect():
 
 def test_ml_api_rejects_manual_coefficients():
     with pytest.raises(ValidationError):MLTrainBody.model_validate({"enabled_features":["h2h_advantage"],"manual_coefficients":{"h2h_advantage":2}})
+
+
+def test_sandbox_can_express_v3_factor_set_without_current_roster_form():
+    """The sandbox must be able to model any registered matchup config, not just v1.
+
+    Regression: sandbox_config used to always validate/iterate against
+    ACTIVE_MATCHUP_CONFIG's own factor set (v1, which still has
+    current_roster_form), so a v3-shaped candidate — which retires that factor
+    — could never be expressed: it was silently reintroduced with v1's default
+    weight on every sandbox edit.
+    """
+    config,meta=sandbox_config({"version":"matchup_v3","normalize_weights":False})
+    assert meta["base_version"]=="matchup_v3"
+    assert set(config.factors)==set(MATCHUP_V3_CONFIG.factors)
+    assert "current_roster_form" not in config.factors
+    assert config.overall_mode=="coverage_agreement"
+    assert config.coverage_floor==pytest.approx(.80)
+    result=calculate_matchup([factor("current_roster_form",90)],1,config)
+    assert result.factors==[]
+
+
+def test_sandbox_rejects_v1_only_factor_under_v3_base():
+    with pytest.raises(ValueError, match="Unknown matchup factors"):
+        sandbox_config({"version":"matchup_v3","factors":{"current_roster_form":{"weight":.1}}})
+
+
+def test_sandbox_defaults_to_active_config_when_version_is_omitted():
+    config,meta=sandbox_config({"factors":{"map_veto":{"weight":.4}}})
+    assert meta["base_version"]==ACTIVE_MATCHUP_CONFIG.version
+    assert set(config.factors)==set(ACTIVE_MATCHUP_CONFIG.factors)

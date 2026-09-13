@@ -143,9 +143,7 @@ def format_he_kill_by_map(context: dict[str, Any]) -> str:
 
 
 def format_llm_analysis(payload: dict[str, Any]) -> str:
-    rendered = payload.get("rendered_analysis") or {}
     analysis = payload.get("analysis") or {}
-    rendered = rendered if isinstance(rendered, dict) else {}
     analysis = analysis if isinstance(analysis, dict) else {}
     if analysis.get("schema_version") == "match_llm_analysis.v3":
         sections = (
@@ -174,30 +172,15 @@ def format_llm_analysis(payload: dict[str, Any]) -> str:
             body = escape(_truncate(str(analysis.get(key) or "Данные отсутствуют."), 650))
             lines.extend(["", f"{icon} <b>{title}</b>", body])
         return _compact(lines)
-    summary = rendered.get("summary") or analysis.get("summary")
-    sections = [
-        ("Преимущества", _texts(rendered.get("advantages"), analysis, "key_advantages", "advantage_texts")),
-        ("Контраргументы", _texts(rendered.get("counter_arguments"), analysis, "counter_arguments", "counter_argument_texts")),
-        ("Противоречия", _texts(rendered.get("contradictions"), analysis, "contradictions", "contradiction_texts")),
-        ("Риски", _texts(rendered.get("risks"), analysis, "risks", "risk_texts")),
-        ("Ограничения", _texts(rendered.get("limitations"), analysis, "data_limitations", "limitation_texts")),
-    ]
     lines = [*_betting_restriction_lines(payload.get("context") or {})]
     if lines:
         lines.append("")
     lines.append("<b>AI-анализ</b>")
-    if summary:
-        lines.extend(["", "<b>Кратко:</b>", escape(_truncate(str(summary), 900))])
-    for title, values in sections:
-        if values:
-            lines.extend(["", f"<b>{title}:</b>"])
-            lines.extend(f"• {escape(_truncate(value, 500))}" for value in values[:5])
-    if len(lines) == 1:
-        status = payload.get("status")
-        if status and status != "completed":
-            lines.extend(["", f"Анализ недоступен: {escape(str(status))}."])
-        else:
-            lines.extend(["", "Сохранённый анализ не содержит текста."])
+    status = payload.get("status")
+    if status and status != "completed":
+        lines.extend(["", f"Анализ недоступен: {escape(str(status))}."])
+    else:
+        lines.extend(["", "Сохранённый анализ использует устаревший формат и больше не отображается."])
     return _compact(lines)
 
 
@@ -352,27 +335,6 @@ def format_llm_history(history: list[dict[str, Any]]) -> str:
             f"{index}. {escape(created)} · {escape(model)} · {escape(prompt)}{escape(status)}"
         )
     return "\n".join(lines)
-
-
-def _texts(
-    rendered_items: object, analysis: dict[str, Any], legacy_key: str, v2_key: str,
-) -> list[str]:
-    if isinstance(rendered_items, list):
-        return [str(item["text"]) for item in rendered_items
-                if isinstance(item, dict) and item.get("text")]
-    legacy = analysis.get(legacy_key)
-    if isinstance(legacy, list):
-        values = []
-        for item in legacy:
-            if isinstance(item, dict):
-                text = item.get("statement") or item.get("description") or item.get("text")
-                if text:
-                    values.append(str(text))
-        return values
-    v2 = analysis.get(v2_key)
-    if isinstance(v2, dict):
-        return [str(value) for value in v2.values() if value]
-    return []
 
 
 def _truncate(value: str, limit: int) -> str:
