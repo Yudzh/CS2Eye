@@ -2,9 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from cs2eye.analytics.matchup_config import MATCHUP_V3_CONFIG, MATCHUP_WEIGHTS, TACTICAL_WEIGHTS
+from cs2eye.analytics.matchup_config import MATCHUP_V3_CONFIG, MATCHUP_WEIGHTS, TACTICAL_WEIGHTS_V3
 from cs2eye.analytics.scoring.core import FactorInput, score_factors
-from cs2eye.services.matchup_service import advantage_level, aggregate_maps, aggregate_maps_v3, relevant_map_weights
+from cs2eye.services.matchup_service import advantage_level, aggregate_maps_v3, relevant_map_weights
 from cs2eye.services.matchup_service import MatchupService
 
 
@@ -17,7 +17,7 @@ def calculated(a=65,b=35):
 
 def test_matchup_weights_sum_to_one():
     assert sum(MATCHUP_WEIGHTS.values())==1
-    assert sum(TACTICAL_WEIGHTS.values())==1
+    assert sum(TACTICAL_WEIGHTS_V3.values())==1
 
 
 def test_equal_available_factors_are_neutral_and_symmetric():
@@ -53,34 +53,8 @@ def test_post_veto_uses_actual_actions():
     assert set(weights)=={"nuke","mirage"} and weights["nuke"][1]=="team_a_pick"
 
 
-def test_map_and_tactical_breakdowns_are_mathematical():
-    data=calculated();weights=relevant_map_weights(data,"bo3");score,maps,tactical=aggregate_maps(data,weights)
-    assert score>50 and tactical["score"]>50
-    assert round(sum(row["playability_weight"] for row in maps),5)==1
-    assert round(50+sum(row["contribution"] for row in maps),2)==score
-
-def test_asymmetric_source_sides_are_pairwise_symmetrized():
-    data=calculated();data["maps"][0]["team_a"]["matchup_map_score"]=70;data["maps"][0]["team_b"]["matchup_map_score"]=40
-    weights={"ancient":(1.0,"remaining")};score,_,_=aggregate_maps(data,weights)
-    assert score==65
-
-
 def test_advantage_labels_are_centralized_and_not_probability_words():
     assert advantage_level(50)=="neutral" and advantage_level(58)=="slight" and advantage_level(65)=="moderate" and advantage_level(75)=="strong"
-
-def test_each_tactical_component_can_move_score_and_missing_is_not_zero():
-    data=calculated(50,50);weights={"ancient":(1.0,"remaining")}
-    baseline=aggregate_maps(data,weights)[2]["score"]
-    data["maps"][0]["team_a"]["tactical_components"]["side"]=90
-    assert aggregate_maps(data,weights)[2]["score"]>baseline
-    data["maps"][0]["team_a"]["tactical_components"]["utility"]=None
-    data["maps"][0]["team_b"]["tactical_components"]["utility"]=None
-    tactical=aggregate_maps(data,weights)[2]
-    assert tactical["utility"]["available"] is False and tactical["score"] is not None
-
-def test_opening_and_clutch_are_not_separate_tactical_factors():
-    _,_,tactical=aggregate_maps(calculated(),{"ancient":(1.0,"remaining")})
-    assert set(tactical)=={"side","bomb","combat_swing","economy","utility","trading","score"}
 
 def map_v3(delta,reliability=80,ct=60,t=60,postplant=60,retake=60):
     return {"delta_vs_team":delta,"reliability":reliability,
@@ -135,11 +109,21 @@ def test_v3_tactical_missing_bomb_data_is_reweighted_not_zero():
 
 
 @pytest.mark.asyncio
-async def test_historical_matchup_v3_is_rejected_explicitly():
-    class Session:
-        async def get(self,_model,team_id):return SimpleNamespace(id=team_id,name=f"T{team_id}")
-    with pytest.raises(ValueError,match="matchup_v3"):
-        await MatchupService(Session()).calculate(1,2,as_of=__import__("datetime").date(2020,1,1),model_version="matchup_v3")
+async def test_historical_request_delegates_to_v3_aware_reconstruction(monkeypatch):
+    # AnalyticsAsOfService.calculate does its own V3-aware temporal reconstruction
+    # (_matchup_v3); this only checks the wiring (the resulting payload is returned
+    # as-is), since exercising _matchup_v3's real behavior needs full demo/roster
+    # fixtures -- covered separately by the aggregate_maps_v3/MATCHUP_V3_CONFIG tests
+    # above and by real-data scripts.
+    import cs2eye.services.analytics_as_of_service as aaos
+    captured={}
+    async def fake_calculate(self,a,b,as_of,format,analysis_mode,series_id):
+        captured["called"]=True
+        return {"model_version":"matchup_v3","team_a":{"id":a,"score":60},"team_b":{"id":b,"score":40},"advantage":{}}
+    monkeypatch.setattr(aaos.AnalyticsAsOfService,"calculate",fake_calculate)
+    result=await MatchupService(object()).calculate(1,2,as_of=__import__("datetime").date(2020,1,1))
+    assert captured["called"] is True
+    assert result["model_version"]=="matchup_v3"
 
 
 @pytest.mark.asyncio

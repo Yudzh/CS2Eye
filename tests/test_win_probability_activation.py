@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from cs2eye.analytics.win_probability_config import WIN_PROBABILITY_FEATURES
+from cs2eye.analytics.win_probability_config import WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3, WIN_PROBABILITY_FEATURES, WIN_PROBABILITY_FEATURES_V3, WIN_PROBABILITY_FEATURES_V3_CANDIDATES
 from cs2eye.db.base import Base
 from cs2eye.models.prediction import WinProbabilityModelArtifact
 from cs2eye.models.team import Team
@@ -76,7 +76,7 @@ async def test_retrain_creates_fresh_inactive_version_and_preserves_old(model_db
     rows = [SimpleNamespace(series_id=i, match_date=date(2026, 1, 1)+timedelta(days=i),
         features={key: (i % 5) / 10 for key in WIN_PROBABILITY_FEATURES}, target=i % 2) for i in range(40)]
     async def dataset(_self, _mode): return rows, {"eligible_series": len(rows)}
-    monkeypatch.setattr(service.AnalyticsAsOfService, "build_dataset", dataset)
+    monkeypatch.setattr(service.AnalyticsAsOfService, "build_dataset_v3", dataset)
     original_train = service.WinProbabilityModel.train.__func__
     initial_weights=[]
     def fresh_train(cls, features, targets, **kwargs):
@@ -94,3 +94,33 @@ async def test_retrain_creates_fresh_inactive_version_and_preserves_old(model_db
         assert first["active"] is False and second["active"] is False
         assert old.active and old.forced_active and old.metrics == old_metrics and old.artifact == old_artifact
         assert len(initial_weights) == 6  # candidate + two baselines for each independent retrain
+
+
+async def test_train_uses_v3_dataset_and_schema_when_requested(model_db, monkeypatch) -> None:
+    # Locks in the schema -> dataset-builder -> feature-list wiring without a real,
+    # multi-minute build_dataset_v3 run against Postgres (see scripts/train_v3_candidate_model.py
+    # for that real-data check). Both the default (matchup_features_v2) and matchup_features_v3
+    # schemas now build training rows from build_dataset_v3 -- only the trained feature_names
+    # subset differs between them. Rows carry every WIN_PROBABILITY_FEATURES key so both
+    # branches can pull from the same fixture.
+    rows = [SimpleNamespace(series_id=i, match_date=date(2026, 1, 1)+timedelta(days=i),
+        features={key: (i % 5) / 10 for key in WIN_PROBABILITY_FEATURES}, target=i % 2) for i in range(40)]
+    calls: list[str] = []
+    async def v3_dataset(_self, _mode): calls.append("v3"); return rows, {"eligible_series": len(rows)}
+    monkeypatch.setattr(service.AnalyticsAsOfService, "build_dataset_v3", v3_dataset)
+    async with model_db() as session:
+        default = await service.train_win_probability(session)
+        v3 = await service.train_win_probability(session, feature_schema_version=WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3)
+        await session.commit()
+        assert calls == ["v3", "v3"]
+        assert default["metrics"]["test"] is not None  # trained without error, default schema untouched
+        row = await session.get(WinProbabilityModelArtifact, v3["artifact_id"])
+        assert row.feature_schema_version == WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3
+        assert row.artifact["features"] == WIN_PROBABILITY_FEATURES_V3
+        # WIN_PROBABILITY_FEATURES_V3 is a forward-selection starting set (grows over time as
+        # candidates earn their place) -- assert against the live constant, not a frozen literal.
+        assert set(row.artifact["features"]) == set(WIN_PROBABILITY_FEATURES_V3)
+        dropped = {"current_roster_advantage", "leadership_advantage", "raw_matchup_centered",
+                   "format_bo1_strength", "format_bo3_strength", "format_bo5_strength", *WIN_PROBABILITY_FEATURES_V3_CANDIDATES}
+        assert dropped.isdisjoint(row.artifact["features"])
+        assert set(row.metrics["coefficients"]) == set(WIN_PROBABILITY_FEATURES_V3)

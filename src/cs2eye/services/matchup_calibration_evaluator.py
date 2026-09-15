@@ -2,28 +2,24 @@ from __future__ import annotations
 from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from cs2eye.analytics.matchup_config import MATCHUP_V1_CONFIG,MATCHUP_V2_CONFIG,MatchupModelConfig
+from cs2eye.analytics.matchup_config import ACTIVE_MATCHUP_CONFIG,MatchupModelConfig
 from cs2eye.analytics.matchup_engine import apply_config_to_payload
 from cs2eye.models.match import Match
 from cs2eye.services.analytics_as_of_service import AnalyticsAsOfService
-from cs2eye.services.matchup_service import form_context_input
 
 MARGIN_BUCKETS=(("0-5",0,5),("5-10",5,10),("10-20",10,20),("20+",20,float("inf")))
 
 class MatchupCalibrationEvaluator:
     def __init__(self,session:AsyncSession,minimum_sample:int=30):self.session=session;self.minimum_sample=minimum_sample
 
-    async def evaluate(self,*,limit:int=120,baseline:MatchupModelConfig=MATCHUP_V1_CONFIG,candidate:MatchupModelConfig=MATCHUP_V2_CONFIG)->dict:
+    async def evaluate(self,*,limit:int=120,baseline:MatchupModelConfig=ACTIVE_MATCHUP_CONFIG,candidate:MatchupModelConfig=ACTIVE_MATCHUP_CONFIG)->dict:
         matches=list((await self.session.scalars(select(Match).where(Match.status=="completed",Match.winner_team_id.is_not(None),Match.team_a_id.is_not(None),Match.team_b_id.is_not(None)).order_by(Match.match_date.desc(),Match.id.desc()).limit(limit))).all())
-        examples,dataset_meta=await AnalyticsAsOfService(self.session).build_dataset("pre_veto")
+        examples,dataset_meta=await AnalyticsAsOfService(self.session).build_dataset_v3("pre_veto")
         by_id={x.series_id:x for x in examples};rows=[]
         for match in matches:
             example=by_id.get(match.id)
             if example is None:continue
             payload={**example.matchup,"factors":list(example.matchup["factors"])}
-            if payload.get("form_context") and not any(x["key"]=="form_context" for x in payload["factors"]):
-                factor=form_context_input(payload["form_context"])
-                payload["factors"].append({**factor.__dict__,"score":factor.normalized_score,"sample":factor.sample_size})
             available=[x for x in payload["factors"] if x.get("available",True) and x.get("score") is not None and x["key"] in baseline.factors]
             payload["reliability"]=sum((float(x.get("confidence") or 0))*baseline.factors[x["key"]].weight for x in available)/sum(baseline.factors[x["key"]].weight for x in available) if available else 0
             a=apply_config_to_payload(payload,baseline);b=apply_config_to_payload(payload,candidate)

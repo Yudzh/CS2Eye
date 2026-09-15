@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cs2eye.analytics.matchup_config import ACTIVE_MATCHUP_CONFIG, MATCHUP_CONFIGS, MATCHUP_V2_CONFIG, MATCHUP_V3_CONFIG, FactorConfig, MatchupModelConfig
+from cs2eye.analytics.matchup_config import ACTIVE_MATCHUP_CONFIG, FactorConfig, MatchupModelConfig
 from cs2eye.analytics.matchup_engine import apply_config_to_payload
 from cs2eye.analytics.win_probability import WinProbabilityModel, probability_metrics, temporal_split
 from cs2eye.analytics.win_probability_config import WIN_PROBABILITY_FEATURES, WIN_PROBABILITY_FEATURE_REGISTRY
@@ -22,11 +22,7 @@ FACTOR_HINTS={"map_veto":"Преимущество по ожидаемым ка�
 
 
 def sandbox_config(raw:dict)->tuple[MatchupModelConfig,dict]:
-    # "version" here means the template a sandbox edit starts from (as returned by
-    # bootstrap()'s *_config payloads), not the resulting sandbox config's own version.
-    base_version=raw.get("version") or ACTIVE_MATCHUP_CONFIG.version
-    base=MATCHUP_CONFIGS.get(base_version)
-    if base is None:raise ValueError(f"Unknown base matchup config version: {base_version}")
+    base=ACTIVE_MATCHUP_CONFIG
     unknown=set(raw.get("factors",{}))-set(base.factors)
     if unknown:raise ValueError(f"Unknown matchup factors: {', '.join(sorted(unknown))}")
     normalize=bool(raw.get("normalize_weights",True));items={};raw_weights={}
@@ -53,7 +49,7 @@ class ModelSandboxService:
     async def bootstrap(self)->dict:
         matches=list((await self.session.scalars(select(Match).where(Match.team_a_id.is_not(None),Match.team_b_id.is_not(None)).order_by(Match.match_date.desc(),Match.id.desc()).limit(100))).all())
         active=await active_model(self.session)
-        return {"production_config":self._config_payload(ACTIVE_MATCHUP_CONFIG),"conservative_config":self._config_payload(MATCHUP_V2_CONFIG),"conservative_available":True,"v3_config":self._config_payload(MATCHUP_V3_CONFIG),"v3_available":True,"matches":[{"id":x.id,"match_date":x.match_date,"status":x.status,"format":x.format,"team_a_id":x.team_a_id,"team_b_id":x.team_b_id} for x in matches],"ml":{"current_schema":active.feature_schema_version if active else None,"features":[{"key":key,**WIN_PROBABILITY_FEATURE_REGISTRY[key]} for key in WIN_PROBABILITY_FEATURES]}}
+        return {"production_config":self._config_payload(ACTIVE_MATCHUP_CONFIG),"matches":[{"id":x.id,"match_date":x.match_date,"status":x.status,"format":x.format,"team_a_id":x.team_a_id,"team_b_id":x.team_b_id} for x in matches],"ml":{"current_schema":active.feature_schema_version if active else None,"features":[{"key":key,**WIN_PROBABILITY_FEATURE_REGISTRY[key]} for key in WIN_PROBABILITY_FEATURES]}}
 
     @staticmethod
     def _config_payload(config):
@@ -65,7 +61,8 @@ class ModelSandboxService:
         mode="post_veto" if match.veto_data_status in {"complete","partial"} else "pre_veto";fmt=match.format if match.format in {"bo1","bo3","bo5"} else "bo3"
         if match.status=="completed":payload=await AnalyticsAsOfService(self.session).calculate(match.team_a_id,match.team_b_id,match.match_date,fmt,mode,match.id)
         else:payload=await MatchupService(self.session).calculate(match.team_a_id,match.team_b_id,fmt,mode,date.today(),match.id)
-        config,meta=sandbox_config(raw);production=apply_config_to_payload(payload,ACTIVE_MATCHUP_CONFIG);candidate=apply_config_to_payload(payload,config)
+        config,meta=sandbox_config(raw)
+        production=apply_config_to_payload(payload,ACTIVE_MATCHUP_CONFIG);candidate=apply_config_to_payload(payload,config)
         pf={x["key"]:x for x in production["factors"]};cf={x["key"]:x for x in candidate["factors"]}
         comparison=[]
         for key in pf.keys()|cf.keys():
@@ -75,14 +72,15 @@ class ModelSandboxService:
         return {"production":production,"sandbox":candidate,"factor_comparison":comparison,"winner_changed":old!=new,"production_winner_id":old,"sandbox_winner_id":new,"config_meta":meta}
 
     async def backtest(self,raw:dict,limit:int=120)->dict:
-        config,meta=sandbox_config(raw);report=await MatchupCalibrationEvaluator(self.session).evaluate(limit=limit,baseline=ACTIVE_MATCHUP_CONFIG,candidate=config);return {**report,"config_meta":meta}
+        config,meta=sandbox_config(raw)
+        report=await MatchupCalibrationEvaluator(self.session).evaluate(limit=limit,baseline=ACTIVE_MATCHUP_CONFIG,candidate=config);return {**report,"config_meta":meta}
 
     async def train_ml(self,enabled:list[str])->dict:
         if not enabled:raise ValueError("At least one feature must be enabled.")
         if len(enabled)!=len(set(enabled)):raise ValueError("Enabled features must be unique.")
         unknown=set(enabled)-set(WIN_PROBABILITY_FEATURES)
         if unknown:raise ValueError(f"Unknown features: {', '.join(sorted(unknown))}")
-        rows,coverage=await AnalyticsAsOfService(self.session).build_dataset("pre_veto");train,validation,test=temporal_split(rows)
+        rows,coverage=await AnalyticsAsOfService(self.session).build_dataset_v3("pre_veto");train,validation,test=temporal_split(rows)
         model=WinProbabilityModel.train([x.features for x in train],[x.target for x in train],feature_names=enabled)
         quality={part:probability_metrics(model.predict_symmetric([x.features for x in values]),[x.target for x in values]) for part,values in (("train",train),("validation",validation),("test",test))}
         current=await active_model(self.session);current_quality=None

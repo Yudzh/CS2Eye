@@ -45,10 +45,11 @@ import { TournamentsPage } from "./pages/TournamentsPage";
 import { AddTournamentPage } from "./pages/AddTournamentPage";
 import { AddTournamentMatchPage } from "./pages/AddTournamentMatchPage";
 import { MLModelsPage } from "./pages/MLModelsPage";
-import { MLFeatureDiagnosticsPage } from "./pages/MLFeatureDiagnosticsPage";
+// Disabled: unused pages, kept on disk in case they're needed again.
+// import { MLFeatureDiagnosticsPage } from "./pages/MLFeatureDiagnosticsPage";
 import { PredictionHistoryPage } from "./pages/PredictionHistoryPage";
-import { MatchupCalibrationPage } from "./pages/MatchupCalibrationPage";
-import { ModelSandboxPage } from "./pages/ModelSandboxPage";
+// import { MatchupCalibrationPage } from "./pages/MatchupCalibrationPage";
+// import { ModelSandboxPage } from "./pages/ModelSandboxPage";
 import { AnalystFactorsPanel } from "./components/AnalystFactorsPanel";
 import { TeamFormContextBlock } from "./components/FormContextPanel";
 
@@ -590,11 +591,12 @@ function rankChangeLabel(
 export default function App() {
   const mapV3Match = window.location.pathname.match(/^\/teams\/(\d+)\/maps\/([^/]+)\/?$/);
   if (mapV3Match) return <MapV3Page teamId={Number(mapV3Match[1])} mapName={decodeURIComponent(mapV3Match[2])}/>;
-  if (/^\/model-sandbox\/?$/.test(window.location.pathname)) return <ModelSandboxPage />;
-  if (/^\/matchup-calibration\/?$/.test(window.location.pathname)) return <MatchupCalibrationPage />;
+  // Disabled: unused pages, kept on disk in case they're needed again.
+  // if (/^\/model-sandbox\/?$/.test(window.location.pathname)) return <ModelSandboxPage />;
+  // if (/^\/matchup-calibration\/?$/.test(window.location.pathname)) return <MatchupCalibrationPage />;
   if (/^\/prediction-history\/?$/.test(window.location.pathname)) return <PredictionHistoryPage />;
   if (/^\/ml\/models\/?$/.test(window.location.pathname)) return <MLModelsPage />;
-  if (/^\/ml\/feature-diagnostics\/?$/.test(window.location.pathname)) return <MLFeatureDiagnosticsPage />;
+  // if (/^\/ml\/feature-diagnostics\/?$/.test(window.location.pathname)) return <MLFeatureDiagnosticsPage />;
   if (/^\/demos\/?$/.test(window.location.pathname)) return <DemosPage />;
   if (/^\/matches\/?$/.test(window.location.pathname)) return <MatchesPage />;
   const seriesMatch = window.location.pathname.match(/^\/matches\/(\d+)\/?$/);
@@ -714,7 +716,9 @@ export default function App() {
         </span>
       </header>
 
-      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a><a className="button" href="/prediction-history">Prediction History</a><a className="button" href="/matchup-calibration" title="Read-only сравнение готовых Matchup V1 и V2">Matchup V1 ↔ V2</a><a className="button" href="/model-sandbox" title="Ручные временные эксперименты с Matchup и ML features">Model Sandbox</a><a className="button" href="/ml/models">ML-модели и активация</a><a className="button" href="/ml/feature-diagnostics" title="Read-only диагностика признаков текущей активной ML-модели">ML: диагностика текущей модели</a></nav>
+      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a><a className="button" href="/prediction-history">Prediction History</a>{/* Disabled: unused pages, kept on disk in case they're needed again.
+      <a className="button" href="/matchup-calibration" title="Read-only сравнение готовых Matchup V1 и V2">Matchup V1 ↔ V2</a>
+      <a className="button" href="/model-sandbox" title="Ручные временные эксперименты с Matchup и ML features">Model Sandbox</a> */}<a className="button" href="/ml/models">ML-модели и активация</a>{/* <a className="button" href="/ml/feature-diagnostics" title="Read-only диагностика признаков текущей активной ML-модели">ML: диагностика текущей модели</a> */}</nav>
 
       <section className="hero">
         <div>

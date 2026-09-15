@@ -5,7 +5,7 @@ import numpy as np
 from sqlalchemy import func,select,update
 from sqlalchemy.ext.asyncio import AsyncSession
 from cs2eye.analytics.win_probability import WinProbabilityModel,probability_metrics,temporal_split
-from cs2eye.analytics.win_probability_config import MIN_PREDICTION_CONFIDENCE,WIN_PROBABILITY_FEATURES,WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,WIN_PROBABILITY_MODEL_VERSION
+from cs2eye.analytics.win_probability_config import MIN_PREDICTION_CONFIDENCE,WIN_PROBABILITY_FEATURES,WIN_PROBABILITY_FEATURES_V3,WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3,WIN_PROBABILITY_MODEL_VERSION
 from cs2eye.models.prediction import MatchPrediction,WinProbabilityModelArtifact
 from cs2eye.services.analytics_as_of_service import AnalyticsAsOfService
 from cs2eye.services.matchup_service import MatchupService
@@ -91,20 +91,34 @@ def explain_prediction(model:WinProbabilityModel,features:dict[str,float],probab
         "has_counterintuitive_factors":any(item["counterintuitive"] and abs(item["impact_percentage_points"])>=.5 for item in impacts),
         "note":"Локальная модельная атрибуция: изменение вероятности при нейтрализации одного признака; не является причинной оценкой."}
 
-async def train_win_probability(session:AsyncSession,mode:str="pre_veto")->dict:
-    rows,report=await AnalyticsAsOfService(session).build_dataset(mode);train,validation,test=temporal_split(rows)
+async def train_win_probability(session:AsyncSession,mode:str="pre_veto",feature_schema_version:str=WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,dataset:tuple[list,dict]|None=None)->dict:
+    if feature_schema_version==WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3:
+        feature_names=WIN_PROBABILITY_FEATURES_V3
+    elif feature_schema_version==WIN_PROBABILITY_FEATURE_SCHEMA_VERSION:
+        feature_names=WIN_PROBABILITY_FEATURES
+    else:raise ValueError(f"Unknown feature_schema_version: {feature_schema_version}")
+    # dataset lets a caller that also needs the raw rows (e.g. for feature diagnostics right
+    # after training) pass an already-built build_dataset_v3() result instead of paying for
+    # a second full build -- that pipeline has no bulk preload and re-running it is expensive.
+    rows,report=dataset if dataset is not None else await AnalyticsAsOfService(session).build_dataset_v3(mode)
+    train,validation,test=temporal_split(rows)
     if not test or not validation:raise ValueError("Insufficient chronological series for train/validation/test.")
-    model=WinProbabilityModel.train([x.features for x in train],[x.target for x in train]);metrics={"train":probability_metrics(model.predict_symmetric([x.features for x in train]),[x.target for x in train]),"validation":probability_metrics(model.predict_symmetric([x.features for x in validation]),[x.target for x in validation]),"test":probability_metrics(model.predict_symmetric([x.features for x in test]),[x.target for x in test])}
+    model=WinProbabilityModel.train([x.features for x in train],[x.target for x in train],feature_names=feature_names,feature_schema_version=feature_schema_version);metrics={"train":probability_metrics(model.predict_symmetric([x.features for x in train]),[x.target for x in train]),"validation":probability_metrics(model.predict_symmetric([x.features for x in validation]),[x.target for x in validation]),"test":probability_metrics(model.predict_symmetric([x.features for x in test]),[x.target for x in test])}
     def baseline(name,pred):return {name:probability_metrics(pred,[x.target for x in test])}
     baselines={**baseline("neutral_50",[.5]*len(test))}
     for name,key in (("team_strength","team_strength_difference"),("matchup_score","matchup_score_centered")):
-        bm=WinProbabilityModel.train([{k:(x.features[key] if k==key else 0) for k in WIN_PROBABILITY_FEATURES} for x in train],[x.target for x in train]);baselines.update(baseline(name,bm.predict_symmetric([{k:(x.features[key] if k==key else 0) for k in WIN_PROBABILITY_FEATURES} for x in test])))
-    predictions=model.predict_symmetric([x.features for x in test]);metadata={"split":{"strategy":"70_15_15_chronological","training_series":len(train),"validation_series":len(validation),"test_series":len(test),"train_dates":[train[0].match_date.isoformat(),train[-1].match_date.isoformat()],"validation_dates":[validation[0].match_date.isoformat(),validation[-1].match_date.isoformat()],"test_dates":[test[0].match_date.isoformat(),test[-1].match_date.isoformat()]},"metrics":metrics,"baselines":baselines,"probability_distribution":_distribution(predictions),"extremes":{"below_20":sum(p<.2 for p in predictions),"above_80":sum(p>.8 for p in predictions)},"coefficients":dict(zip(WIN_PROBABILITY_FEATURES,model.artifact["coefficients"])),"coverage":report,"calibration_method":"raw_logistic","strict_historical":True}
+        # Always a genuine single-feature model on `key`, independent of the candidate's
+        # feature_names -- if key isn't among feature_names (e.g. team_strength_difference
+        # after the v3 forward-selection restart), the old code built every row as all-zeros,
+        # silently degenerating this baseline into a copy of neutral_50 instead of measuring
+        # the real single-factor floor the candidate needs to beat.
+        bm=WinProbabilityModel.train([{key:x.features[key]} for x in train],[x.target for x in train],feature_names=[key]);baselines.update(baseline(name,bm.predict_symmetric([{key:x.features[key]} for x in test])))
+    predictions=model.predict_symmetric([x.features for x in test]);metadata={"split":{"strategy":"70_15_15_chronological","training_series":len(train),"validation_series":len(validation),"test_series":len(test),"train_dates":[train[0].match_date.isoformat(),train[-1].match_date.isoformat()],"validation_dates":[validation[0].match_date.isoformat(),validation[-1].match_date.isoformat()],"test_dates":[test[0].match_date.isoformat(),test[-1].match_date.isoformat()]},"metrics":metrics,"baselines":baselines,"probability_distribution":_distribution(predictions),"extremes":{"below_20":sum(p<.2 for p in predictions),"above_80":sum(p>.8 for p in predictions)},"coefficients":dict(zip(feature_names,model.artifact["coefficients"])),"coverage":report,"calibration_method":"raw_logistic","strict_historical":True}
     ordinal=int((await session.scalar(select(func.max(WinProbabilityModelArtifact.id)))) or 0)+1
     model_version=f"v{ordinal}"
     artifact={**model.artifact,"model_version":model_version}
     passed=quality_gate_passed(metadata)
-    row=WinProbabilityModelArtifact(model_version=model_version,feature_schema_version=WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,trained_at=datetime.now(UTC),training_series=len(train),validation_series=len(validation),test_series=len(test),artifact=artifact,metrics=metadata,dataset_report=report,trained=True,quality_gate_passed=passed,active=False,forced_active=False);session.add(row);await session.flush();return {"artifact_id":row.id,"model_version":model_version,"trained":True,"quality_gate_passed":passed,"active":False,"forced_active":False,"activated":False,**metadata}
+    row=WinProbabilityModelArtifact(model_version=model_version,feature_schema_version=feature_schema_version,trained_at=datetime.now(UTC),training_series=len(train),validation_series=len(validation),test_series=len(test),artifact=artifact,metrics=metadata,dataset_report=report,trained=True,quality_gate_passed=passed,active=False,forced_active=False);session.add(row);await session.flush();return {"artifact_id":row.id,"model_version":model_version,"trained":True,"quality_gate_passed":passed,"active":False,"forced_active":False,"activated":False,**metadata}
 
 async def activate_win_probability(session:AsyncSession,artifact_id:int,force:bool=False)->dict:
     row=await session.get(WinProbabilityModelArtifact,artifact_id)
@@ -123,7 +137,11 @@ async def predict_win_probability(session:AsyncSession,a:int,b:int,format:str="b
     artifact=await active_model(session)
     if not artifact:return {"prediction_status":"model_not_trained","model_version":None,"model_status":"unavailable","quality_gate_passed":False,"team_a":{"id":a,"probability":None},"team_b":{"id":b,"probability":None},"confidence":0,"limitations":[]}
     cutoff=as_of or date.today();historical=cutoff<date.today()
-    matchup=await (AnalyticsAsOfService(session).calculate(a,b,cutoff,format,mode,series_id) if historical else MatchupService(session).calculate(a,b,format,mode,cutoff,series_id))
+    # Always go through MatchupService.calculate: it already resolves ACTIVE_MATCHUP_CONFIG
+    # for both the historical and live branches internally. Calling AnalyticsAsOfService
+    # directly here (as before) skipped that resolution and always used matchup_v1 for
+    # historical predictions, regardless of which matchup engine was actually active.
+    matchup=await MatchupService(session).calculate(a,b,format,mode,cutoff,series_id)
     if historical:
         features=matchup.get("prediction_features") or _feature_vector(matchup,format)
     else:
@@ -144,7 +162,7 @@ async def save_prediction(session:AsyncSession,**kwargs)->dict:
 async def backtest_win_probability(session:AsyncSession,mode:str="pre_veto",artifact_id:int|None=None)->dict:
     artifact=await session.get(WinProbabilityModelArtifact,artifact_id) if artifact_id else await active_model(session)
     if artifact is None:raise ValueError("No active Win Probability model.")
-    rows,coverage=await AnalyticsAsOfService(session).build_dataset(mode);_,_,test=temporal_split(rows)
+    rows,coverage=await AnalyticsAsOfService(session).build_dataset_v3(mode);_,_,test=temporal_split(rows)
     model=WinProbabilityModel(artifact.artifact);probabilities=model.predict_symmetric([item.features for item in test])
     return {"model_version":artifact.model_version,"feature_schema_version":artifact.feature_schema_version,"analysis_mode":mode,"test_series":len(test),"metrics":probability_metrics(probabilities,[item.target for item in test]),"coverage":coverage,"probability_distribution":_distribution(probabilities)}
 

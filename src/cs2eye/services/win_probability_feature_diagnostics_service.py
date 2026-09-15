@@ -167,7 +167,7 @@ class WinProbabilityFeatureDiagnosticsService:
     async def run(self,analysis_mode: str="pre_veto") -> dict[str,Any]:
         artifact=await active_model(self.session)
         if artifact is None:raise ValueError("No active Win Probability model.")
-        rows,dataset_report=await AnalyticsAsOfService(self.session).build_dataset(analysis_mode)
+        rows,dataset_report=await AnalyticsAsOfService(self.session).build_dataset_v3(analysis_mode)
         train,_,test=temporal_split(rows)
         core=diagnose_feature_matrix([row.features for row in train],[row.target for row in train],artifact.artifact)
         # Quality and ablations use the same chronological train/test boundary.

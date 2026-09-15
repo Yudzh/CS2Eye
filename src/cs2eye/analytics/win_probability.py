@@ -23,14 +23,14 @@ def probability_metrics(probabilities:Sequence[float],targets:Sequence[int])->di
 class WinProbabilityModel:
     artifact:dict
     @classmethod
-    def train(cls,features:list[dict[str,float]],targets:list[int],epochs:int=600,lr:float=.08,l2:float=.03,feature_names:list[str]|None=None):
+    def train(cls,features:list[dict[str,float]],targets:list[int],epochs:int=600,lr:float=.08,l2:float=.03,feature_names:list[str]|None=None,feature_schema_version:str|None=None):
         if len(features)<10:raise ValueError("At least 10 historical series are required.")
         names=feature_names or WIN_PROBABILITY_FEATURES
         if not names:raise ValueError("At least one feature is required.")
         x=np.asarray([[row[key] for key in names] for row in features],float);y=np.asarray(targets,float);means=x.mean(0);scales=x.std(0);scales[scales<1e-8]=1;x=(x-means)/scales;weights=np.zeros(x.shape[1]);intercept=log((y.sum()+1)/(len(y)-y.sum()+1))
         for _ in range(epochs):
             pred=sigmoid(intercept+x@weights);error=pred-y;intercept-=lr*float(error.mean());weights-=lr*((x.T@error)/len(y)+l2*weights)
-        artifact={"model_type":"standardized_logistic_regression","model_version":WIN_PROBABILITY_MODEL_VERSION,"feature_schema_version":WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,"features":list(names),"means":means.tolist(),"scales":scales.tolist(),"coefficients":weights.tolist(),"intercept":intercept,"l2":l2}
+        artifact={"model_type":"standardized_logistic_regression","model_version":WIN_PROBABILITY_MODEL_VERSION,"feature_schema_version":feature_schema_version or WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,"features":list(names),"means":means.tolist(),"scales":scales.tolist(),"coefficients":weights.tolist(),"intercept":intercept,"l2":l2}
         return cls(artifact)
     def predict(self,features:list[dict[str,float]])->list[float]:
         if not features:return []

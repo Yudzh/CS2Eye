@@ -1189,9 +1189,6 @@ export function TeamComparePage() {
     "pre_veto",
   );
   const [seriesId, setSeriesId] = useState(0);
-  const [matchupModelVersion, setMatchupModelVersion] = useState<
-    "" | "matchup_v1" | "matchup_v2_candidate" | "matchup_v3"
-  >("");
   const [seriesTournament, setSeriesTournament] = useState<
     MatchSeries["tournament"] | null
   >(null);
@@ -1275,7 +1272,6 @@ export function TeamComparePage() {
           fmt,
           mode,
           series || undefined,
-          matchupModelVersion || undefined,
         ),
         getWinProbability(a, b, fmt, mode, series || undefined),
         mode === "post_veto"
@@ -1518,21 +1514,6 @@ export function TeamComparePage() {
             >
               <option value="pre_veto">До вето</option>
               <option value="post_veto">После вето</option>
-            </select>
-          </label>
-          <label>
-            Модель матчапа
-            <select
-              value={matchupModelVersion}
-              onChange={(event) =>
-                setMatchupModelVersion(
-                  event.target.value as typeof matchupModelVersion,
-                )
-              }
-            >
-              <option value="">Production (matchup_v1)</option>
-              <option value="matchup_v2_candidate">matchup_v2_candidate</option>
-              <option value="matchup_v3">matchup_v3 (experimental)</option>
             </select>
           </label>
           <label>
