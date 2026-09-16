@@ -148,8 +148,16 @@ class AnalyticsAsOfService:
             # Must match win_probability_service._feature_vector's centered() exactly:
             # an is-None check, not `or 50`, since a legitimate score of 0 is falsy
             # and would otherwise be misread as "missing" and rounded up to neutral.
-            score=(factors.get(key) or {}).get("score")
-            return 0.0 if score is None else (float(score)-50.0)/50.0
+            # Reliability-weighted the same way matchup_engine.calculate_matchup discounts
+            # a factor's own contribution to the matchup score: a sparse-data factor must
+            # reach the model at the same reduced strength matchup itself is using, not at
+            # full weight, so training and matchup never disagree on how much a low-
+            # confidence factor should matter.
+            factor=factors.get(key) or {}
+            score=factor.get("score")
+            if score is None:return 0.0
+            reliability=max(0.,min(1.,float(factor.get("confidence") or 0.0)))
+            return (float(score)-50.0)/50.0*reliability
         strength_delta=centered("team_strength")
         rank_a=AnalyticsAsOfService._rank(rankings,a,as_of);rank_b=AnalyticsAsOfService._rank(rankings,b,as_of);rank_adv=0 if not rank_a or not rank_b else max(-30,min(30,rank_b-rank_a))/30
         form=context.get("form_context",{});fa=form.get("team_a_form_context",{});fb=form.get("team_b_form_context",{})

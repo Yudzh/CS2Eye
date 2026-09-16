@@ -96,13 +96,18 @@ async def test_retrain_creates_fresh_inactive_version_and_preserves_old(model_db
         assert len(initial_weights) == 6  # candidate + two baselines for each independent retrain
 
 
-async def test_train_uses_v3_dataset_and_schema_when_requested(model_db, monkeypatch) -> None:
+async def test_train_rejects_unknown_feature_schema_version(model_db) -> None:
+    async with model_db() as session:
+        with pytest.raises(ValueError, match="Unknown feature_schema_version"):
+            await service.train_win_probability(session, feature_schema_version="matchup_features_v2")
+
+
+async def test_train_uses_v3_dataset_and_schema_by_default(model_db, monkeypatch) -> None:
     # Locks in the schema -> dataset-builder -> feature-list wiring without a real,
     # multi-minute build_dataset_v3 run against Postgres (see scripts/train_v3_candidate_model.py
-    # for that real-data check). Both the default (matchup_features_v2) and matchup_features_v3
-    # schemas now build training rows from build_dataset_v3 -- only the trained feature_names
-    # subset differs between them. Rows carry every WIN_PROBABILITY_FEATURES key so both
-    # branches can pull from the same fixture.
+    # for that real-data check). matchup_features_v3 is the only trainable schema now, and its
+    # rows come from build_dataset_v3. Rows carry every WIN_PROBABILITY_FEATURES key so the
+    # fixture can stand in for a real dataset.
     rows = [SimpleNamespace(series_id=i, match_date=date(2026, 1, 1)+timedelta(days=i),
         features={key: (i % 5) / 10 for key in WIN_PROBABILITY_FEATURES}, target=i % 2) for i in range(40)]
     calls: list[str] = []
@@ -110,17 +115,19 @@ async def test_train_uses_v3_dataset_and_schema_when_requested(model_db, monkeyp
     monkeypatch.setattr(service.AnalyticsAsOfService, "build_dataset_v3", v3_dataset)
     async with model_db() as session:
         default = await service.train_win_probability(session)
-        v3 = await service.train_win_probability(session, feature_schema_version=WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3)
         await session.commit()
-        assert calls == ["v3", "v3"]
-        assert default["metrics"]["test"] is not None  # trained without error, default schema untouched
-        row = await session.get(WinProbabilityModelArtifact, v3["artifact_id"])
+        assert calls == ["v3"]
+        row = await session.get(WinProbabilityModelArtifact, default["artifact_id"])
         assert row.feature_schema_version == WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3
         assert row.artifact["features"] == WIN_PROBABILITY_FEATURES_V3
         # WIN_PROBABILITY_FEATURES_V3 is a forward-selection starting set (grows over time as
         # candidates earn their place) -- assert against the live constant, not a frozen literal.
         assert set(row.artifact["features"]) == set(WIN_PROBABILITY_FEATURES_V3)
-        dropped = {"current_roster_advantage", "leadership_advantage", "raw_matchup_centered",
+        # current_roster_advantage/leadership_advantage/format_bo*_strength are gone from
+        # WIN_PROBABILITY_FEATURES entirely (not just parked), so those names are never
+        # valid dict keys any more; raw_matchup_centered is covered dynamically below since
+        # it's parked in WIN_PROBABILITY_FEATURES_V3_CANDIDATES rather than hardcoded here.
+        dropped = {"current_roster_advantage", "leadership_advantage",
                    "format_bo1_strength", "format_bo3_strength", "format_bo5_strength", *WIN_PROBABILITY_FEATURES_V3_CANDIDATES}
         assert dropped.isdisjoint(row.artifact["features"])
         assert set(row.metrics["coefficients"]) == set(WIN_PROBABILITY_FEATURES_V3)

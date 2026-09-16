@@ -87,12 +87,12 @@ def test_feature_vector_keeps_matchup_and_probability_separate() -> None:
     matchup={
         "team_a":{"score":60},"raw_score":70,"reliability":.5,
         "factors":[
-            {"key":"team_strength","score":65},
-            {"key":"map_veto","score":55},
-            {"key":"current_roster_form","score":52},
-            {"key":"tactical_matchup","score":58},
-            {"key":"h2h","score":None},
-            {"key":"leadership_context","score":51},
+            {"key":"team_strength","score":65,"confidence":1.0},
+            {"key":"map_veto","score":55,"confidence":1.0},
+            {"key":"current_roster_form","score":52,"confidence":1.0},
+            {"key":"tactical_matchup","score":58,"confidence":.3},
+            {"key":"h2h","score":None,"confidence":1.0},
+            {"key":"leadership_context","score":51,"confidence":1.0},
         ],
     }
     result=_feature_vector(matchup,"bo3",.25)
@@ -100,5 +100,8 @@ def test_feature_vector_keeps_matchup_and_probability_separate() -> None:
     assert result["raw_matchup_centered"]==pytest.approx(.4)
     assert result["team_strength_difference"]==pytest.approx(.3)
     assert result["h2h_advantage"]==0
-    assert result["format_bo3_strength"]==pytest.approx(.3)
-    assert result["format_bo1_strength"]==0
+    # tactical_matchup's low confidence (.3) must discount the feature by the same
+    # factor, not just the matchup engine's own contribution to the matchup score --
+    # otherwise ML sees a sparse-data factor at full strength while matchup itself
+    # has already discounted it toward neutral.
+    assert result["tactical_advantage"]==pytest.approx((58-50)/50*.3)

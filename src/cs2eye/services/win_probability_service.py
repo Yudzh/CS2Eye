@@ -5,7 +5,7 @@ import numpy as np
 from sqlalchemy import func,select,update
 from sqlalchemy.ext.asyncio import AsyncSession
 from cs2eye.analytics.win_probability import WinProbabilityModel,probability_metrics,temporal_split
-from cs2eye.analytics.win_probability_config import MIN_PREDICTION_CONFIDENCE,WIN_PROBABILITY_FEATURES,WIN_PROBABILITY_FEATURES_V3,WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3,WIN_PROBABILITY_MODEL_VERSION
+from cs2eye.analytics.win_probability_config import MIN_PREDICTION_CONFIDENCE,WIN_PROBABILITY_FEATURES,WIN_PROBABILITY_FEATURES_V3,WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3,WIN_PROBABILITY_MODEL_VERSION
 from cs2eye.models.prediction import MatchPrediction,WinProbabilityModelArtifact
 from cs2eye.services.analytics_as_of_service import AnalyticsAsOfService
 from cs2eye.services.matchup_service import MatchupService
@@ -14,11 +14,9 @@ from cs2eye.models.team import Team
 FEATURE_LABELS={
     "matchup_score_centered":"Matchup Score","raw_matchup_centered":"Raw Matchup Score",
     "matchup_reliability_advantage":"Matchup с учётом надёжности","team_strength_difference":"Team Strength",
-    "map_pool_advantage":"Map Pool","current_roster_advantage":"Форма текущего состава",
+    "map_pool_advantage":"Map Pool",
     "tactical_advantage":"Тактическое соответствие","h2h_advantage":"Личные встречи",
-    "leadership_advantage":"Лидерство","ranking_advantage":"Рейтинг",
-    "format_bo1_strength":"Team Strength × BO1","format_bo3_strength":"Team Strength × BO3",
-    "format_bo5_strength":"Team Strength × BO5","tournament_form_advantage":"Tournament Form",
+    "ranking_advantage":"Рейтинг","tournament_form_advantage":"Tournament Form",
     "recent_60d_adjusted_form_advantage":"Adjusted Form (60d)",
     "strength_of_schedule_advantage":"Strength of Schedule",
     "performance_vs_expectation_advantage":"Performance vs Expectation",
@@ -39,8 +37,18 @@ def quality_gate_passed(metrics:dict)->bool:
 def _feature_vector(matchup:dict,format:str,ranking_advantage:float=0.0)->dict[str,float]:
     factors={item["key"]:item for item in matchup.get("factors",[])}
     def centered(key:str)->float:
-        score=(factors.get(key) or {}).get("score")
-        return 0.0 if score is None else (float(score)-50.0)/50.0
+        # Reliability-weighted, matching matchup_engine.calculate_matchup's own per-factor
+        # discounting: a sparse-data factor (e.g. tactical_matchup) that the matchup score
+        # itself is already discounting toward zero must reach the model at the same reduced
+        # strength, not at full weight -- otherwise ML and matchup disagree on how much a
+        # low-confidence factor should matter. Must match AnalyticsAsOfService.features'
+        # centered() exactly (an is-None check, not `or 50`: a legitimate score of 0 is
+        # falsy and would otherwise be misread as "missing" and rounded up to neutral).
+        factor=factors.get(key) or {}
+        score=factor.get("score")
+        if score is None:return 0.0
+        reliability=max(0.,min(1.,float(factor.get("confidence") or 0.0)))
+        return (float(score)-50.0)/50.0*reliability
     strength=centered("team_strength")
     form=matchup.get("form_context",{})
     form_a=form.get("team_a_form_context",{});form_b=form.get("team_b_form_context",{})
@@ -91,12 +99,9 @@ def explain_prediction(model:WinProbabilityModel,features:dict[str,float],probab
         "has_counterintuitive_factors":any(item["counterintuitive"] and abs(item["impact_percentage_points"])>=.5 for item in impacts),
         "note":"Локальная модельная атрибуция: изменение вероятности при нейтрализации одного признака; не является причинной оценкой."}
 
-async def train_win_probability(session:AsyncSession,mode:str="pre_veto",feature_schema_version:str=WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,dataset:tuple[list,dict]|None=None)->dict:
-    if feature_schema_version==WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3:
-        feature_names=WIN_PROBABILITY_FEATURES_V3
-    elif feature_schema_version==WIN_PROBABILITY_FEATURE_SCHEMA_VERSION:
-        feature_names=WIN_PROBABILITY_FEATURES
-    else:raise ValueError(f"Unknown feature_schema_version: {feature_schema_version}")
+async def train_win_probability(session:AsyncSession,mode:str="pre_veto",feature_schema_version:str=WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3,dataset:tuple[list,dict]|None=None)->dict:
+    if feature_schema_version!=WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3:raise ValueError(f"Unknown feature_schema_version: {feature_schema_version}")
+    feature_names=WIN_PROBABILITY_FEATURES_V3
     # dataset lets a caller that also needs the raw rows (e.g. for feature diagnostics right
     # after training) pass an already-built build_dataset_v3() result instead of paying for
     # a second full build -- that pipeline has no bulk preload and re-running it is expensive.

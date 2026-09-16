@@ -1,44 +1,37 @@
 WIN_PROBABILITY_MODEL_VERSION = "v1"
-WIN_PROBABILITY_FEATURE_SCHEMA_VERSION = "matchup_features_v2"
 MIN_HISTORICAL_MAPS_PER_TEAM = 3
 MIN_PREDICTION_CONFIDENCE = .25
 
+# Five columns from the original 17-feature (matchup_v1-era) schema are gone outright, not
+# just excluded from the v3 pool -- keeping them in the list/registry while unreachable from
+# both WIN_PROBABILITY_FEATURES_V3 and WIN_PROBABILITY_FEATURES_V3_CANDIDATES left no way to
+# tell "forgotten junk" from "parked for later" (2026-09-15 cleanup):
+#   - current_roster_advantage: AnalyticsAsOfService._matchup_v3 never emits a
+#     current_roster_form factor at all (retired along with matchup_v1/matchup_v2_candidate
+#     -- its signal already lives inside Team/Map Strength V3's own roster-applicability
+#     weighting), so this is a constant zero for every v3-trained example, permanently.
+#   - format_bo1_strength / format_bo3_strength / format_bo5_strength: each is just
+#     team_strength_difference gated by format (0 elsewhere), so they are the same
+#     signal split three ways rather than independent information -- corr >= 0.79
+#     with team_strength_difference in the diagnostics run that first flagged this, and
+#     format_bo1_strength's own bootstrap sign was unstable (57% -- close to a coin flip).
+#   - leadership_advantage: always exactly 0 for every historical training row (see
+#     AnalyticsAsOfService.features below), so its trained coefficient is provably
+#     always 0 -- no historical signal to learn, ever.
+# raw_matchup_centered was cut in the same original pass (corr == 1.00 with
+# matchup_score_centered -- the pre- vs post- coverage/agreement-adjustment view of the
+# identical score) but, unlike the four above, isn't structurally dead -- kept below and
+# parked in WIN_PROBABILITY_FEATURES_V3_CANDIDATES in case a future v3 dataset shows it
+# diverging from matchup_score_centered enough to be worth a second look.
 WIN_PROBABILITY_FEATURES = [
     "matchup_score_centered", "raw_matchup_centered", "matchup_reliability_advantage",
-    "team_strength_difference", "map_pool_advantage", "current_roster_advantage",
-    "tactical_advantage", "h2h_advantage", "leadership_advantage",
-    "ranking_advantage", "format_bo1_strength", "format_bo3_strength", "format_bo5_strength",
+    "team_strength_difference", "map_pool_advantage",
+    "tactical_advantage", "h2h_advantage",
+    "ranking_advantage",
     "tournament_form_advantage", "recent_60d_adjusted_form_advantage",
     "strength_of_schedule_advantage", "performance_vs_expectation_advantage",
 ]
 
-# matchup_v3 (see analytics.matchup_config.MATCHUP_V3_CONFIG) scores only 6 factors:
-# map_veto, team_strength, form_context, tactical_matchup, h2h, leadership_context.
-# scripts/train_v3_candidate_model.py's diagnostics (bootstrap sign stability, VIF,
-# pairwise correlation) on the full 17-feature schema found the v1 schema carries dead
-# weight and near-duplicate columns that a 6-factor model doesn't need and that were
-# contributing to failed quality gates and sign instability:
-#   - current_roster_advantage: AnalyticsAsOfService._matchup_v3 never emits a
-#     current_roster_form factor (retired -- its signal already lives inside Team/Map
-#     Strength V3's own roster-applicability weighting), so this was a constant zero
-#     for every v3-trained example.
-#   - format_bo1_strength / format_bo3_strength / format_bo5_strength: each is just
-#     team_strength_difference gated by format (0 elsewhere), so they are the same
-#     signal split three ways rather than independent information -- corr >= 0.79
-#     with team_strength_difference in that diagnostics run, and format_bo1_strength's
-#     own bootstrap sign was unstable (57% -- close to a coin flip).
-#   - raw_matchup_centered: corr == 1.00 with matchup_score_centered in that run (the
-#     pre- vs post- coverage/agreement-adjustment view of the identical score) -- one
-#     version of "the matchup score" is enough; matchup_score_centered (the actual,
-#     adjusted score shown everywhere else) is the one kept.
-#   - leadership_advantage: always exactly 0 for every historical training row (see
-#     AnalyticsAsOfService.features below), so its trained coefficient is provably
-#     always 0 (see win_probability_service.explain_prediction /
-#     tests/test_win_probability_feature_parity.py) -- no historical signal to learn.
-# What's left (11 features) each maps to one of the 6 factors, an external signal
-# (ranking_advantage), or a deliberate reliability-weighted interaction -- no column
-# whose purpose can't be stated in one sentence.
-#
 # Forward-selection restart (2026-09-15): training the full 11 still failed the quality
 # gate, and diagnostics on that run found the same kind of duplication that got the v1
 # schema trimmed to begin with -- matchup_reliability_advantage is matchup_score_centered
@@ -63,7 +56,42 @@ WIN_PROBABILITY_FEATURES_V3_CANDIDATES = [
     "matchup_reliability_advantage", "map_pool_advantage",
     "h2h_advantage", "tournament_form_advantage", "recent_60d_adjusted_form_advantage",
     "strength_of_schedule_advantage", "performance_vs_expectation_advantage",
+    "raw_matchup_centered",
 ]
+
+# WinProbabilityModel.train previously re-fit every column's standardization scale from
+# its own empirical std on each retrain. That is fine for a feature whose spread is stable,
+# but broke once _feature_vector/AnalyticsAsOfService.features started multiplying
+# tactical_advantage and team_strength_difference by the matchup factor's own reliability
+# (2026-09-16 fix for tactical getting muted by matchup but not by ML): most historical
+# matches have chronically low tactical-matchup confidence, so nearly every training row
+# gets pulled toward 0 and the column's empirical std collapsed 23x (v10 -> v11: 0.0934 ->
+# 0.0040). Standardizing against that collapsed std then reads any moderately-confident
+# live match as a 5+ sigma outlier, re-amplifying exactly the signal the reliability
+# weighting was meant to suppress (see explain_prediction's per-factor impact on
+# Spirit-vs-MOUZ, 2026-09-16: tactical_advantage's tiny raw value swung the prediction by
+# nearly as much as team_strength_difference).
+#
+# Freezing each V3 feature's scale below removes that feedback loop -- "one unit of
+# signal" no longer depends on how often a factor happened to be reliable in whichever
+# training window produced the latest retrain. Values are each feature's own empirical std
+# from v10 (2026-09-15, trained the day before the reliability-weighting fix shipped, same
+# 4-feature set as v11) -- the natural historical spread of the *unweighted* signal, before
+# it could be muted by low confidence:
+#   - tactical_advantage / team_strength_difference: this is the specific fix -- v10's
+#     pre-collapse std restores the original "unit of signal" for both (team_strength's
+#     confidence is usually high, so its v10->v11 collapse was much milder, 0.0973 ->
+#     0.0671, but freezing it removes the same drift risk for future retrains).
+#   - matchup_score_centered: not touched by the reliability-weighting fix (matchup_score
+#     is already dampened by matchup_engine's own coverage/agreement multiplier, a separate
+#     mechanism) but shows the same narrow-spread-inflates-standardization risk; frozen at
+#     its v10/v11 empirical value, which was already stable across both.
+#   - ranking_advantage: stable, well-behaved spread; frozen anyway so every V3 feature
+#     uses a fixed scale rather than a fragile mix of fixed and still-adaptive columns.
+WIN_PROBABILITY_FEATURE_FIXED_SCALES = {
+    "tactical_advantage": 0.0934, "team_strength_difference": 0.0973,
+    "matchup_score_centered": 0.0183, "ranking_advantage": 0.2264,
+}
 
 # Explicit semantics: diagnostics must never infer direction or symmetry from a name.
 WIN_PROBABILITY_FEATURE_REGISTRY = {
@@ -72,14 +100,9 @@ WIN_PROBABILITY_FEATURE_REGISTRY = {
     "matchup_reliability_advantage": {"group": "matchup", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
     "team_strength_difference": {"group": "team_strength", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
     "map_pool_advantage": {"group": "matchup", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
-    "current_roster_advantage": {"group": "form", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
     "tactical_advantage": {"group": "matchup", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
     "h2h_advantage": {"group": "h2h", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
-    "leadership_advantage": {"group": "matchup", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
     "ranking_advantage": {"group": "ranking", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
-    "format_bo1_strength": {"group": "format", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
-    "format_bo3_strength": {"group": "format", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
-    "format_bo5_strength": {"group": "format", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
     "tournament_form_advantage": {"group": "form", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
     "recent_60d_adjusted_form_advantage": {"group": "form", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
     "strength_of_schedule_advantage": {"group": "form", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},

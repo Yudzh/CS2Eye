@@ -9,11 +9,6 @@ factors/form context, but nothing enforced that beyond code review — this
 test pins the contract so a future edit to one without the other is caught,
 instead of silently producing a model that predicts on features it was never
 trained on.
-
-leadership_advantage is the one deliberate, tracked exception: historical
-role-tenure data isn't reliable, so training fixes it at 0 while live serving
-computes a real value. See the comment in AnalyticsAsOfService.features for
-why that gap is currently inert (the learned coefficient is provably 0).
 """
 
 import pytest
@@ -23,9 +18,6 @@ from cs2eye.services.analytics_as_of_service import AnalyticsAsOfService
 from cs2eye.services.win_probability_service import _feature_vector
 
 
-KNOWN_TRAIN_SERVE_GAPS = {"leadership_advantage"}
-
-
 def _context(*, team_a_score=58.0, raw_score=55.0, reliability=.6, factors, form_context=None):
     return {
         "team_a": {"score": team_a_score}, "raw_score": raw_score, "reliability": reliability,
@@ -33,8 +25,8 @@ def _context(*, team_a_score=58.0, raw_score=55.0, reliability=.6, factors, form
     }
 
 
-def _factors(**scores):
-    return [{"key": key, "score": score} for key, score in scores.items()]
+def _factors(confidence=1.0, **scores):
+    return [{"key": key, "score": score, "confidence": confidence} for key, score in scores.items()]
 
 
 @pytest.mark.parametrize("factors", [
@@ -47,6 +39,10 @@ def _factors(**scores):
     # A factor absent entirely (not even in the list) must also read as neutral,
     # matching a factor present but with score=None.
     _factors(team_strength=70),
+    # Reliability weighting (see centered() in both implementations) must be applied
+    # identically -- a low, non-1.0 confidence must discount training and live serving
+    # by the same amount, not just a full-confidence factor.
+    _factors(confidence=.3, team_strength=65, map_veto=55, tactical_matchup=58, h2h=40),
 ])
 def test_features_match_between_training_and_live_serving(factors):
     context = _context(factors=factors, form_context={
@@ -62,19 +58,4 @@ def test_features_match_between_training_and_live_serving(factors):
     training = AnalyticsAsOfService.features(context, "bo3", {}, None, 1, 2)
     live = _feature_vector(context, "bo3", ranking_advantage=0.0)
     for key in WIN_PROBABILITY_FEATURES:
-        if key in KNOWN_TRAIN_SERVE_GAPS:
-            continue
         assert training[key] == pytest.approx(live[key]), f"{key} diverged: train={training[key]} serve={live[key]}"
-
-
-def test_leadership_advantage_gap_is_the_only_tracked_divergence():
-    """If this starts failing, either the gap widened (bug) or it was closed (update KNOWN_TRAIN_SERVE_GAPS)."""
-    context = _context(factors=_factors(leadership_context=90))
-    training = AnalyticsAsOfService.features(context, "bo3", {}, None, 1, 2)
-    live = _feature_vector(context, "bo3", ranking_advantage=0.0)
-    assert training["leadership_advantage"] == 0.0
-    assert live["leadership_advantage"] == pytest.approx(.8)
-    for key in WIN_PROBABILITY_FEATURES:
-        if key == "leadership_advantage":
-            continue
-        assert training[key] == pytest.approx(live[key])

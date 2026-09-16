@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from math import exp,log
 from typing import Sequence
 import numpy as np
-from cs2eye.analytics.win_probability_config import WIN_PROBABILITY_FEATURES,WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,WIN_PROBABILITY_MODEL_VERSION
+from cs2eye.analytics.win_probability_config import WIN_PROBABILITY_FEATURES,WIN_PROBABILITY_FEATURE_FIXED_SCALES,WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3,WIN_PROBABILITY_MODEL_VERSION
 
 def sigmoid(x):return 1/(1+np.exp(-np.clip(x,-35,35)))
 
@@ -27,10 +27,17 @@ class WinProbabilityModel:
         if len(features)<10:raise ValueError("At least 10 historical series are required.")
         names=feature_names or WIN_PROBABILITY_FEATURES
         if not names:raise ValueError("At least one feature is required.")
-        x=np.asarray([[row[key] for key in names] for row in features],float);y=np.asarray(targets,float);means=x.mean(0);scales=x.std(0);scales[scales<1e-8]=1;x=(x-means)/scales;weights=np.zeros(x.shape[1]);intercept=log((y.sum()+1)/(len(y)-y.sum()+1))
+        x=np.asarray([[row[key] for key in names] for row in features],float);y=np.asarray(targets,float);means=x.mean(0)
+        # Fixed scales (see WIN_PROBABILITY_FEATURE_FIXED_SCALES) take priority over each
+        # retrain's own empirical std: a column whose values are mostly muted toward 0 by
+        # per-row reliability weighting has a collapsed std, and standardizing against that
+        # collapsed std re-amplifies exactly the signal the weighting was meant to suppress.
+        # Any feature without a frozen scale (e.g. legacy/candidate columns) still falls
+        # back to its own empirical std, as before.
+        empirical=x.std(0);scales=np.array([WIN_PROBABILITY_FEATURE_FIXED_SCALES.get(name,empirical[index]) for index,name in enumerate(names)],float);scales[scales<1e-8]=1;x=(x-means)/scales;weights=np.zeros(x.shape[1]);intercept=log((y.sum()+1)/(len(y)-y.sum()+1))
         for _ in range(epochs):
             pred=sigmoid(intercept+x@weights);error=pred-y;intercept-=lr*float(error.mean());weights-=lr*((x.T@error)/len(y)+l2*weights)
-        artifact={"model_type":"standardized_logistic_regression","model_version":WIN_PROBABILITY_MODEL_VERSION,"feature_schema_version":feature_schema_version or WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,"features":list(names),"means":means.tolist(),"scales":scales.tolist(),"coefficients":weights.tolist(),"intercept":intercept,"l2":l2}
+        artifact={"model_type":"standardized_logistic_regression","model_version":WIN_PROBABILITY_MODEL_VERSION,"feature_schema_version":feature_schema_version or WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3,"features":list(names),"means":means.tolist(),"scales":scales.tolist(),"coefficients":weights.tolist(),"intercept":intercept,"l2":l2}
         return cls(artifact)
     def predict(self,features:list[dict[str,float]])->list[float]:
         if not features:return []

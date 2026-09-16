@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from cs2eye.db.session import get_db_session
-from cs2eye.analytics.win_probability_config import WIN_PROBABILITY_FEATURE_SCHEMA_VERSION
+from cs2eye.analytics.win_probability_config import WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3
 from cs2eye.api.schemas.analysis import (
     LegacyCurrentRosterComparisonResponse, TeamH2HComparisonResponse,
     TeamMapComparisonResponse, TeamMapDetailResponse, TeamMapsResponse,
@@ -317,7 +317,7 @@ async def create_prediction(body:PredictionRequest,session:AsyncSession=Depends(
     except ValueError as error:raise HTTPException(422,str(error)) from error
 
 @router.post("/win-probability/train")
-async def train_probability(mode:str="pre_veto",feature_schema_version:str=Query(WIN_PROBABILITY_FEATURE_SCHEMA_VERSION,pattern="^(matchup_features_v2|matchup_features_v3)$"),session:AsyncSession=Depends(get_db_session)):
+async def train_probability(mode:str="pre_veto",feature_schema_version:str=Query(WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3,pattern="^matchup_features_v3$"),session:AsyncSession=Depends(get_db_session)):
     try:result=await train_win_probability(session,mode,feature_schema_version);await session.commit();return result
     except ValueError as error:raise HTTPException(422,str(error)) from error
 
