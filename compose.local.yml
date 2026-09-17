@@ -45,7 +45,7 @@ services:
       OLLAMA_HOST: ${OLLAMA_HOST:-http://127.0.0.1:11434}
       MATCH_LLM_PROVIDER: ${MATCH_LLM_PROVIDER:-ollama}
       MATCH_LLM_MODEL: ${MATCH_LLM_MODEL:-qwen3:8b}
-      MATCH_LLM_PROMPT_VERSION: ${MATCH_LLM_PROMPT_VERSION:-match_analysis_prompt.v3}
+      MATCH_LLM_PROMPT_VERSION: ${MATCH_LLM_PROMPT_VERSION:-match_analysis_prompt.v5}
       MATCH_LLM_TIMEOUT_SECONDS: ${MATCH_LLM_TIMEOUT_SECONDS:-60}
       MATCH_LLM_THINK: ${MATCH_LLM_THINK:-true}
       HTTP_PROXY: ${HTTP_PROXY:-}
@@ -79,7 +79,7 @@ services:
       - ./src:/app/src
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini:ro
-      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD33/demos}:/app/storage
+      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD34/demos}:/app/storage
     depends_on:
       db:
         condition: service_healthy

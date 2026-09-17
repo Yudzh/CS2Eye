@@ -158,7 +158,7 @@ def test_favorite_and_internal_statistics_basis_are_backend_owned():
     assert "внутренней статистике CS2Eye" in result.conclusion.internal_statistics_disclaimer
 
 
-def test_first_tournament_match_uses_previous_tournament_fallback():
+def test_first_tournament_match_reports_no_form_instead_of_fallback():
     def mutate(payload):
         for side in ("team_a", "team_b"):
             payload["teams"][side]["form"].update({
@@ -170,7 +170,12 @@ def test_first_tournament_match_uses_previous_tournament_fallback():
     result = plan(mutate)
     assert result.form.state == "not_started"
     assert "Турнир только начинается" in result.form.context_notes[0]
-    assert result.form.team_a.fallback in {"previous_tournament", "recent_60d"}
+    # A recent-60d or previous-tournament fallback would let a "strong form" claim leak
+    # into a section whose own note says the teams have no tournament form yet.
+    assert result.form.team_a.fallback == "none"
+    assert result.form.team_a.score is None
+    assert result.form.team_a.form_level == "unknown"
+    assert result.form.team_b.fallback == "none"
 
 
 def test_current_tournament_and_mixed_availability_states():

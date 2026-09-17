@@ -34,8 +34,13 @@ def advantage_level(score: float) -> str:
     return "strong"
 
 
-def confidence_level(reliability: float) -> str:
-    return "low" if reliability < .45 else "medium" if reliability < .75 else "high"
+def confidence_level(reliability: float, effective_coverage: float | None = None, factor_agreement_score: float | None = None, config=ACTIVE_MATCHUP_CONFIG) -> str:
+    level = "low" if reliability < .45 else "medium" if reliability < .75 else "high"
+    if effective_coverage is not None and effective_coverage < config.coverage_floor:
+        level = {"high": "medium", "medium": "low", "low": "low"}[level]
+    if factor_agreement_score is not None and factor_agreement_score < config.agreement_floor:
+        level = {"high": "medium", "medium": "low", "low": "low"}[level]
+    return level
 
 def form_context_input(form_pair:dict,weight:float=None)->FactorInput:
     form_a,form_b=form_pair["team_a_form_context"],form_pair["team_b_form_context"]
@@ -180,7 +185,7 @@ class MatchupService:
         names={team_a_id:team_a.name,team_b_id:team_b.name}
         return {"model_version":config.version,"score_semantics":"analytical_score_0_100_not_probability","analysis_mode":analysis_mode,"format":format,"as_of":as_of,"historical_policy":"current_snapshot",
             "team_a":{"id":team_a_id,"name":names[team_a_id],"score":score,"advantage":round(score-50,2)},"team_b":{"id":team_b_id,"name":names[team_b_id],"score":team_b_score,"advantage":round(team_b_score-50,2)},
-            "raw_score":result.raw_score,"reliability":result.reliability,"raw_coverage":getattr(result,"raw_coverage",None),"effective_coverage":getattr(result,"effective_coverage",None),"factor_agreement_score":getattr(result,"factor_agreement_score",None),"confidence_level":confidence_level(result.reliability),
+            "raw_score":result.raw_score,"reliability":result.reliability,"raw_coverage":getattr(result,"raw_coverage",None),"effective_coverage":getattr(result,"effective_coverage",None),"factor_agreement_score":getattr(result,"factor_agreement_score",None),"confidence_level":confidence_level(result.reliability,getattr(result,"effective_coverage",None),getattr(result,"factor_agreement_score",None),config),
             "advantage":{"team_id":winner,"team_name":names.get(winner),"level":advantage_level(score)},
             "factors":[{**factor.__dict__,"score":factor.normalized_score,"sample":factor.sample_size} for factor in result.factors],"maps":maps,"tactical":tactical,
             "veto":{"basis":"actual_veto" if actual else "calculated_veto","series_id":series_id,"calculated_veto_model_version":calculated["calculated_veto_model_version"]},

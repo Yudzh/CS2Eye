@@ -11,6 +11,11 @@ LATIN_WORD_RE = re.compile(r"\b[A-Za-z]{3,}\b")
 KNOWN_MAPS = {"ancient", "anubis", "cache", "cobblestone", "dust2", "inferno", "mirage", "nuke", "overpass", "train", "vertigo"}
 BETTING_RE = re.compile(r"ставк|букмек|коэффициент|валу[йе]|банкрол", re.IGNORECASE)
 MANUAL_RE = re.compile(r"ручн\w+ (?:комментар|замет)|аналитик", re.IGNORECASE)
+TOURNAMENT_NOT_STARTED_RE = re.compile(
+    r"турнир\w*[^.!?]{0,40}(?:только\s+начина|ещё\s+не\s+начал|не\s+начал\w*|не\s+стартова)"
+    r"|(?:только\s+начина|ещё\s+не\s+начал|не\s+начал\w*|не\s+стартова)[^.!?]{0,40}турнир\w*",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -72,6 +77,9 @@ class MatchLLMAnalysisV3Validator:
         misplaced = [map_name for map_name in supplied_maps if re.search(rf"(?<!\w){re.escape(map_name)}(?!\w)", analysis.form_text, re.IGNORECASE)]
         if misplaced:
             errors.append(f"form contains map facts: {sorted(misplaced)}"); codes.append("cross_section_fact")
+        if plan.form.state != "not_started" and TOURNAMENT_NOT_STARTED_RE.search(analysis.form_text):
+            errors.append("form claims the tournament just started, but state is not not_started")
+            codes.append("form_state_mismatch")
         if (plan.manual_context.team_a or plan.manual_context.team_b) and not MANUAL_RE.search(analysis.manual_text):
             errors.append("manual notes are not labeled as analyst comments"); codes.append("manual_context_unlabeled")
         expected = plan.expected_winner

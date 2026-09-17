@@ -232,7 +232,8 @@ class MatchAnalysisContextBuilder:
                 warnings.append(f"Calculated veto unavailable: {error}")
         likely_maps = self._likely_maps(veto_payload)
         map_matchups = await self._map_matchups(
-            (team_a_id, team_b_id), likely_maps, veto_payload, historical,
+            (team_a_id, team_b_id), likely_maps,
+            (matchup_payload or {}).get("maps"), historical,
         )
 
         h2h_payload = await TeamH2HService(self.session, today=cutoff).compare(
@@ -582,7 +583,7 @@ class MatchAnalysisContextBuilder:
 
     async def _map_matchups(
         self, team_ids: tuple[int, int], likely_maps: list[dict],
-        veto: dict | None, historical: bool,
+        matchup_maps: list[dict] | None, historical: bool,
     ) -> list[dict]:
         if historical or not likely_maps:
             return []
@@ -596,7 +597,9 @@ class MatchAnalysisContextBuilder:
             level_ok = row.aggregation_level == "organization" and row.roster_id is None
             if level_ok:
                 scopes[(row.team_id, row.map_name)][row.scope_key] = row
-        veto_maps = {item["map"]: item for item in (veto or {}).get("maps", [])}
+        # Sourced from MatchupService.aggregate_maps_v3 so this matches the map score
+        # shown in the actual matchup, instead of the separate Calculated Veto v1.1 score.
+        matchup_scores = {item["map"]: item.get("map_matchup_score") for item in (matchup_maps or [])}
         relevance = {item["map"]: item for item in likely_maps}
         result = []
         for map_name in map_names:
@@ -606,7 +609,6 @@ class MatchAnalysisContextBuilder:
             b_strength = calculate_map_strength(b_scopes) if b_scopes else None
             a_all, b_all = a_scopes.get("all"), b_scopes.get("all")
             edges = self._key_edges(map_name, a_all, b_all, a_strength, b_strength)
-            calculated = veto_maps.get(map_name, {})
             result.append({
                 "map": map_name,
                 "relevance": relevance[map_name].get("series_probability"),
@@ -620,7 +622,7 @@ class MatchAnalysisContextBuilder:
                     "reliability": b_strength.reliability if b_strength else None,
                     "sample_maps": b_all.maps_played if b_all else 0,
                 },
-                "matchup_score_team_a": (calculated.get("team_a") or {}).get("matchup_map_score"),
+                "matchup_score_team_a": matchup_scores.get(map_name),
                 "key_edges": edges,
             })
         return result

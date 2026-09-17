@@ -14,6 +14,7 @@ MIN_MAP_SAMPLE = 3
 MIN_MAP_RELIABILITY = .60
 STRONG_MAP_SCORE = 55
 WEAK_MAP_SCORE = 45
+MIN_MAP_PLAYABILITY = .05
 MIN_TEAMPLAY_RELIABILITY = .60
 
 
@@ -92,8 +93,12 @@ class DeterministicMatchExplanationBuilderV2:
             state = "mixed_availability"
         team_a = self._form_team(context, "team_a", state)
         team_b = self._form_team(context, "team_b", state)
-        score_a = team_a.score
-        score_b = team_b.score
+        # Compare using the same form_context factor the matchup itself scores with
+        # (cross-compared, opponent-strength-adjusted), not each team's own raw form
+        # score below — those two numbers can point in different directions.
+        matchup_form = next((f for f in context.matchup.factors if f.key == "form_context"), None)
+        score_a = matchup_form.team_a_score if matchup_form else None
+        score_b = matchup_form.team_b_score if matchup_form else None
         if score_a is None or score_b is None or abs(score_a - score_b) < 3:
             side, strength = "none", "none"
         else:
@@ -132,7 +137,10 @@ class DeterministicMatchExplanationBuilderV2:
         score = team.form.tournament_form_score if use_current else None
         reliability = team.form.tournament_reliability if use_current else None
         matches = team.form.tournament_matches if use_current else 0
-        if not use_current:
+        # When the tournament hasn't started for either team, don't let a recent-60d or
+        # previous-tournament fallback smuggle a "form" claim into a section whose own
+        # notes say the teams have no tournament form yet.
+        if not use_current and state != "not_started":
             previous = self._previous_tournament(evidence)
             if previous:
                 fallback = "previous_tournament"
@@ -193,10 +201,14 @@ class DeterministicMatchExplanationBuilderV2:
         return "weak"
 
     def _maps(self, context) -> MapsSection:
-        profiles = {}
+        playable_matchups = [
+            item for item in context.map_matchups
+            if item.relevance is None or item.relevance >= MIN_MAP_PLAYABILITY
+        ]
+        rows_by_side = {}
         for side in ("team_a", "team_b"):
             rows = []
-            for item in context.map_matchups:
+            for item in playable_matchups:
                 data = getattr(item, side)
                 if data.map_strength is None or data.reliability is None:
                     continue
@@ -209,19 +221,36 @@ class DeterministicMatchExplanationBuilderV2:
                         reliability=data.reliability, sample_maps=data.sample_maps,
                         classification=classification,
                     ))
+            rows_by_side[side] = rows
+        strong_by_map = {}
+        for side, rows in rows_by_side.items():
+            for row in rows:
+                if row.classification == "strong":
+                    strong_by_map.setdefault(row.map, {})[side] = row
+        for map_name, by_side in strong_by_map.items():
+            if len(by_side) < 2:
+                continue
+            loser_side = min(by_side, key=lambda s: by_side[s].strength_score)
+            rows_by_side[loser_side] = [
+                row for row in rows_by_side[loser_side]
+                if not (row.map == map_name and row.classification == "strong")
+            ]
+        profiles = {}
+        for side in ("team_a", "team_b"):
+            rows = rows_by_side[side]
             profiles[side] = TeamMapProfile(
                 team_name=getattr(context.teams, side).name or side,
                 strong_maps=sorted((x for x in rows if x.classification == "strong"), key=lambda x: (-x.strength_score, x.map))[:3],
                 weak_maps=sorted((x for x in rows if x.classification == "weak"), key=lambda x: (x.strength_score, x.map))[:3],
             )
         edges = []
-        for item in sorted(context.map_matchups, key=lambda x: (-(x.relevance or 0), x.map)):
+        for item in sorted(playable_matchups, key=lambda x: (-(x.relevance or 0), x.map)):
             if item.matchup_score_team_a is None or abs(item.matchup_score_team_a - 50) < 3:
                 continue
             side = "team_a" if item.matchup_score_team_a > 50 else "team_b"
             distance = abs(item.matchup_score_team_a - 50)
             strength = "clear" if distance >= 12 else "moderate" if distance >= 7 else "small"
-            reasons = self._map_reasons(item, side)
+            reasons = self._map_reasons(context, item, side)
             if reasons:
                 edges.append(KeyMapEdge(
                     map=item.map, favored_team=side,
@@ -234,19 +263,19 @@ class DeterministicMatchExplanationBuilderV2:
         notes = [] if status == "available" else ["Недостаточно надёжных данных для уверенного сравнения карт."]
         return MapsSection(status=status, team_a=profiles["team_a"], team_b=profiles["team_b"], key_map_edges=edges, context_notes=notes)
 
-    def _map_reasons(self, item, favored_side):
+    def _map_reasons(self, context, item, favored_side):
         reasons = []
         own = getattr(item, favored_side)
         other_side = "team_b" if favored_side == "team_a" else "team_a"
         opponent = getattr(item, other_side)
-        if own.sample_maps < MIN_MAP_SAMPLE:
-            reasons.append(MapEdgeReason(type="team_low_sample", side=favored_side, side_name=favored_side, strength="small", reliability=own.reliability))
-        elif own.map_strength is not None and own.map_strength >= STRONG_MAP_SCORE:
-            reasons.append(MapEdgeReason(type="team_strong_on_map", side=favored_side, side_name=favored_side, strength="moderate", reliability=own.reliability))
+        favored_name = getattr(context.teams, favored_side).name or favored_side
+        other_name = getattr(context.teams, other_side).name or other_side
+        if own.map_strength is not None and own.map_strength >= STRONG_MAP_SCORE:
+            reasons.append(MapEdgeReason(type="team_strong_on_map", side=favored_side, side_name=favored_name, strength="moderate", reliability=own.reliability))
         if opponent.sample_maps < MIN_MAP_SAMPLE:
-            reasons.append(MapEdgeReason(type="opponent_low_sample", side=other_side, side_name=other_side, strength="small", reliability=opponent.reliability))
+            reasons.append(MapEdgeReason(type="opponent_low_sample", side=other_side, side_name=other_name, strength="small", reliability=opponent.reliability))
         elif opponent.map_strength is not None and opponent.map_strength <= WEAK_MAP_SCORE:
-            reasons.append(MapEdgeReason(type="opponent_weak_on_map", side=other_side, side_name=other_side, strength="moderate", reliability=opponent.reliability))
+            reasons.append(MapEdgeReason(type="opponent_weak_on_map", side=other_side, side_name=other_name, strength="moderate", reliability=opponent.reliability))
         mapping = {"trade": "trading", "trading": "trading"}
         allowed = {"ct_side", "t_side", "opening", "trading", "clutch", "postplant", "retake", "full_buy", "force_buy", "anti_eco", "pistol", "utility"}
         for edge in item.key_edges:
@@ -256,7 +285,7 @@ class DeterministicMatchExplanationBuilderV2:
                 and (edge.reliability or 0) >= MIN_MAP_RELIABILITY
             ):
                 reasons.append(MapEdgeReason(
-                    type=metric, side=favored_side, side_name=favored_side, strength=edge.strength,
+                    type=metric, side=favored_side, side_name=favored_name, strength=edge.strength,
                     reliability=edge.reliability, evidence_id=edge.evidence_id,
                 ))
         return reasons
