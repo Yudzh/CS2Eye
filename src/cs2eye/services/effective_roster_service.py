@@ -7,8 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.analytics.temporary_replacement_config import stand_in_penalty
+from cs2eye.models.demo import DemoTeamRoster
+from cs2eye.models.demo_file import DemoFile
 from cs2eye.models.match import Match, Tournament, TournamentRosterOverride, TournamentTeam
-from cs2eye.models.team import AnalystFactor, Player, Team, TeamRosterMember
+from cs2eye.models.team import AnalystFactor, Player, Team, TeamRoster, TeamRosterMember
 
 
 PRIORITY = {"MANUAL": 3, "CONFIRMED": 2, "DETECTED": 1, "REJECTED": 0}
@@ -19,6 +21,30 @@ def roster_applicability(current: set[int], historical: set[int]) -> float:
         return 0.0
     shared = len(current & historical)
     return {5: 1.0, 4: 0.8, 3: 0.6}.get(shared, 0.2 if shared == 2 else 0.0)
+
+
+async def resolve_roster(session: AsyncSession, team: Team, as_of: date, *, historical: bool) -> TeamRoster | None:
+    """Point-in-time roster resolution, shared by TeamStrengthV3Service and EffectiveRosterService.
+
+    `historical=False` (as_of is today or a not-yet-played future date) trusts team.current_roster_id
+    directly. `historical=True` reconstructs the roster as it stood strictly before `as_of` from demo
+    evidence (falling back to date-windowed TeamRoster rows), because team.current_roster_id is a mutable
+    "whoever is current roster TODAY" pointer with no memory of past lineups -- using it for a past as_of
+    leaks the team's present-day roster into a prediction about the past. See docs/
+    win_probability_backtest_log.md for the Vitality/jL case this was found from.
+    """
+    if not historical and team.current_roster_id:
+        current = await session.get(TeamRoster, team.current_roster_id)
+        return current if current and current.resolution_status == "complete" else None
+    roster_id = await session.scalar(select(DemoTeamRoster.roster_id).join(
+        DemoFile, DemoFile.id == DemoTeamRoster.demo_file_id).where(
+            DemoTeamRoster.team_id == team.id, DemoTeamRoster.resolution_status == "complete",
+            DemoTeamRoster.roster_id.is_not(None), DemoFile.match_date < as_of).order_by(
+                DemoFile.match_date.desc(), DemoFile.id.desc()).limit(1))
+    if roster_id: return await session.get(TeamRoster, roster_id)
+    return await session.scalar(select(TeamRoster).where(TeamRoster.team_id == team.id,
+        (TeamRoster.active_from.is_(None) | (TeamRoster.active_from < as_of)),
+        (TeamRoster.active_to.is_(None) | (TeamRoster.active_to >= as_of))).order_by(TeamRoster.active_from.desc()).limit(1))
 
 
 class EffectiveRosterService:
@@ -46,11 +72,14 @@ class EffectiveRosterService:
         tournament_id, tournament, match = await self._context(team_id, tournament_id, match_id)
         point = as_of.date() if isinstance(as_of, datetime) else as_of
         point = point or (match.match_date if match else date.today())
-        members = list((await self.session.scalars(select(TeamRosterMember).where(
-            TeamRosterMember.roster_id == team.current_roster_id,
-            TeamRosterMember.player_id.is_not(None)))).all()) if team.current_roster_id else []
-        permanent_ids = (list(permanent_player_ids) if permanent_player_ids is not None else
-                         [int(x.player_id) for x in members if x.player_id is not None])
+        if permanent_player_ids is not None:
+            permanent_ids = list(permanent_player_ids)
+        else:
+            roster = await resolve_roster(self.session, team, point, historical=point < date.today())
+            members = list((await self.session.scalars(select(TeamRosterMember).where(
+                TeamRosterMember.roster_id == roster.id,
+                TeamRosterMember.player_id.is_not(None)))).all()) if roster else []
+            permanent_ids = [int(x.player_id) for x in members if x.player_id is not None]
         overrides: list[TournamentRosterOverride] = []
         if tournament_id is not None:
             rows = list((await self.session.scalars(select(TournamentRosterOverride).where(

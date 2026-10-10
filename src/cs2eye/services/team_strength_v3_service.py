@@ -10,13 +10,11 @@ from cs2eye.analytics.team_strength_v3_config import (
     CALCULATION_REVISION, COMPONENT_WEIGHTS, EXECUTION_WEIGHTS, MODEL_VERSION, RELIABILITY_TARGETS,
     RELIABILITY_WEIGHTS, ROSTER_WEIGHTS,
 )
-from cs2eye.models.demo import DemoTeamRoster
-from cs2eye.models.demo_file import DemoFile
 from cs2eye.models.team import Player, Team, TeamRoster, TeamRosterMember, TeamStrengthV3Snapshot
 from cs2eye.services.opponent_adjusted_results_service import OpponentAdjustedResultsService
 from cs2eye.services.performance_profile_service import PerformanceProfileService
 from cs2eye.services.player_strength_v3_service import PlayerStrengthV3Service
-from cs2eye.services.effective_roster_service import EffectiveRosterService
+from cs2eye.services.effective_roster_service import EffectiveRosterService, resolve_roster
 
 
 def _json_safe(value):
@@ -87,18 +85,7 @@ class TeamStrengthV3Service:
         self.results_service = OpponentAdjustedResultsService(session)
 
     async def _roster(self, team: Team, as_of: date, historical: bool) -> TeamRoster | None:
-        if not historical and team.current_roster_id:
-            current = await self.session.get(TeamRoster, team.current_roster_id)
-            return current if current and current.resolution_status == "complete" else None
-        roster_id = await self.session.scalar(select(DemoTeamRoster.roster_id).join(
-            DemoFile, DemoFile.id == DemoTeamRoster.demo_file_id).where(
-                DemoTeamRoster.team_id == team.id, DemoTeamRoster.resolution_status == "complete",
-                DemoTeamRoster.roster_id.is_not(None), DemoFile.match_date < as_of).order_by(
-                    DemoFile.match_date.desc(), DemoFile.id.desc()).limit(1))
-        if roster_id: return await self.session.get(TeamRoster, roster_id)
-        return await self.session.scalar(select(TeamRoster).where(TeamRoster.team_id == team.id,
-            (TeamRoster.active_from.is_(None) | (TeamRoster.active_from < as_of)),
-            (TeamRoster.active_to.is_(None) | (TeamRoster.active_to >= as_of))).order_by(TeamRoster.active_from.desc()).limit(1))
+        return await resolve_roster(self.session, team, as_of, historical=historical)
 
     async def calculate(self, team_id: int, as_of: date | None = None, *, exclude_match_id: int | None = None,
                         force: bool = False, tournament_id: int | None = None,

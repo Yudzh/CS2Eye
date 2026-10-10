@@ -30,6 +30,7 @@ WIN_PROBABILITY_FEATURES = [
     "ranking_advantage",
     "tournament_form_advantage", "recent_60d_adjusted_form_advantage",
     "strength_of_schedule_advantage", "performance_vs_expectation_advantage",
+    "effective_coverage",
 ]
 
 # Forward-selection restart (2026-09-15): training the full 11 still failed the quality
@@ -57,7 +58,31 @@ WIN_PROBABILITY_FEATURES_V3_CANDIDATES = [
     "h2h_advantage", "tournament_form_advantage", "recent_60d_adjusted_form_advantage",
     "strength_of_schedule_advantage", "performance_vs_expectation_advantage",
     "raw_matchup_centered",
+    "effective_coverage",
 ]
+# effective_coverage (added 2026-09-18, parked as a candidate, not yet in
+# WIN_PROBABILITY_FEATURES_V3): matchup_engine.calculate_matchup's coverage_agreement branch
+# already computes it -- sum(factor.weight * confidence_multiplier) across all six matchup
+# factors, i.e. how much of the matchup's declared 100% weight actually survived confidence
+# discounting, as opposed to matchup_reliability_advantage (matchup_score_centered scaled by
+# `reliability`, which is coverage_multiplier*agreement_multiplier and is FLOORED at
+# coverage_floor=.80/agreement_floor=.85 -- so it barely moves even when real coverage
+# collapses; see the Legacy/FUT and Legacy/Falcons 2026-08-27/29 backtest misses, where
+# map_veto+tactical_matchup -- 43% of total weight -- were confidence-discounted to ~0 yet
+# `reliability` stayed at 0.88). effective_coverage is the unfloored 0-1 number that would
+# actually have flagged that.
+#
+# It is NOT an antisymmetric team_a-advantage like every other feature here: it's the same
+# value regardless of which team is "a" or "b" (both teams' factor confidences already feed
+# the same aggregate). WinProbabilityModel.predict_symmetric negates every feature to build
+# its "reversed" evaluation, assuming P(A,B) == 1 - P(B,A) holds feature-by-feature -- that
+# assumption is correct for every other column here but wrong for a symmetric one: negating
+# effective_coverage produces a value the model was never trained to interpret. Harmless
+# while this stays a candidate (only WIN_PROBABILITY_FEATURES_V3 feeds predict_symmetric),
+# but predict_symmetric (or the training/promotion path) needs to special-case symmetric
+# features -- e.g. exclude them from negation -- before this is ever promoted into
+# WIN_PROBABILITY_FEATURES_V3. See its "expected_symmetry": "symmetric" entry below, the
+# only one that isn't "antisymmetric".
 
 # WinProbabilityModel.train previously re-fit every column's standardization scale from
 # its own empirical std on each retrain. That is fine for a feature whose spread is stable,
@@ -107,6 +132,14 @@ WIN_PROBABILITY_FEATURE_REGISTRY = {
     "recent_60d_adjusted_form_advantage": {"group": "form", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
     "strength_of_schedule_advantage": {"group": "form", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
     "performance_vs_expectation_advantage": {"group": "form", "expected_direction": "positive", "expected_symmetry": "antisymmetric"},
+    # expected_direction is a placeholder, not a real prior: unlike every antisymmetric
+    # feature above, effective_coverage has no team_a/team_b advantage direction at all --
+    # it should have close to zero relationship with who wins, only with how much the OTHER
+    # factors' signal can be trusted. diagnose_feature_matrix's sign_mismatch/consistent_
+    # inverse_signal checks only compare against "positive"/"negative", so a human reading
+    # its report for this feature should treat any such flag as expected noise, not a real
+    # miscalibration -- there is no directional prior here to violate.
+    "effective_coverage": {"group": "matchup", "expected_direction": "positive", "expected_symmetry": "symmetric"},
 }
 
 FEATURE_DIAGNOSTICS_BOOTSTRAP_RUNS = 100

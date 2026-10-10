@@ -152,8 +152,8 @@ class MatchupService:
                 maps_v3[(team_id,map_name)]=await map_service.calculate(team_id,map_name)
         map_score,maps,tactical=aggregate_maps_v3(team_a_id,team_b_id,weights,maps_v3)
         strength_service=TeamStrengthV3Service(self.session)
-        strength_a=await strength_service.calculate(team_a_id)
-        strength_b=await strength_service.calculate(team_b_id)
+        strength_a=await strength_service.calculate(team_a_id,match_id=series_id)
+        strength_b=await strength_service.calculate(team_b_id,match_id=series_id)
         strength_score=cross(strength_a["score"],strength_b["score"])
         strength_conf=min(strength_a["reliability"],strength_b["reliability"])/100
         h2h=await TeamH2HService(self.session,today=as_of).compare(team_a_id,team_b_id,recent_limit=20)

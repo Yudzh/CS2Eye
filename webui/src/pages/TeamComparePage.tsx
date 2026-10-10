@@ -972,6 +972,49 @@ function MatchupBlock({ matchup }: { matchup: MatchupScore }) {
   );
 }
 
+function SourcePicksBlock({ prediction }: { prediction: WinProbability }) {
+  const matchup = prediction.matchup;
+  const strengthFactor = matchup?.factors.find(
+    (f) => f.key === "team_strength",
+  );
+  const strengthScore = strengthFactor?.score ?? null;
+  const strengthPick =
+    !matchup || strengthScore === null
+      ? "—"
+      : strengthScore > 50
+        ? matchup.team_a.name
+        : strengthScore < 50
+          ? matchup.team_b.name
+          : "—";
+  const matchupPick = matchup
+    ? (matchup.advantage.team_name ?? "Нет фаворита")
+    : "—";
+  const mlPick =
+    prediction.prediction_status !== "available" ||
+    prediction.team_a.probability === null ||
+    prediction.team_b.probability === null
+      ? "Недоступен"
+      : prediction.team_a.probability >= prediction.team_b.probability
+        ? (prediction.team_a.name ?? "Команда A")
+        : (prediction.team_b.name ?? "Команда B");
+  return (
+    <section className="team-metrics source-picks">
+      <article className="metric-card">
+        <span>Сила команд</span>
+        <strong>{strengthPick}</strong>
+      </article>
+      <article className="metric-card">
+        <span>Matchup</span>
+        <strong>{matchupPick}</strong>
+      </article>
+      <article className="metric-card">
+        <span>ML</span>
+        <strong>{mlPick}</strong>
+      </article>
+    </section>
+  );
+}
+
 function WinProbabilityBlock({
   prediction,
   preVeto,
@@ -1583,6 +1626,7 @@ export function TeamComparePage() {
             teamAId={comparison.team_a.id}
             teamBId={comparison.team_b.id}
           />
+          {winProbability && <SourcePicksBlock prediction={winProbability} />}
           {winProbability && (
             <WinProbabilityBlock
               prediction={winProbability}

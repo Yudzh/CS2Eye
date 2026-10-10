@@ -200,11 +200,15 @@ class DeterministicMatchExplanationBuilderV2:
         if score >= 45: return "mixed"
         return "weak"
 
-    def _maps(self, context) -> MapsSection:
-        playable_matchups = [
+    @staticmethod
+    def _playable_matchups(context):
+        return [
             item for item in context.map_matchups
             if item.relevance is None or item.relevance >= MIN_MAP_PLAYABILITY
         ]
+
+    def _maps(self, context) -> MapsSection:
+        playable_matchups = self._playable_matchups(context)
         rows_by_side = {}
         for side in ("team_a", "team_b"):
             rows = []
@@ -294,7 +298,7 @@ class DeterministicMatchExplanationBuilderV2:
         category_map = {"trade": "trading", "trading": "trading"}
         allowed = {"ct_side", "t_side", "opening", "trading", "clutch", "postplant", "retake", "pistol", "force_buy", "full_buy", "anti_eco", "utility"}
         candidates = []
-        for item in context.map_matchups:
+        for item in self._playable_matchups(context):
             for edge in item.key_edges:
                 category = category_map.get(edge.metric, edge.metric)
                 reliability = edge.reliability or 0

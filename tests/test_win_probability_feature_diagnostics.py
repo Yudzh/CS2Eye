@@ -45,10 +45,18 @@ def test_correlated_features_are_reported_as_redundant():
 
 
 def test_feature_registry_is_explicit_and_orientation_is_antisymmetric():
+    # effective_coverage is the one deliberate exception: it's the same value regardless of
+    # which team is "a" or "b" (see its comment in win_probability_config.py), so it must
+    # stay out of this antisymmetry guarantee -- but only it, nothing else may silently
+    # slip in as "symmetric" without the same review (predict_symmetric negates every
+    # feature it isn't told to skip, so a wrongly-declared symmetric feature there would
+    # silently corrupt predictions).
+    symmetric_exceptions={"effective_coverage"}
     assert set(WIN_PROBABILITY_FEATURE_REGISTRY)==set(WIN_PROBABILITY_FEATURES)
     values={key:(index+1)/100 for index,key in enumerate(WIN_PROBABILITY_FEATURES)}
     reversed_values={key:-value for key,value in values.items()}
     for key in WIN_PROBABILITY_FEATURES:
         assert WIN_PROBABILITY_FEATURE_REGISTRY[key]["expected_direction"]=="positive"
-        assert WIN_PROBABILITY_FEATURE_REGISTRY[key]["expected_symmetry"]=="antisymmetric"
+        expected_symmetry="symmetric" if key in symmetric_exceptions else "antisymmetric"
+        assert WIN_PROBABILITY_FEATURE_REGISTRY[key]["expected_symmetry"]==expected_symmetry
         assert values[key]==-reversed_values[key]

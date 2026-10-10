@@ -73,6 +73,7 @@ def _feature_vector(matchup:dict,format:str,ranking_advantage:float=0.0)->dict[s
         "recent_60d_adjusted_form_advantage":form_delta("recent_60d_adjusted_form_score"),
         "strength_of_schedule_advantage":form_delta("strength_of_schedule_score"),
         "performance_vs_expectation_advantage":form_delta("performance_vs_expectation_score"),
+        "effective_coverage":float(matchup.get("effective_coverage") or 0.0),
     }
     return {key:float(values[key]) for key in WIN_PROBABILITY_FEATURES}
 
@@ -156,7 +157,14 @@ async def predict_win_probability(session:AsyncSession,a:int,b:int,format:str="b
         features=_feature_vector(matchup,format,rank_advantage)
     confidence=matchup.get("reliability",0);status="insufficient_data" if confidence<MIN_PREDICTION_CONFIDENCE else "available";model=WinProbabilityModel(artifact.artifact);p=model.predict_symmetric([features])[0] if status=="available" else None
     explanation=explain_prediction(model,features,p) if p is not None else None
-    return {"model_version":artifact.model_version,"feature_schema_version":artifact.feature_schema_version,"trained_at":artifact.trained_at,"model_status":"experimental" if artifact.forced_active else "active","quality_gate_passed":artifact.quality_gate_passed,"prediction_status":status,"team_a":{"id":a,"name":matchup.get("team_a",{}).get("name"),"probability":p},"team_b":{"id":b,"name":matchup.get("team_b",{}).get("name"),"probability":None if p is None else 1-p},"confidence":confidence,"basis":{"analysis_mode":mode,"veto":"actual_veto" if mode=="post_veto" else "calculated_veto","matchup_score":matchup["team_a"]["score"]},"features":features,"explanation":explanation,"matchup":matchup,"limitations":matchup.get("limitations",[])}
+    return {"model_version":artifact.model_version,"feature_schema_version":artifact.feature_schema_version,"trained_at":artifact.trained_at,"model_status":"experimental" if artifact.forced_active else "active","quality_gate_passed":artifact.quality_gate_passed,"prediction_status":status,"team_a":{"id":a,"name":matchup.get("team_a",{}).get("name"),"probability":p},"team_b":{"id":b,"name":matchup.get("team_b",{}).get("name"),"probability":None if p is None else 1-p},"confidence":confidence,
+        # Surfaced next to confidence so a caller doesn't have to reach into matchup.
+        # effective_coverage is unfloored (unlike `confidence`, which is coverage*agreement
+        # floored at .80/.85 -- see WIN_PROBABILITY_FEATURES_V3_CANDIDATES' comment in
+        # win_probability_config.py) -- it is the honest "how much of the matchup formula's
+        # weight actually had confident data" number, not the dampened one `confidence` is.
+        "effective_coverage":matchup.get("effective_coverage"),
+        "basis":{"analysis_mode":mode,"veto":"actual_veto" if mode=="post_veto" else "calculated_veto","matchup_score":matchup["team_a"]["score"]},"features":features,"explanation":explanation,"matchup":matchup,"limitations":matchup.get("limitations",[])}
 
 async def save_prediction(session:AsyncSession,**kwargs)->dict:
     result=await predict_win_probability(session,**kwargs)
