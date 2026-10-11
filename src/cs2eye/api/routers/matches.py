@@ -1,5 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from cs2eye.models.match import TournamentTeam
 
 from cs2eye.api.schemas.matches import (
     MatchBackfillResponse, MatchCreateRequest, MatchListResponse, MatchMapResponse, MatchPatchRequest, MatchReorderRequest,
@@ -19,6 +22,13 @@ router = APIRouter(tags=["matches"])
 
 async def response(view: MatchView, session: AsyncSession) -> MatchResponse:
     item = view.match
+    names = dict((await session.execute(select(
+        TournamentTeam.team_id, TournamentTeam.display_name,
+    ).where(
+        TournamentTeam.tournament_id == item.tournament_id,
+        TournamentTeam.team_id.in_([team_id for team_id in (item.team_a_id, item.team_b_id) if team_id is not None]),
+        TournamentTeam.display_name.is_not(None),
+    ))).all()) if item.tournament_id is not None else {}
     veto = await VetoService(session).actions(item.id)
     return MatchResponse(
         id=item.id,
@@ -26,8 +36,8 @@ async def response(view: MatchView, session: AsyncSession) -> MatchResponse:
         match_date=item.match_date, format=item.format, stage=item.stage, environment=item.environment,
         status=item.status, resolution_status=item.resolution_status, is_playoff=item.is_playoff,
         is_elimination=item.is_elimination,
-        team_a=MatchTeamResponse(id=item.team_a_id, name=view.team_a.name if view.team_a else None),
-        team_b=MatchTeamResponse(id=item.team_b_id, name=view.team_b.name if view.team_b else None),
+        team_a=MatchTeamResponse(id=item.team_a_id, name=names.get(item.team_a_id) or (view.team_a.name if view.team_a else None)),
+        team_b=MatchTeamResponse(id=item.team_b_id, name=names.get(item.team_b_id) or (view.team_b.name if view.team_b else None)),
         score=MatchScoreResponse(team_a=item.team_a_maps_won, team_b=item.team_b_maps_won),
         winner_team_id=item.winner_team_id,
         maps=[MatchMapResponse.model_validate(map_item, from_attributes=True) for map_item in view.maps],

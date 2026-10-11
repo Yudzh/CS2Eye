@@ -695,3 +695,74 @@ async def test_reparse_intentionally_deleted_source_preserves_results(
 
     assert result.error == "source_demo_deleted_reupload_required"
     assert await db_session.scalar(select(func.count(DemoPlayerStat.id))) == 1
+
+
+@pytest.mark.parametrize("upload_mode", ["separate", "reverse_batch", "existing_final_batch"])
+async def test_split_demo_rebuilds_when_first_part_arrives_late(db_session, tmp_path, upload_mode):
+    from datetime import date
+    from cs2eye.models.demo import DemoMapResult, DemoRound
+    from cs2eye.services.demo_parser_service import ParsedDemo
+    from cs2eye.services.demo_map_result_service import ParsedMapResult
+    from tests.test_demo_round_service import mr12_rounds
+
+    db_session.add_all([
+        Team(bo3_id=901, bo3_slug="spirit", name="Spirit"),
+        Team(bo3_id=902, bo3_slug="navi", name="NAVI"),
+    ])
+    final = DemoFile(tournament_name="Split Cup", tournament_slug="split-cup",
+        match_date=date(2026, 10, 3), original_filename="spirit-vs-navi-m1-p2.dem",
+        storage_path="spirit-vs-navi-m1-p2.dem", file_size_bytes=1, sha256="1" * 64)
+    db_session.add(final)
+    await db_session.commit()
+    final_id = final.id
+    service = DemoParseService(db_session, tmp_path)
+
+    class Parser:
+        parser_name = "test"
+        parser_version = "1"
+
+        def parse(self, path):
+            first = path.name.endswith("p1.dem")
+            rounds = mr12_rounds(13, 4)[:12] if first else mr12_rounds(13, 4)[12:]
+            n = len(rounds)
+            stats = [ParsedDemoPlayerStat(
+                steam_id=str(i), nickname=name, team_name=name, rounds_played=n,
+                kills=n, deaths=1, assists=1, total_damage=n * 80, adr=Decimal("80"),
+                kast_rounds=n, kast_percent=Decimal("100"), internal_rating=Decimal("7"),
+            ) for i, name in enumerate(("Spirit", "NAVI"), 1)]
+            return ParsedDemo(ParsedMapResult(raw_map_name="inferno", team_a_name="Spirit",
+                team_b_name="NAVI", team_a_score=12 if first else 13, team_b_score=0 if first else 4), stats, rounds)
+
+    service.parser = Parser()
+    if upload_mode != "reverse_batch":
+        parsed, _ = await service.parse_by_id(final_id, True)
+        assert parsed.status == "parsed"
+        incomplete = await db_session.scalar(select(DemoMapResult).where(DemoMapResult.demo_file_id == final_id))
+        assert incomplete.round_data_status != "complete"
+    first = DemoFile(tournament_name="Split Cup", tournament_slug="split-cup",
+        match_date=date(2026, 10, 3), original_filename="spirit-vs-navi-m1-p1.dem",
+        storage_path="spirit-vs-navi-m1-p1.dem", file_size_bytes=1, sha256="2" * 64)
+    db_session.add(first)
+    await db_session.commit()
+    first_id = first.id
+    if upload_mode == "separate":
+        parsed, _ = await service.parse_by_id(first_id, True)
+        assert parsed.status == "parsed"
+        assert f"split_final_rebuilt:{final_id}" in parsed.diagnostics
+    else:
+        batch = await service.parse_ids([final_id, first_id], replace_existing=False)
+        assert batch.failed_count == 0
+        assert batch.parsed_count == 2
+    # Reprocessing a predecessor must rebuild, never add the same stats twice.
+    parsed, _ = await service.parse_by_id(first_id, True)
+    assert parsed.status == "parsed"
+    result = await db_session.scalar(select(DemoMapResult).where(DemoMapResult.demo_file_id == final_id))
+    assert result.round_data_status == "complete"
+    assert result.rounds_parsed_count == 17
+    assert await db_session.scalar(select(func.count()).select_from(DemoRound).where(DemoRound.demo_file_id == final_id)) == 17
+    stats = list(await db_session.scalars(select(DemoPlayerStat).where(DemoPlayerStat.demo_file_id.in_([first_id, final_id]))))
+    assert len(stats) == 2
+    assert all(stat.demo_file_id == final_id and stat.rounds_played == 17 for stat in stats)
+    saved = await db_session.get(DemoFile, final_id, populate_existing=True)
+    assert saved.match_id is not None
+    assert await db_session.scalar(select(func.count()).select_from(DemoFile).where(DemoFile.match_id == saved.match_id)) == 1

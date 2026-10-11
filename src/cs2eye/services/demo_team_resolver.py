@@ -9,6 +9,8 @@ from cs2eye.models.team import Team
 
 
 TEAM_NAME_ALIASES = {
+    # 1win competed as The One at ESL Pro League Season 24.
+    "the one": "1win",
     "navi": "natus vincere",
     "natus vincer": "natus vincere",
     "team vitality": "vitality",

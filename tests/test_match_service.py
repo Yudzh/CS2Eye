@@ -95,7 +95,8 @@ async def test_automatic_grouping_resolves_numbered_bo3(match_db) -> None:
         assert view.match.team_a_maps_won == 2
 
 
-async def test_automatic_grouping_reuses_scheduled_match_with_reversed_demo_teams(match_db) -> None:
+@pytest.mark.parametrize("initial_status", ["scheduled", "completed"])
+async def test_automatic_grouping_reuses_scheduled_match_with_reversed_demo_teams(match_db, initial_status) -> None:
     await add_map(match_db, 1, 13, 8, filename="alpha-vs-bravo-m1.dem", reverse=True)
     await add_map(match_db, 2, 13, 9, filename="alpha-vs-bravo-m2.dem")
     async with match_db() as session:
@@ -105,7 +106,9 @@ async def test_automatic_grouping_reuses_scheduled_match_with_reversed_demo_team
         scheduled = Match(
             tournament_id=tournament.id, match_date=DAY,
             team_a_id=1, team_b_id=2, format="bo3", stage="group",
-            environment="lan", status="scheduled", resolution_status="resolved",
+            environment="lan", status=initial_status, resolution_status="resolved",
+            team_a_maps_won=2 if initial_status == "completed" else 0,
+            winner_team_id=1 if initial_status == "completed" else None,
             is_playoff=False,
         )
         session.add(scheduled)
@@ -124,7 +127,8 @@ async def test_automatic_grouping_reuses_scheduled_match_with_reversed_demo_team
         assert [item.id for item in matches] == [scheduled_id]
 
 
-async def test_automatic_grouping_reuses_unique_scheduled_match_on_adjacent_date(match_db) -> None:
+@pytest.mark.parametrize("initial_status", ["scheduled", "completed"])
+async def test_automatic_grouping_reuses_unique_scheduled_match_on_adjacent_date(match_db, initial_status) -> None:
     await add_map(match_db, 1, 13, 8, filename="alpha-vs-bravo-m1.dem", reverse=True)
     await add_map(match_db, 2, 13, 9, filename="alpha-vs-bravo-m2.dem")
     async with match_db() as session:
@@ -134,7 +138,9 @@ async def test_automatic_grouping_reuses_unique_scheduled_match_on_adjacent_date
         scheduled = Match(
             tournament_id=tournament.id, match_date=DAY - timedelta(days=1),
             team_a_id=1, team_b_id=2, format="bo3", stage="group",
-            environment="lan", status="scheduled", resolution_status="resolved",
+            environment="lan", status=initial_status, resolution_status="resolved",
+            team_a_maps_won=2 if initial_status == "completed" else 0,
+            winner_team_id=1 if initial_status == "completed" else None,
         )
         session.add(scheduled)
         await session.commit()

@@ -34,6 +34,7 @@ class TournamentTeam(Base):
     tournament_id: Mapped[int] = mapped_column(ForeignKey("tournaments.id", ondelete="CASCADE"), nullable=False, index=True)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
     seed: Mapped[int | None] = mapped_column(Integer)
+    display_name: Mapped[str | None] = mapped_column(String(160))
 
 
 class TournamentRosterOverride(Base):

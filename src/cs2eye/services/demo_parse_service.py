@@ -180,6 +180,12 @@ class DemoParseService:
     ) -> DemoParseResponse:
         results: list[DemoParseFileResult] = []
         affected: set[int] = set()
+        # Persist fragments before their final part, even when uploads arrived
+        # in reverse order. Otherwise a later fragment can overwrite stitched stats.
+        demos = sorted(demos, key=lambda demo: (
+            demo.tournament_slug, demo.match_date,
+            (_part_number(demo.original_filename) or (demo.original_filename, 0)),
+        ))
         # A rollback in parse_one expires every ORM instance attached to the
         # shared session, including demos that have not been processed yet.
         # Keep plain IDs and explicitly reload each row in async context so a
@@ -193,6 +199,18 @@ class DemoParseService:
                 DemoParseRun.demo_file_id.in_(demo_ids),
                 DemoParseRun.status == "success",
             ))).scalars())
+        rebuild_ids: set[int] = set()
+        changed_sequences = {
+            (demo.tournament_slug, demo.match_date, part[0])
+            for demo in demos
+            if demo.id not in successful_ids
+            if (part := _part_number(demo.original_filename)) is not None
+        }
+        for demo in demos:
+            part = _part_number(demo.original_filename)
+            if part and (demo.tournament_slug, demo.match_date, part[0]) in changed_sequences:
+                rebuild_ids.add(demo.id)
+        successful_ids -= rebuild_ids
         parse_semaphore = asyncio.Semaphore(self.parse_concurrency)
         # Spawn avoids inheriting asyncpg connections from the API process.
         process_pool = ProcessPoolExecutor(
@@ -250,7 +268,7 @@ class DemoParseService:
                     await progress_callback(len(results), len(demo_ids), result)
                 continue
             result, player_ids = await self.parse_one(
-                demo, replace_existing, parse_tasks=parse_tasks,
+                demo, replace_existing or demo_id in rebuild_ids, parse_tasks=parse_tasks,
             )
             results.append(result)
             affected.update(player_ids)
@@ -307,6 +325,44 @@ class DemoParseService:
                     tick=event.tick, event_kind=event.event_kind, bombsite=event.bombsite))
 
     async def parse_one(
+        self,
+        demo: DemoFile,
+        replace_existing: bool,
+        *,
+        parse_tasks: dict[int, asyncio.Task[ParsedDemo | list[ParsedDemoPlayerStat]]] | None = None,
+    ) -> tuple[DemoParseFileResult, set[int]]:
+        part = _part_number(demo.original_filename)
+        slug, match_date = demo.tournament_slug, demo.match_date
+        result, affected = await self._parse_one(demo, replace_existing, parse_tasks=parse_tasks)
+        if result.status != "parsed" or part is None:
+            return result, affected
+        siblings = list((await self.session.scalars(select(DemoFile).where(
+            DemoFile.tournament_slug == slug, DemoFile.match_date == match_date,
+        ))).all())
+        later = [
+            (candidate_part[1], candidate.id)
+            for candidate in siblings
+            if (candidate_part := _part_number(candidate.original_filename))
+            and candidate_part[0] == part[0] and candidate_part[1] > part[1]
+        ]
+        if not later:
+            return result, affected
+        final_id = max(later)[1]
+        if parse_tasks is not None and final_id in parse_tasks:
+            # The sorted batch will persist this part after all its predecessors.
+            return result, affected
+        final = await self.session.get(DemoFile, final_id, populate_existing=True)
+        rebuilt, linked = await self._parse_one(final, True)
+        affected.update(linked)
+        if rebuilt.status == "parsed":
+            result.diagnostics.append(f"split_final_rebuilt:{final_id}")
+        else:
+            result.status = "failed"
+            result.error = f"Failed to rebuild split demo #{final_id}: {rebuilt.error}"
+            result.diagnostics.append(f"split_final_rebuild_failed:{final_id}")
+        return result, affected
+
+    async def _parse_one(
         self,
         demo: DemoFile,
         replace_existing: bool,

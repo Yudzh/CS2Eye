@@ -65,6 +65,32 @@ async def test_tournament_list_and_view_are_filtered(match_db, tournament_api) -
     assert {tuple((link["from_match_id"], link["to_match_id"])) for link in view["bracket_links"]} >= {(qf1, sf)}
 
 
+async def test_team_display_name_is_scoped_to_tournament(match_db, tournament_api) -> None:
+    tournament_id, qf1, _, _, _ = await seed_bracket(match_db)
+    async with match_db() as session:
+        session.add(TournamentTeam(tournament_id=tournament_id, team_id=1, display_name="The One"))
+        other = Tournament(name="Other Cup", year=2026, environment="lan")
+        session.add(other)
+        await session.flush()
+        match = Match(tournament_id=other.id, match_date=date(2026, 8, 4), team_a_id=2,
+                      team_b_id=1, format="bo3", stage="final", status="scheduled", resolution_status="resolved")
+        session.add(match)
+        await session.commit()
+        other_match_id = match.id
+    response = await tournament_api.get(f"/api/v1/tournaments/{tournament_id}/view")
+    assert response.status_code == 200
+    view = response.json()
+    assert view["participants"][0]["name"] == "The One"
+    first = next(m for m in view["matches"] if m["id"] == qf1)
+    assert first["team_a"] == {"id": 1, "name": "The One"}
+    assert first["team_b"] == {"id": 2, "name": "Bravo"}
+    other_response = await tournament_api.get(f"/api/v1/matches/{other_match_id}")
+    assert other_response.status_code == 200
+    assert other_response.json()["team_b"] == {"id": 1, "name": "Alpha"}
+    async with match_db() as session:
+        assert (await session.get(Team, 1)).name == "Alpha"
+
+
 async def test_ambiguous_next_match_is_not_linked(match_db) -> None:
     tournament_id, qf1, _, sf, _ = await seed_bracket(match_db)
     async with match_db() as session:

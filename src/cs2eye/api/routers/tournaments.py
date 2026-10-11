@@ -60,7 +60,7 @@ async def build_view(service: TournamentViewService, tournament_id: int, session
         stages=list(dict.fromkeys(item.stage for item in matches)),
         bracket_links=[BracketLink(from_match_id=a, to_match_id=b, source=source) for a, b, source in view.links],
         problems=[TournamentProblem.model_validate(item, from_attributes=True) for item in view.problems],
-        participants=[TournamentParticipant(team_id=link.team_id, name=team.name, seed=link.seed) for link, team in participants],
+        participants=[TournamentParticipant(team_id=link.team_id, name=link.display_name or team.name, seed=link.seed) for link, team in participants],
     )
 
 @router.post("", response_model=TournamentResponse, status_code=201)

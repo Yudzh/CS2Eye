@@ -395,15 +395,26 @@ class MatchService:
         )).scalars().all())
         scheduled_ids: set[int] = set()
         if not force_standalone:
+            # Results may be entered before demos arrive. Such an empty series
+            # is still an import target; keep its official date and bracket ID.
+            import_target = or_(
+                Match.status == "scheduled",
+                and_(
+                    Match.status == "completed",
+                    ~select(DemoFile.id).where(DemoFile.match_id == Match.id).exists(),
+                ),
+            )
             scheduled_ids = set((await self.session.scalars(select(Match.id).where(
                 Match.tournament_id == tournament.id,
                 Match.match_date == demo.match_date,
-                Match.status == "scheduled",
+                import_target,
                 or_(
                     and_(Match.team_a_id == pair[0], Match.team_b_id == pair[1]),
                     and_(Match.team_a_id == pair[1], Match.team_b_id == pair[0]),
                 ),
             ))).all())
+            if len(scheduled_ids) > 1:
+                scheduled_ids.clear()
             if not scheduled_ids:
                 adjacent_ids = list((await self.session.scalars(select(Match.id).where(
                     Match.tournament_id == tournament.id,
@@ -411,7 +422,7 @@ class MatchService:
                         demo.match_date - timedelta(days=1),
                         demo.match_date + timedelta(days=1),
                     ),
-                    Match.status == "scheduled",
+                    import_target,
                     or_(
                         and_(Match.team_a_id == pair[0], Match.team_b_id == pair[1]),
                         and_(Match.team_a_id == pair[1], Match.team_b_id == pair[0]),

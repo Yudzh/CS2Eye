@@ -88,6 +88,10 @@ async def set_current_roster(
         old.is_current = False
         if old.active_to is None and active_from is not None:
             old.active_to = active_from
+    # Release the unique current-roster slot before activating another row.
+    # A single flush may update an older roster first, violating the index.
+    if previous:
+        await session.flush()
     roster.is_current = True
     roster.active_from = roster.active_from or active_from
     if roster.active_from == active_from and active_from is not None:
