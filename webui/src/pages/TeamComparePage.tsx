@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   capturePredictionHistory,
+  getForecast,
   compareTeamMaps,
   compareTeams,
   compareTeamVeto,
@@ -1097,6 +1098,7 @@ function WinProbabilityBlock({
           {(prediction.confidence * 100).toFixed(0)}%
         </span>
       </div>
+      {prediction.manual_adjustment && <div className="notice"><b>С поправкой аналитика</b><p>Исходная модель: {prediction.team_a.name} {(prediction.manual_adjustment.base_team_a_probability*100).toFixed(1)}% / {prediction.team_b.name} {((1-prediction.manual_adjustment.base_team_a_probability)*100).toFixed(1)}%. Поправка к первой команде: {prediction.manual_adjustment.impact_team_a_pp>0?"+":""}{prediction.manual_adjustment.impact_team_a_pp.toFixed(1)} п.п.</p>{prediction.manual_adjustment.factors.map(f=><p key={f.id}>{f.text}</p>)}<small>Разбор признаков ниже относится к исходной модели.</small></div>}
       <div className="win-probability__hero">
         <div>
           <strong>{prediction.team_a.name ?? "Команда A"}</strong>
@@ -1196,6 +1198,9 @@ function WinProbabilityBlock({
 }
 
 export function TeamComparePage() {
+  const requestGeneration = useRef(0);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [forecastError, setForecastError] = useState<string|null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamA, setTeamA] = useState(0);
   const [teamB, setTeamB] = useState(0);
@@ -1251,7 +1256,12 @@ export function TeamComparePage() {
       series: number;
     },
   ) {
+    const generation = ++requestGeneration.current;
+    const current = () => requestGeneration.current === generation;
     setLoadingComparison(true);
+    setComparison(null); setMatchup(null); setWinProbability(null); setPreVetoProbability(null);
+    setMapPool(null); setVeto(null); setCalculatedVeto(null); setHEKillByMap([]);
+    setForecastLoading(true); setForecastError(null);
     setMapPoolLevel("current_roster");
     setMapPoolError(null);
     setError(null);
@@ -1286,70 +1296,39 @@ export function TeamComparePage() {
           window.history.replaceState(null, "", `/compare?${query.toString()}`);
         } else {
           setSeriesTournament(selectedMatch.tournament);
-          await capturePredictionHistory(
-            series,
-            selectedMatch.status === "completed",
-          );
+          try {
+            await capturePredictionHistory(series);
+          } catch (value) {
+            if (current()) {setError(value instanceof Error ? value.message : "Не удалось сохранить прогноз."); setLoadingComparison(false);}
+            return;
+          }
+          if (current()) window.location.href = `/matches/${series}`;
+          return;
         }
       } else {
         setSeriesTournament(null);
       }
-      const [
-        organization,
-        maps,
-        vetoData,
-        calculated,
-        matchupData,
-        probabilityData,
-        preProbabilityData,
-        heKillData,
-        restriction,
-      ] = await Promise.all([
-        compareTeams(a, b),
-        compareTeamMaps(a, b),
-        compareTeamVeto(a, b),
-        getCalculatedVeto(a, b),
-        getMatchupScore(
-          a,
-          b,
-          fmt,
-          mode,
-          series || undefined,
-        ),
-        getWinProbability(a, b, fmt, mode, series || undefined),
-        mode === "post_veto"
-          ? getWinProbability(a, b, fmt, "pre_veto", series || undefined)
-          : Promise.resolve(null),
-        getHEKillByMap(a, b, series || undefined),
-        getBettingRestrictions(a, b, series || undefined),
+      if (!current()) return;
+      // Render the basic comparison before starting CPU-heavy auxiliary work.
+      const organization = await compareTeams(a,b);
+      if (!current()) return;
+      setComparison(organization); setLoadingComparison(false);
+      // Each additional section appears as soon as its own request finishes.
+      const showError = (value: unknown) => {if (current()) setError(value instanceof Error ? value.message : "Не удалось загрузить часть сравнения.");};
+      await Promise.allSettled([
+        compareTeamMaps(a,b).then(value=>{if(current())setMapPool(value);}).catch(showError),
+        compareTeamVeto(a,b).then(value=>{if(current())setVeto(value);}).catch(showError),
+        getCalculatedVeto(a,b).then(value=>{if(current())setCalculatedVeto(value);}).catch(showError),
+        getForecast(a,b,fmt,mode,series||undefined).then(value=>{if(current()){setMatchup(value.matchup);setWinProbability(value.probability);}}).catch(value=>{if(current())setForecastError(value instanceof Error?value.message:"Не удалось рассчитать прогноз.");}).finally(()=>{if(current())setForecastLoading(false);}),
+        mode==="post_veto" ? getWinProbability(a,b,fmt,"pre_veto",series||undefined).then(value=>{if(current())setPreVetoProbability(value);}).catch(showError) : Promise.resolve(),
+        getHEKillByMap(a,b,series||undefined).then(value=>{if(current())setHEKillByMap(value);}).catch(showError),
+        getBettingRestrictions(a,b,series||undefined).then(value=>{if(current())setBettingRestrictions(value);}).catch(showError),
+        getTeamH2H(a,b).then(value=>{if(current())setH2H(value);}).catch(value=>{if(current())setH2HError(value instanceof Error?value.message:"Не удалось загрузить личные встречи.");}).finally(()=>{if(current())setH2HLoading(false);}),
       ]);
-      setComparison(organization);
-      setMapPool(maps);
-      setVeto(vetoData);
-      setCalculatedVeto(calculated);
-      setMatchup(matchupData);
-      setWinProbability(probabilityData);
-      setPreVetoProbability(preProbabilityData);
-      setHEKillByMap(heKillData);
-      setBettingRestrictions(restriction);
     } catch (value: unknown) {
-      setComparison(null);
-      setError(
-        value instanceof Error ? value.message : "Не удалось сравнить команды.",
-      );
+      if(current()) setError(value instanceof Error ? value.message : "Не удалось сравнить команды.");
     } finally {
-      setLoadingComparison(false);
-    }
-    try {
-      setH2H(await getTeamH2H(a, b));
-    } catch (value: unknown) {
-      setH2HError(
-        value instanceof Error
-          ? value.message
-          : "Не удалось загрузить личные встречи.",
-      );
-    } finally {
-      setH2HLoading(false);
+      if(current()){setLoadingComparison(false);setForecastLoading(false);setH2HLoading(false);}
     }
   }
 
@@ -1626,6 +1605,8 @@ export function TeamComparePage() {
             teamAId={comparison.team_a.id}
             teamBId={comparison.team_b.id}
           />
+          {forecastLoading && <div className="empty-state" role="status">Рассчитываю прогноз… Остальные разделы уже доступны.</div>}
+          {forecastError && <div className="empty-state empty-state--error">{forecastError}</div>}
           {winProbability && <SourcePicksBlock prediction={winProbability} />}
           {winProbability && (
             <WinProbabilityBlock

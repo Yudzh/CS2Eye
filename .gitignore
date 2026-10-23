@@ -12,3 +12,7 @@ webui/dist/
 
 storage/
 uploads/
+
+.env.prod
+deploy/secrets/
+backups/

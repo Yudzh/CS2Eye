@@ -119,7 +119,7 @@ def aggregate_maps_v3(team_a_id:int,team_b_id:int,weights:dict[str,tuple[float,s
 class MatchupService:
     def __init__(self,session:AsyncSession):self.session=session
 
-    async def calculate(self,team_a_id:int,team_b_id:int,format:str="bo3",analysis_mode:str="pre_veto",as_of:date|None=None,series_id:int|None=None)->dict:
+    async def calculate(self,team_a_id:int,team_b_id:int,format:str="bo3",analysis_mode:str="pre_veto",as_of:date|None=None,series_id:int|None=None,*,tournament_id:int|None=None)->dict:
         if format not in {"bo1","bo3","bo5"}:raise ValueError("format must be bo1, bo3 or bo5")
         if analysis_mode not in {"pre_veto","post_veto"}:raise ValueError("analysis_mode must be pre_veto or post_veto")
         if team_a_id==team_b_id:raise ValueError("Нужны две разные команды.")
@@ -128,10 +128,10 @@ class MatchupService:
         # request they are deliberately disabled instead of leaking future information.
         if historical:
             from cs2eye.services.analytics_as_of_service import AnalyticsAsOfService
-            return await AnalyticsAsOfService(self.session).calculate(team_a_id,team_b_id,as_of,format,analysis_mode,series_id)
-        return await self._calculate_v3(team_a_id,team_b_id,format,analysis_mode,as_of,series_id,ACTIVE_MATCHUP_CONFIG)
+            return await AnalyticsAsOfService(self.session).calculate(team_a_id,team_b_id,as_of,format,analysis_mode,series_id,**({"tournament_id":tournament_id} if tournament_id is not None else {}))
+        return await self._calculate_v3(team_a_id,team_b_id,format,analysis_mode,as_of,series_id,ACTIVE_MATCHUP_CONFIG,tournament_id=tournament_id)
 
-    async def _calculate_v3(self,team_a_id:int,team_b_id:int,format:str,analysis_mode:str,as_of:date,series_id:int|None,config)->dict:
+    async def _calculate_v3(self,team_a_id:int,team_b_id:int,format:str,analysis_mode:str,as_of:date,series_id:int|None,config,*,tournament_id:int|None=None)->dict:
         from cs2eye.models.team import Team
         team_a=await self.session.get(Team,team_a_id);team_b=await self.session.get(Team,team_b_id)
         if not team_a or not team_b:raise ValueError("Команда не найдена.")
@@ -149,11 +149,11 @@ class MatchupService:
         maps_v3={}
         for team_id in (team_a_id,team_b_id):
             for map_name in weights:
-                maps_v3[(team_id,map_name)]=await map_service.calculate(team_id,map_name)
+                maps_v3[(team_id,map_name)]=await map_service.calculate(team_id,map_name,as_of=as_of if series_id is not None else None,match_id=series_id,tournament_id=tournament_id)
         map_score,maps,tactical=aggregate_maps_v3(team_a_id,team_b_id,weights,maps_v3)
         strength_service=TeamStrengthV3Service(self.session)
-        strength_a=await strength_service.calculate(team_a_id,match_id=series_id)
-        strength_b=await strength_service.calculate(team_b_id,match_id=series_id)
+        strength_a=await strength_service.calculate(team_a_id,match_id=series_id,tournament_id=tournament_id)
+        strength_b=await strength_service.calculate(team_b_id,match_id=series_id,tournament_id=tournament_id)
         strength_score=cross(strength_a["score"],strength_b["score"])
         strength_conf=min(strength_a["reliability"],strength_b["reliability"])/100
         h2h=await TeamH2HService(self.session,today=as_of).compare(team_a_id,team_b_id,recent_limit=20)

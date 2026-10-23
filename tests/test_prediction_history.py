@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -34,12 +34,16 @@ async def history_db():
 async def test_capture_saves_all_three_snapshots_and_never_recalculates(history_db, monkeypatch) -> None:
     import cs2eye.services.prediction_history_service as module
     state = {"strength": (60.0, 40.0), "matchup": (45.0, 55.0), "ml": (.61, .39)}
+    calculated_matchups = []
     async def compare(self, a, b):
         return SimpleNamespace(team_a=SimpleNamespace(strength=SimpleNamespace(team_strength_score=state["strength"][0])), team_b=SimpleNamespace(strength=SimpleNamespace(team_strength_score=state["strength"][1])))
     async def matchup(self, *args):
         winner = 1 if state["matchup"][0] > 53 else 2 if state["matchup"][0] < 47 else None
-        return {"model_version":"matchup_v1","team_a": {"score": state["matchup"][0]}, "team_b": {"score": state["matchup"][1]}, "reliability":.8,"advantage":{"team_id":winner},"factors":[{"key":"map_veto","label":"Карты и вето","score":60,"weight":.3,"effective_weight":.3,"impact":3,"confidence":.9,"available":True}]}
+        result = {"model_version":"matchup_v1","team_a": {"score": state["matchup"][0]}, "team_b": {"score": state["matchup"][1]}, "reliability":.8,"advantage":{"team_id":winner},"factors":[{"key":"map_veto","label":"Карты и вето","score":60,"weight":.3,"effective_weight":.3,"impact":3,"confidence":.9,"available":True}]}
+        calculated_matchups.append(result)
+        return result
     async def ml(*args, **kwargs):
+        assert kwargs["precomputed_matchup"] is calculated_matchups[0]
         return {"prediction_status": "available", "model_version":"ml_v1", "feature_schema_version":"features_v2", "team_a": {"probability": state["ml"][0]}, "team_b": {"probability": state["ml"][1]}}
     monkeypatch.setattr(module.TeamComparisonService, "compare", compare)
     monkeypatch.setattr(module.MatchupService, "calculate", matchup)
@@ -47,7 +51,9 @@ async def test_capture_saves_all_three_snapshots_and_never_recalculates(history_
     as_of = datetime(2026, 8, 31, 10, tzinfo=UTC)
     async with history_db() as session:
         service = PredictionHistoryService(session)
-        first = await service.capture(10, as_of=as_of)
+        match = await session.get(Match, 10)
+        match.starts_at = datetime.now(UTC) + timedelta(hours=1)
+        first = await service.capture(10)
         await session.commit()
         assert (float(first.team_strength_a), float(first.team_strength_b), first.team_strength_winner_id) == (60, 40, 1)
         assert (float(first.matchup_a), float(first.matchup_b), first.matchup_winner_id) == (45, 55, 2)
@@ -63,6 +69,7 @@ async def test_capture_saves_all_three_snapshots_and_never_recalculates(history_
         assert (float(second.matchup_a), second.matchup_winner_id) == (45, 2)
         assert second.matchup_factors["factors"]["map_veto"]["contribution"] == 2.4
         assert (float(second.ml_a_probability), second.ml_winner_id) == (.61, 1)
+        assert len(calculated_matchups) == 1
 
 
 async def test_history_result_consensus_accuracy_missing_ml_pending_and_filters(history_db) -> None:
@@ -240,3 +247,86 @@ async def test_official_accuracy_uses_only_two_pre_match_among_ten_retrospective
         assert result["statistics"]["snapshot_counts"] == {
             "pre_match": 2, "retrospective": 10, "completed_pre_match": 2,
         }
+
+
+async def test_capture_rejects_started_past_date_and_backdating(history_db):
+    async with history_db() as session:
+        service = PredictionHistoryService(session)
+        match = await session.get(Match, 10)
+        match.starts_at = datetime.now(UTC) - timedelta(seconds=1)
+        with pytest.raises(ValueError, match="уже начался"):
+            await service.capture(10)
+        match.starts_at = None
+        match.match_date = datetime.now(UTC).date() - timedelta(days=1)
+        with pytest.raises(ValueError, match="Дата матча уже прошла"):
+            await service.capture(10)
+        match.starts_at = datetime.now(UTC) + timedelta(hours=1)
+        with pytest.raises(ValueError, match="устанавливает сервер"):
+            await service.capture(10, as_of=datetime(2020, 1, 1, tzinfo=UTC))
+
+
+async def test_monitor_captures_all_future_known_matches_and_excludes_saved(history_db):
+    from cs2eye.services.prediction_capture_monitor import due_query
+    now = datetime.now(UTC)
+    async with history_db() as session:
+        match = await session.get(Match, 10)
+        match.starts_at = now + timedelta(minutes=20)
+        await session.flush()
+        assert list((await session.scalars(due_query(now))).all()) == [10]
+        match.starts_at = now + timedelta(minutes=31)
+        await session.flush()
+        assert list((await session.scalars(due_query(now))).all()) == [10]
+        match.starts_at = now + timedelta(days=1)
+        await session.flush()
+        assert list((await session.scalars(due_query(now))).all()) == [10]
+        match.starts_at = now + timedelta(days=30)
+        await session.flush()
+        assert list((await session.scalars(due_query(now))).all()) == [10]
+        match.starts_at = now
+        await session.flush()
+        assert list((await session.scalars(due_query(now))).all()) == []
+        match.starts_at = None
+        match.match_date = now.date() + timedelta(days=30)
+        await session.flush()
+        assert list((await session.scalars(due_query(now))).all()) == [10]
+        match.match_date = now.date()
+        await session.flush()
+        assert list((await session.scalars(due_query(now))).all()) == [10]
+        match.match_date = now.date() - timedelta(days=1)
+        await session.flush()
+        assert list((await session.scalars(due_query(now))).all()) == []
+        match.match_date = now.date()
+        session.add(PredictionHistorySnapshot(match_id=10, tournament_id=1, as_of=now,
+            source="pre_match", team_a_id=1, team_b_id=2,
+            team_strength_a=60, team_strength_b=40, matchup_a=55, matchup_b=45))
+        await session.commit()
+    async with history_db() as session:
+        assert list((await session.scalars(due_query(now))).all()) == []
+
+
+async def test_capture_preserves_displayed_forecast_without_recalculating(history_db, monkeypatch):
+    import cs2eye.services.prediction_history_service as module
+    from unittest.mock import AsyncMock
+    compare = AsyncMock(return_value=SimpleNamespace(
+        team_a=SimpleNamespace(strength=SimpleNamespace(team_strength_score=60)),
+        team_b=SimpleNamespace(strength=SimpleNamespace(team_strength_score=40))))
+    monkeypatch.setattr(module.TeamComparisonService, 'compare', compare)
+    calculate = AsyncMock(side_effect=AssertionError('Must use displayed matchup'))
+    predict = AsyncMock(side_effect=AssertionError('Must use displayed probability'))
+    monkeypatch.setattr(module.MatchupService, 'calculate', calculate)
+    monkeypatch.setattr(module, 'predict_win_probability', predict)
+    async with history_db() as session:
+        match = await session.get(Match, 10)
+        match.starts_at = None
+        match.match_date = datetime.now(UTC).date()
+        row = await PredictionHistoryService(session).capture(10,
+            precomputed_matchup={'model_version': 'displayed', 'team_a': {'score': 55},
+                                'team_b': {'score': 45}},
+            precomputed_ml={'prediction_status': 'available', 'model_version': 'displayed-ml',
+                            'team_a': {'probability': .72}, 'team_b': {'probability': .28}})
+        await session.commit()
+        assert float(row.ml_a_probability) == .72
+        assert row.ml_model_version == 'displayed-ml'
+        assert float(row.matchup_a) == 55
+        calculate.assert_not_awaited()
+        predict.assert_not_awaited()

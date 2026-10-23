@@ -330,3 +330,44 @@ async def test_global_match_list_hides_empty_bracket_placeholders(match_db, matc
         await session.commit()
     payload = (await match_api.get("/api/v1/matches")).json()
     assert payload == {"total": 0, "items": []}
+
+
+@pytest.mark.parametrize("initial_status", ["scheduled", "completed"])
+async def test_manual_grouping_reuses_bracket_slot(match_db, initial_status) -> None:
+    await add_map(match_db, 1, 13, 8, reverse=True)
+    await add_map(match_db, 2, 13, 9)
+    async with match_db() as session:
+        tournament = Tournament(name="IEM", year=DAY.year, environment="lan")
+        session.add(tournament)
+        await session.flush()
+        slot = Match(tournament_id=tournament.id, match_date=DAY,
+            team_a_id=1, team_b_id=2, format="bo3", stage="final",
+            environment="lan", status=initial_status, resolution_status="resolved",
+            round_label="3rd place", bracket_section="lower", bracket_position=2)
+        session.add(slot)
+        await session.flush()
+        slot_id = slot.id
+        view = await MatchService(session).create_manual([1, 2], format="bo3")
+        assert view.match.id == slot_id
+        assert view.match.round_label == "3rd place"
+        assert view.match.bracket_section == "lower"
+        assert view.match.stage == "final"
+        assert view.match.status == "completed"
+        assert (view.match.team_a_maps_won, view.match.team_b_maps_won) == (2, 0)
+        assert list(await session.scalars(select(Match.id))) == [slot_id]
+
+
+async def test_manual_grouping_rejects_ambiguous_schedule(match_db) -> None:
+    await add_map(match_db, 1, 13, 8)
+    async with match_db() as session:
+        tournament = Tournament(name="IEM", year=DAY.year, environment="lan")
+        session.add(tournament)
+        await session.flush()
+        for _ in range(2):
+            await MatchService(session).create_scheduled(tournament_id=tournament.id,
+                match_date=DAY, team_a_id=1, team_b_id=2, format="bo3",
+                stage="group", environment="lan")
+        with pytest.raises(MatchValidationError, match="несколько матчей"):
+            await MatchService(session).create_manual([1], format="bo3")
+        assert len(list(await session.scalars(select(Match.id)))) == 2
+        assert (await session.get(DemoFile, 1)).match_id is None

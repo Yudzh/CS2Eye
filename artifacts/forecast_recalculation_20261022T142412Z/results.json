@@ -1,0 +1,74 @@
+[
+  {
+    "match_id": 390,
+    "team_a": "Natus Vincere",
+    "team_b": "Falcons",
+    "probability_a": 0.25381818942836226,
+    "probability_b": 0.7461818105716378,
+    "winner": "Falcons",
+    "as_of": "2026-10-22 14:24:24.148236+00:00"
+  },
+  {
+    "match_id": 391,
+    "team_a": "FURIA",
+    "team_b": "FaZe",
+    "probability_a": 0.8839323337451763,
+    "probability_b": 0.11606766625482368,
+    "winner": "FURIA",
+    "as_of": "2026-10-22 14:24:32.255559+00:00"
+  },
+  {
+    "match_id": 392,
+    "team_a": "HEROIC",
+    "team_b": "B8",
+    "probability_a": 0.21518303956167695,
+    "probability_b": 0.784816960438323,
+    "winner": "B8",
+    "as_of": "2026-10-22 14:24:39.726958+00:00"
+  },
+  {
+    "match_id": 393,
+    "team_a": "Legacy",
+    "team_b": "The MongolZ",
+    "probability_a": 0.88396165839682,
+    "probability_b": 0.11603834160318005,
+    "winner": "Legacy",
+    "as_of": "2026-10-22 14:24:47.656444+00:00"
+  },
+  {
+    "match_id": 402,
+    "team_a": "G2",
+    "team_b": "PARIVISION",
+    "probability_a": 0.7125009148796321,
+    "probability_b": 0.2874990851203679,
+    "winner": "G2",
+    "as_of": "2026-10-22 14:24:55.646394+00:00"
+  },
+  {
+    "match_id": 403,
+    "team_a": "BetBoom",
+    "team_b": "9z",
+    "probability_a": 0.31131963835429705,
+    "probability_b": 0.6886803616457029,
+    "winner": "9z",
+    "as_of": "2026-10-22 14:25:04.031608+00:00"
+  },
+  {
+    "match_id": 404,
+    "team_a": "Aurora",
+    "team_b": "Liquid",
+    "probability_a": 0.7941177550883831,
+    "probability_b": 0.20588224491161689,
+    "winner": "Aurora",
+    "as_of": "2026-10-22 14:25:12.006925+00:00"
+  },
+  {
+    "match_id": 405,
+    "team_a": "MOUZ",
+    "team_b": "TYLOO",
+    "probability_a": 0.9903812517476174,
+    "probability_b": 0.009618748252382625,
+    "winner": "MOUZ",
+    "as_of": "2026-10-22 14:25:20.354308+00:00"
+  }
+]

@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from cs2eye.api.schemas.analyst_factors import AnalystFactorCreate, AnalystFactorResponse, AnalystFactorUpdate, AnalystPerson
 from cs2eye.db.session import get_db_session
+from cs2eye.models.match import Match
 from cs2eye.models.team import AnalystFactor, Player, Team, TeamParticipantMembership
 from cs2eye.services.analyst_context_service import AnalystContextService, factor_status
 from cs2eye.services.demo_map_result_service import STANDARD_MAPS
@@ -25,7 +26,7 @@ async def load_factor(session: AsyncSession, factor_id: int) -> AnalystFactor:
 async def response(session: AsyncSession, factor: AnalystFactor, as_of: datetime | None = None) -> AnalystFactorResponse:
     team = await session.get(Team, factor.team_id)
     return AnalystFactorResponse(id=factor.id, team_id=factor.team_id, team_name=team.name,
-        factor_type=factor.factor_type, text=factor.text, category=factor.category, map_name=factor.map_name,
+        factor_type=factor.factor_type, probability_bonus_pp=factor.probability_bonus_pp, match_id=factor.match_id, text=factor.text, category=factor.category, map_name=factor.map_name,
         environment=factor.environment, players=[AnalystPerson(id=p.id, nickname=p.nickname) for p in factor.players],
         coach=AnalystPerson(id=factor.coach.id, nickname=factor.coach.nickname) if factor.coach else None,
         valid_from=factor.valid_from, valid_until=factor.valid_until, is_active=factor.is_active,
@@ -52,9 +53,17 @@ def validate_map(map_name: str | None) -> str | None:
     return normalized
 
 
+async def validate_match(session: AsyncSession, team_id: int, match_id: int | None):
+    if match_id is not None:
+        match = await session.get(Match, match_id)
+        if match is None or team_id not in {match.team_a_id, match.team_b_id}:
+            raise HTTPException(422, "Матч должен существовать и включать эту команду.")
+
+
 @router.post("", response_model=AnalystFactorResponse, status_code=201)
 async def create_factor(payload: AnalystFactorCreate, session: AsyncSession = Depends(get_db_session)):
     if await session.get(Team, payload.team_id) is None: raise HTTPException(404, "Команда не найдена.")
+    await validate_match(session, payload.team_id, payload.match_id)
     players, coach = await validate_people(session, payload.team_id, payload.player_ids, payload.coach_id)
     data = payload.model_dump(exclude={"player_ids", "coach_id", "map_name"})
     factor = AnalystFactor(**data, map_name=validate_map(payload.map_name), coach_id=coach.id if coach else None, players=players)
@@ -84,6 +93,9 @@ async def update_factor(factor_id: int, payload: AnalystFactorUpdate, session: A
     player_ids = payload.player_ids if "player_ids" in fields else [p.id for p in factor.players]
     coach_id = payload.coach_id if "coach_id" in fields else factor.coach_id
     players, _ = await validate_people(session, factor.team_id, player_ids or [], coach_id)
+    await validate_match(session, factor.team_id, payload.match_id if "match_id" in fields else factor.match_id)
+    if "probability_bonus_pp" in fields and payload.probability_bonus_pp is None:
+        raise HTTPException(422, "Поправка не может быть null.")
     for name in fields - {"player_ids", "coach_id", "map_name"}: setattr(factor, name, getattr(payload, name))
     if "map_name" in fields: factor.map_name = validate_map(payload.map_name)
     if "coach_id" in fields: factor.coach_id = coach_id

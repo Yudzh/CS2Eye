@@ -4,6 +4,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand, MenuButtonCommands
 
 from cs2eye.bot.api_client import CS2EyeAPIClient
 from cs2eye.bot.handlers import router
@@ -26,6 +27,9 @@ async def run() -> None:
         generation_timeout=settings.cs2eye_api_generation_timeout_seconds,
     ) as api_client:
         try:
+            await bot.set_my_commands([BotCommand(command="start", description="Главное меню"),
+                                       BotCommand(command="restart", description="Начать заново и очистить ответы")])
+            await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
             await dispatcher.start_polling(
                 bot, api_client=api_client, navigation_state=NavigationState(),
             )

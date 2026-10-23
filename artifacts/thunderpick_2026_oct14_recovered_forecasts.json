@@ -1,0 +1,109 @@
+{
+  "source": "historical_reconstruction",
+  "calculated_at": "2026-10-15T04:36:24.759982+00:00",
+  "policy": "strictly_before_match_date; original pre_match snapshot preserved; not original viewed values",
+  "rows": [
+    {
+      "match_id": 377,
+      "team_a": "Falcons",
+      "team_b": "Ninjas in Pyjamas",
+      "model_version": "v12",
+      "team_a_probability": 0.9049681605211479,
+      "team_b_probability": 0.09503183947885208,
+      "features": {
+        "matchup_score_centered": 0.0031999999999999316,
+        "raw_matchup_centered": 0.0040000000000000565,
+        "matchup_reliability_advantage": 0.002611199999999944,
+        "team_strength_difference": 0.015461599999999987,
+        "map_pool_advantage": -0.0012528999999999997,
+        "tactical_advantage": -0.0003365999999999995,
+        "h2h_advantage": 0.0,
+        "ranking_advantage": 0.8333333333333334,
+        "tournament_form_advantage": 0.0,
+        "recent_60d_adjusted_form_advantage": 0.0,
+        "strength_of_schedule_advantage": 0.0,
+        "performance_vs_expectation_advantage": 0.0,
+        "effective_coverage": 0.0801
+      },
+      "basis": {
+        "analysis_mode": "pre_veto",
+        "veto": "calculated_veto",
+        "matchup_score": 50.16
+      },
+      "historical_policy": "strict_rolling_before_date",
+      "limitations": [
+        "map_veto playability selection (which maps matter) still comes from historical win-rate/ban-rate tendency, not a V3-native veto engine.",
+        "Historical Leadership excluded: role tenure snapshots are not reliable."
+      ]
+    },
+    {
+      "match_id": 378,
+      "team_a": "Legacy",
+      "team_b": "PARIVISION",
+      "model_version": "v12",
+      "team_a_probability": 0.6210239785269587,
+      "team_b_probability": 0.3789760214730413,
+      "features": {
+        "matchup_score_centered": -0.022199999999999987,
+        "raw_matchup_centered": -0.027999999999999973,
+        "matchup_reliability_advantage": -0.01766897999999999,
+        "team_strength_difference": 0.10757280000000007,
+        "map_pool_advantage": 0.0005535000000000064,
+        "tactical_advantage": 0.008548500000000002,
+        "h2h_advantage": 0.0,
+        "ranking_advantage": 0.1,
+        "tournament_form_advantage": 0.0,
+        "recent_60d_adjusted_form_advantage": -0.18699999999999994,
+        "strength_of_schedule_advantage": -0.26130000000000003,
+        "performance_vs_expectation_advantage": -0.5988,
+        "effective_coverage": 0.4215
+      },
+      "basis": {
+        "analysis_mode": "pre_veto",
+        "veto": "calculated_veto",
+        "matchup_score": 48.89
+      },
+      "historical_policy": "strict_rolling_before_date",
+      "limitations": [
+        "map_veto playability selection (which maps matter) still comes from historical win-rate/ban-rate tendency, not a V3-native veto engine.",
+        "Historical Leadership excluded: role tenure snapshots are not reliable."
+      ],
+      "superseded_by_original_context": 78,
+      "original_team_a_probability": 0.5979812958592735
+    },
+    {
+      "match_id": 379,
+      "team_a": "FURIA",
+      "team_b": "BetBoom",
+      "model_version": "v12",
+      "team_a_probability": 0.8709409450208296,
+      "team_b_probability": 0.12905905497917036,
+      "features": {
+        "matchup_score_centered": 0.03879999999999995,
+        "raw_matchup_centered": 0.044399999999999974,
+        "matchup_reliability_advantage": 0.03381419999999996,
+        "team_strength_difference": 0.09313279999999996,
+        "map_pool_advantage": 0.0064069199999999965,
+        "tactical_advantage": 0.009292919999999996,
+        "h2h_advantage": 0.13336,
+        "ranking_advantage": 0.26666666666666666,
+        "tournament_form_advantage": 0.0,
+        "recent_60d_adjusted_form_advantage": 0.1375,
+        "strength_of_schedule_advantage": 0.09650000000000006,
+        "performance_vs_expectation_advantage": 0.11070000000000003,
+        "effective_coverage": 0.3575
+      },
+      "basis": {
+        "analysis_mode": "pre_veto",
+        "veto": "calculated_veto",
+        "matchup_score": 51.94
+      },
+      "historical_policy": "strict_rolling_before_date",
+      "limitations": [
+        "map_veto playability selection (which maps matter) still comes from historical win-rate/ban-rate tendency, not a V3-native veto engine.",
+        "Historical Leadership excluded: role tenure snapshots are not reliable."
+      ]
+    }
+  ],
+  "notes": "Match 378 reconstruction superseded by original context 78; original saved in prediction_history_snapshots."
+}

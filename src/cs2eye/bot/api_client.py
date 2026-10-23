@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from time import monotonic
 from typing import Any
 
@@ -24,11 +24,13 @@ class CS2EyeAPIClient:
         *,
         timeout: float = 15.0,
         generation_timeout: float = 330.0,
+        analytics_timeout: float = 120.0,
         client: httpx.AsyncClient | None = None,
         tournaments_ttl: float = 60.0,
         tournament_matches_ttl: float = 45.0,
     ) -> None:
         self._generation_timeout = generation_timeout
+        self._analytics_timeout = analytics_timeout
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             base_url=base_url.rstrip("/"), timeout=timeout,
@@ -117,6 +119,30 @@ class CS2EyeAPIClient:
             raise CS2EyeAPIError("Invalid match response")
         return payload
 
+    async def get_saved_match_forecasts(self, tournament_id: int) -> list[dict[str, Any]]:
+        payload = await self._get("/api/v1/prediction-history", params={"tournament_id": tournament_id, "source": "pre_match"})
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            raise CS2EyeAPIError("Invalid saved forecasts response")
+        items = payload["items"]
+        results = await self._get("/api/v1/prediction-history/results")
+        for row in results.get("items", []):
+            if row.get("source") != "retrospective" or row.get("tournament_id") != tournament_id or row.get("model_version") != "v12":
+                continue
+            items.append({"match_id": row["match_id"], "source": "retrospective",
+                "versions": {"ml": row["model_version"]}, "created_at": row["captured_at"],
+                "manual_adjustment": row.get("manual_adjustment"),
+                "team_a": row["team_a"], "team_b": row["team_b"],
+                "ml": {"predicted_winner": row["predicted_winner"], "team_a_value": row["team_a_probability"],
+                       "team_b_value": 1-row["team_a_probability"], "correct": row["correct"]}})
+        return items
+
+    async def get_match_summary(self, match_id: int) -> dict[str, Any]:
+        payload = await self._request("GET", "/api/v1/analysis/match-card-context",
+            params={"match_id": match_id}, timeout=self._analytics_timeout)
+        if not isinstance(payload, dict):
+            raise CS2EyeAPIError("Invalid match card response")
+        return payload
+
     async def get_match_analysis_context(
         self,
         *,
@@ -135,7 +161,7 @@ class CS2EyeAPIClient:
         }
         if tournament_id is not None:
             params["tournament_id"] = tournament_id
-        payload = await self._get("/api/v1/analysis/match-analysis-context", params=params)
+        payload = await self._request("GET", "/api/v1/analysis/match-analysis-context", params=params, timeout=self._analytics_timeout)
         if not isinstance(payload, dict):
             raise CS2EyeAPIError("Invalid match analysis context response")
         return payload
@@ -175,7 +201,7 @@ class CS2EyeAPIClient:
         body: dict[str, Any] = {
             "team_a_id": team_a_id, "team_b_id": team_b_id,
             "as_of": as_of.isoformat(), "match_id": match_id,
-            "analysis_mode": "pre_match", "language": "ru",
+            "analysis_mode": "pre_match", "language": "ru", "reuse_existing": True,
         }
         if tournament_id is not None:
             body["tournament_id"] = tournament_id
@@ -203,7 +229,7 @@ class CS2EyeAPIClient:
     async def regenerate_llm_analysis(self, analysis_run_id: int) -> dict[str, Any]:
         return self._stored_analysis(await self._post(
             f"/api/v1/analysis/llm-match-analysis/{analysis_run_id}/regenerate",
-            json={"reuse_context": True, "reuse_explanation_plan": False},
+            json={"reuse_context": False, "reuse_explanation_plan": False, "as_of": datetime.now(UTC).isoformat()},
             timeout=self._generation_timeout,
         ))
 

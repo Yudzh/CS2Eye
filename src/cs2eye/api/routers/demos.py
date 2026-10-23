@@ -128,7 +128,7 @@ async def upload_demos(
     event_type: Literal["online", "lan"] = Form(...),
     match_date: date = Form(...),
     parse_after_upload: bool = Form(False),
-    delete_after_successful_parse: bool = Form(False),
+    delete_after_successful_parse: bool = Form(True),
     files: list[UploadFile] = File(...),
     session: AsyncSession = Depends(get_db_session),
 ) -> DemoUploadResponse:
@@ -142,7 +142,8 @@ async def upload_demos(
     if parse_after_upload:
         # A failed upload has no id and is deliberately excluded. Unchanged
         # files are valid stored demos and may be parsed if still pending.
-        demo_ids = [item.id for item in result.files if item.id is not None and item.status != "failed"]
+        demo_ids = [item.id for item in result.files if item.id is not None and item.status != "failed"
+                    and (not delete_after_successful_parse or item.status in {"created", "replaced"})]
         if demo_ids:
             job = demo_parse_job_manager.start_for_files(
                 demo_ids, replace_existing=False,

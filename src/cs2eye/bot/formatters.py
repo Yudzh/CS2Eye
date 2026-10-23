@@ -99,7 +99,19 @@ def format_match_card(match: dict[str, Any], context: dict[str, Any]) -> str:
     if stage:
         lines.append(escape(str(stage)))
 
+    if match.get("status") == "completed":
+        score = match.get("score") or {}
+        lines.append(f"Матч завершён · {score.get('team_a', '—')}:{score.get('team_b', '—')}")
+        lines.append("Текущий расчёт, не архив предматчевого прогноза.")
     prediction = context.get("prediction") or {}
+    if prediction.get("status") == "loading":
+        lines.extend(["", "Рассчитываю прогноз… Разделы матча уже доступны."])
+        return "\n".join(lines)
+    if prediction.get("model_version"):
+        lines.append(f"Модель: {escape(str(prediction['model_version']))}")
+    generated = context.get("generated_at") or context.get("as_of")
+    if generated:
+        lines.append(f"Данные на {_datetime_label(generated)} UTC")
     lines.extend(["", "<b>ML prediction</b>"])
     probability_a = prediction.get("team_a_probability")
     probability_b = prediction.get("team_b_probability")
@@ -108,6 +120,12 @@ def format_match_card(match: dict[str, Any], context: dict[str, Any]) -> str:
     else:
         lines[-1] = "<b>ML prediction:</b> unavailable"
 
+    adjustment = prediction.get("manual_adjustment")
+    if adjustment:
+        base = adjustment.get("base_team_a_probability")
+        impact = adjustment.get("impact_team_a_pp")
+        if base is not None and impact is not None:
+            lines.append(f"Ручной анализ: {name_a} {float(impact):+.1f} п.п. · модель без поправки {float(base):.1%}")
     matchup = context.get("matchup") or {}
     score_a, score_b = matchup.get("team_a_score"), matchup.get("team_b_score")
     lines.extend(["", "<b>Matchup Score</b>"])
@@ -121,8 +139,9 @@ def format_match_card(match: dict[str, Any], context: dict[str, Any]) -> str:
     lines.extend([
         "",
         f"Confidence: {VALUE_LABELS.get(confidence, 'Unavailable')}",
-        f"Data quality: {VALUE_LABELS.get(quality, 'Unavailable')}",
     ])
+    if "data_quality" in context:
+        lines.append(f"Data quality: {VALUE_LABELS.get(quality, 'Unavailable')}")
     return "\n".join(lines)
 
 
@@ -157,6 +176,9 @@ def format_llm_analysis(payload: dict[str, Any]) -> str:
         if lines:
             lines.append("")
         lines.append("🤖 <b>AI-анализ</b>")
+        saved_at = payload.get("created_at") or (payload.get("context") or {}).get("generated_at")
+        if saved_at:
+            lines.append(f"Сохранён {_datetime_label(saved_at)} UTC. Для свежих данных нажмите «Обновить анализ».")
         plan = payload.get("explanation_plan") or {}
         if isinstance(plan, dict) and "expected_winner" in plan:
             winner = plan.get("expected_winner")
@@ -359,3 +381,59 @@ def _date(value: object) -> date | None:
         except ValueError:
             return None
     return None
+
+
+def past_tournaments(tournaments, *, today=None):
+    today = today or date.today()
+    # Forecast archive starts with ESL Pro League Season 24.
+    archive_start = date(2026, 10, 3)
+    return sorted([item for item in tournaments if _date(item.get("end_date")) is not None
+                   and _date(item["end_date"]) < today
+                   and (_date(item.get("start_date")) or date.min) >= archive_start],
+                  key=lambda item: (_date(item["end_date"]), int(item["id"])), reverse=True)
+
+
+def format_past_match_card(match, forecasts):
+    a, b = match.get("team_a") or {}, match.get("team_b") or {}
+    name_a, name_b = a.get("name") or "TBD", b.get("name") or "TBD"
+    score = match.get("score") or {}
+    winner_id = match.get("winner_team_id")
+    winner = name_a if winner_id is not None and winner_id == a.get("id") else name_b if winner_id is not None and winner_id == b.get("id") else "Неизвестен"
+    lines = [f"<b>{escape(name_a)} — {escape(name_b)}</b>",
+             escape(str((match.get("tournament") or {}).get("name") or "Турнир")),
+             f"{escape(str(match.get('match_date') or ''))} · {escape(str(match.get('format') or '').upper())}",
+             f"Счёт: {score.get('team_a', '—')} : {score.get('team_b', '—')}",
+             f"Победитель: <b>{escape(winner)}</b>", ""]
+    saved = [item for item in forecasts if item.get("source") == "pre_match" and item.get("match_id") == match.get("id")]
+    if not any((item.get("ml") or {}).get("team_a_value") is not None for item in saved):
+        reconstructed = [item for item in forecasts if item.get("source") == "retrospective" and item.get("match_id") == match.get("id")]
+        if reconstructed:
+            saved = reconstructed
+    if saved:
+        for item in saved:
+            ml = item.get("ml") or {}
+            lines += ["<b>Прогноз до матча</b>" if item.get("source") == "pre_match" else "<b>Восстановленный прогноз · данные до игры</b>", f"Модель: {escape(str((item.get('versions') or {}).get('ml') or '—'))}"]
+            pick = ml.get("predicted_winner")
+            lines.append(f"Выбор: {escape(str(pick or 'Не сохранён'))}")
+            for key, team in (("team_a_value", item.get("team_a") or {}), ("team_b_value", item.get("team_b") or {})):
+                value = ml.get(key)
+                if value is not None:
+                    lines.append(f"{escape(str(team.get('name') or 'TBD'))}: {float(value)*100:.1f}%")
+            adjustment = item.get("manual_adjustment")
+            if adjustment:
+                lines.append("Ручная поправка: Vitality +15 п.п.")
+            correct = ml.get("correct")
+            lines.append("Без оценки" if correct is None else "✓ Угадали" if correct else "✕ Не угадали")
+            lines.append(f"Сохранён: {escape(str(item.get('created_at') or '—'))}")
+    else:
+        lines.append("Прогноз до матча не был сохранён.")
+    if not saved or all((item.get("ml") or {}).get("team_a_value") is None for item in saved):
+        coverage = match.get("prediction_history_coverage") or {}
+        required = coverage.get("required_maps", 3)
+        missing = [team for team in coverage.get("teams", []) if team.get("available_maps", 0) < required]
+        if missing:
+            lines += ["", f"Для расчёта не хватает истории до {escape(str(coverage.get('as_of') or 'даты игры'))}:"]
+            for team in missing:
+                lines.append(f"{escape(str(team.get('name') or 'TBD'))}: {team.get('available_maps', 0)} карт с полной статистикой раундов; нужно минимум {required}.")
+            lines.append("Нужны демки более ранних игр этих команд.")
+    return "\n".join(lines)

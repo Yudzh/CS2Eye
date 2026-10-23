@@ -8,6 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from cs2eye.services.llm_generation_queue import generation_slot
 from cs2eye.db.session import get_db_session
 from cs2eye.analytics.win_probability_config import WIN_PROBABILITY_FEATURE_SCHEMA_VERSION_V3
 from cs2eye.api.schemas.analysis import (
@@ -88,6 +89,16 @@ async def get_ollama_match_analysis_client(
         yield client
     finally:
         await client.close()
+
+
+@router.get("/match-card-context")
+async def match_card_context(match_id: int, session: AsyncSession = Depends(get_db_session)) -> dict:
+    try:
+        return await MatchAnalysisContextBuilder(session).build_card(match_id)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
 
 @router.get("/match-analysis-context", response_model=MatchAnalysisContext)
@@ -184,16 +195,34 @@ def _llm_http_error(error: MatchLLMServiceError) -> HTTPException:
     })
 
 
+async def queued_llm_generation(session: AsyncSession = Depends(get_db_session)):
+    try:
+        async with generation_slot(session.bind):
+            yield
+    except TimeoutError as error:
+        raise HTTPException(503, "AI generation queue is busy. Try again later.") from error
+
+
 @router.post(
     "/llm-match-analysis/generate", response_model=MatchLLMStoredAnalysisResponse,
+    dependencies=[Depends(queued_llm_generation)],
 )
 async def generate_llm_match_analysis(
     body: MatchLLMAnalysisRequest,
     session: AsyncSession = Depends(get_db_session),
     provider: MatchAnalysisProvider | None = Depends(get_ollama_match_analysis_client),
 ) -> MatchLLMStoredAnalysisResponse:
-    service, _ = _run_service(session, provider)
+    service, repository = _run_service(session, provider)
     try:
+        if body.reuse_existing:
+            if body.match_id is None:
+                raise ValueError("match_id is required when reuse_existing=true")
+            existing = await repository.get_latest(
+                team_a_id=body.team_a_id, team_b_id=body.team_b_id,
+                match_id=body.match_id, analysis_mode=body.analysis_mode,
+            )
+            if existing is not None:
+                return service.detail(existing)
         return await service.generate(
             body.team_a_id, body.team_b_id, as_of=body.as_of,
             match_id=body.match_id, tournament_id=body.tournament_id,
@@ -257,6 +286,7 @@ async def stored_llm_match_analysis(
 
 @router.post(
     "/llm-match-analysis/{analysis_run_id}/regenerate",
+    dependencies=[Depends(queued_llm_generation)],
     response_model=MatchLLMStoredAnalysisResponse,
 )
 async def regenerate_llm_match_analysis(
@@ -831,3 +861,34 @@ async def team_map_detail(team_id: int, map_name: str,
             "aggregation_level": aggregation_level,
             "roster_id": team.current_roster_id if aggregation_level == "current_roster" else None,
             **_map_payload(selected, date.today()), "recent_matches": recent_matches}
+
+
+@router.get("/forecast")
+async def forecast_bundle(
+    team_a_id: int, team_b_id: int, format: str = "bo3",
+    analysis_mode: str = "pre_veto", series_id: int | None = None,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Calculate Matchup once and reuse its features for the ML forecast."""
+    if team_a_id == team_b_id:
+        raise HTTPException(422, "Выберите две разные команды.")
+    if format not in {"bo1", "bo3", "bo5"} or analysis_mode not in {"pre_veto", "post_veto"}:
+        raise HTTPException(422, "Некорректный формат или режим анализа.")
+    try:
+        matchup = await MatchupService(session).calculate(
+            team_a_id, team_b_id, format, analysis_mode, date.today(), series_id)
+        probability = await predict_win_probability(
+            session, a=team_a_id, b=team_b_id, format=format,
+            mode=analysis_mode, series_id=series_id, precomputed_matchup=matchup)
+        if series_id is not None and analysis_mode == "pre_veto":
+            match = await session.get(Match, series_id)
+            if match is not None and match.status == "scheduled" and match.winner_team_id is None:
+                if (match.team_a_id, match.team_b_id) != (team_a_id, team_b_id) or match.format != format:
+                    raise ValueError("Команды или формат прогноза не совпадают с матчем.")
+                from cs2eye.services.prediction_history_service import PredictionHistoryService
+                await PredictionHistoryService(session).capture(
+                    series_id, precomputed_matchup=matchup, precomputed_ml=probability)
+                await session.commit()
+        return {"matchup": matchup, "probability": probability}
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(422, str(exc)) from exc

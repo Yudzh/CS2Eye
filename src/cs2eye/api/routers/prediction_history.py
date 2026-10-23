@@ -78,3 +78,15 @@ async def history(
     )
     await session.commit()
     return result
+
+
+@router.get("/results")
+async def prediction_results(session: AsyncSession = Depends(get_db_session)) -> dict:
+    from cs2eye.services.prediction_results_service import PredictionResultsService
+    return await PredictionResultsService(session).results()
+
+
+@router.get("/feed")
+async def prediction_feed(session: AsyncSession = Depends(get_db_session)) -> dict:
+    from cs2eye.services.prediction_feed_service import PredictionFeedService
+    return await PredictionFeedService(session).feed()

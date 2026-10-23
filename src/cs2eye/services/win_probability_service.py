@@ -139,24 +139,36 @@ async def activate_win_probability(session:AsyncSession,artifact_id:int,force:bo
     await session.flush()
     return {"artifact_id":row.id,"model_version":row.model_version,"trained":row.trained,"quality_gate_passed":passed,"active":True,"forced_active":row.forced_active,"model_status":"experimental" if row.forced_active else "active"}
 
-async def predict_win_probability(session:AsyncSession,a:int,b:int,format:str="bo3",mode:str="pre_veto",as_of:date|None=None,series_id:int|None=None)->dict:
+async def predict_win_probability(session:AsyncSession,a:int,b:int,format:str="bo3",mode:str="pre_veto",as_of:date|None=None,series_id:int|None=None,*,tournament_id:int|None=None,precomputed_matchup:dict|None=None)->dict:
     artifact=await active_model(session)
     if not artifact:return {"prediction_status":"model_not_trained","model_version":None,"model_status":"unavailable","quality_gate_passed":False,"team_a":{"id":a,"probability":None},"team_b":{"id":b,"probability":None},"confidence":0,"limitations":[]}
     cutoff=as_of or date.today();historical=cutoff<date.today()
-    # Always go through MatchupService.calculate: it already resolves ACTIVE_MATCHUP_CONFIG
+    # Without a precomputed result, go through MatchupService.calculate: it resolves ACTIVE_MATCHUP_CONFIG
     # for both the historical and live branches internally. Calling AnalyticsAsOfService
     # directly here (as before) skipped that resolution and always used matchup_v1 for
     # historical predictions, regardless of which matchup engine was actually active.
-    matchup=await MatchupService(session).calculate(a,b,format,mode,cutoff,series_id)
+    # Internal callers may reuse a result calculated for the same teams, format,
+    # mode, cutoff and series rather than running the expensive pipeline twice.
+    matchup=precomputed_matchup
+    if matchup is None:
+        matchup=await MatchupService(session).calculate(a,b,format,mode,cutoff,series_id,**({"tournament_id":tournament_id} if tournament_id is not None else {}))
+    missing_rank_team_ids=[]
     if historical:
         features=matchup.get("prediction_features") or _feature_vector(matchup,format)
     else:
         teams=list((await session.execute(select(Team).where(Team.id.in_((a,b))))).scalars())
         indexed={team.id:team for team in teams};rank_a=indexed.get(a).current_rank if indexed.get(a) else None;rank_b=indexed.get(b).current_rank if indexed.get(b) else None
+        if "ranking_advantage" in artifact.artifact["features"]:
+            missing_rank_team_ids=[team_id for team_id,rank in ((a,rank_a),(b,rank_b)) if rank is None or rank <= 0]
         rank_advantage=0.0 if rank_a is None or rank_b is None else max(-30,min(30,rank_b-rank_a))/30
         features=_feature_vector(matchup,format,rank_advantage)
-    confidence=matchup.get("reliability",0);status="insufficient_data" if confidence<MIN_PREDICTION_CONFIDENCE else "available";model=WinProbabilityModel(artifact.artifact);p=model.predict_symmetric([features])[0] if status=="available" else None
+    confidence=matchup.get("reliability",0);status="insufficient_data" if missing_rank_team_ids or confidence<MIN_PREDICTION_CONFIDENCE else "available";model=WinProbabilityModel(artifact.artifact);p=model.predict_symmetric([features])[0] if status=="available" else None
+    limitations=list(matchup.get("limitations",[]))
+    if missing_rank_team_ids:
+        limitations.append("Невозможно рассчитать вероятность: отсутствует корректный рейтинг команд " + ", ".join(map(str,missing_rank_team_ids)) + ". Отсутствие рейтинга не означает равенство команд.")
     explanation=explain_prediction(model,features,p) if p is not None else None
+    from cs2eye.services.analyst_probability_service import analyst_probability_adjustment
+    p,manual_adjustment=await analyst_probability_adjustment(session,a,b,p,series_id=series_id,as_of=cutoff)
     return {"model_version":artifact.model_version,"feature_schema_version":artifact.feature_schema_version,"trained_at":artifact.trained_at,"model_status":"experimental" if artifact.forced_active else "active","quality_gate_passed":artifact.quality_gate_passed,"prediction_status":status,"team_a":{"id":a,"name":matchup.get("team_a",{}).get("name"),"probability":p},"team_b":{"id":b,"name":matchup.get("team_b",{}).get("name"),"probability":None if p is None else 1-p},"confidence":confidence,
         # Surfaced next to confidence so a caller doesn't have to reach into matchup.
         # effective_coverage is unfloored (unlike `confidence`, which is coverage*agreement
@@ -164,12 +176,12 @@ async def predict_win_probability(session:AsyncSession,a:int,b:int,format:str="b
         # win_probability_config.py) -- it is the honest "how much of the matchup formula's
         # weight actually had confident data" number, not the dampened one `confidence` is.
         "effective_coverage":matchup.get("effective_coverage"),
-        "basis":{"analysis_mode":mode,"veto":"actual_veto" if mode=="post_veto" else "calculated_veto","matchup_score":matchup["team_a"]["score"]},"features":features,"explanation":explanation,"matchup":matchup,"limitations":matchup.get("limitations",[])}
+        "basis":{"analysis_mode":mode,"veto":"actual_veto" if mode=="post_veto" else "calculated_veto","matchup_score":matchup["team_a"]["score"]},"features":features,"explanation":explanation,"manual_adjustment":manual_adjustment,"matchup":matchup,"limitations":limitations,"missing_rank_team_ids":missing_rank_team_ids}
 
 async def save_prediction(session:AsyncSession,**kwargs)->dict:
     result=await predict_win_probability(session,**kwargs)
     if result["prediction_status"]!="available":return result
-    row=MatchPrediction(series_id=kwargs.get("series_id"),as_of=kwargs.get("as_of") or date.today(),mode=kwargs.get("mode","pre_veto"),source="live_saved_prediction",model_version=result["model_version"],feature_schema_version=result["feature_schema_version"],team_a_id=kwargs["a"],team_b_id=kwargs["b"],team_a_probability=Decimal(str(result["team_a"]["probability"])),team_b_probability=Decimal(str(result["team_b"]["probability"])),confidence=Decimal(str(result["confidence"])),feature_snapshot={"features":result["features"],"basis":result["basis"]},prediction_status="available");session.add(row);await session.flush();return {**result,"prediction_id":row.id}
+    row=MatchPrediction(series_id=kwargs.get("series_id"),as_of=kwargs.get("as_of") or date.today(),mode=kwargs.get("mode","pre_veto"),source="live_saved_prediction",model_version=result["model_version"],feature_schema_version=result["feature_schema_version"],team_a_id=kwargs["a"],team_b_id=kwargs["b"],team_a_probability=Decimal(str(result["team_a"]["probability"])),team_b_probability=Decimal(str(result["team_b"]["probability"])),confidence=Decimal(str(result["confidence"])),feature_snapshot={"features":result["features"],"basis":result["basis"],"manual_adjustment":result.get("manual_adjustment")},prediction_status="available");session.add(row);await session.flush();return {**result,"prediction_id":row.id}
 
 
 async def backtest_win_probability(session:AsyncSession,mode:str="pre_veto",artifact_id:int|None=None)->dict:

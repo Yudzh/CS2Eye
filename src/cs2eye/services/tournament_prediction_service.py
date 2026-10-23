@@ -27,6 +27,7 @@ class TournamentPredictionService:
                  comparator: Comparator | None = None) -> None:
         self.session = session
         self.predictor = predictor
+        self.default_comparator = comparator is None
         self.comparator = comparator or MatchupService(session).calculate
 
     async def generate(self, tournament_id: int) -> TournamentPredictionRun:
@@ -95,6 +96,7 @@ class TournamentPredictionService:
                 result = await self.predictor(
                     self.session, a=team_a, b=team_b, format=match.format if match.format in {"bo1", "bo3", "bo5"} else "bo3",
                     mode="pre_veto", series_id=None if projected else match.id,
+                    **({"tournament_id": tournament_id} if self.predictor is predict_win_probability else {}),
                 )
                 status = result["prediction_status"]
                 model_version = result.get("model_version")
@@ -114,6 +116,7 @@ class TournamentPredictionService:
                         team_a, team_b,
                         match.format if match.format in {"bo1", "bo3", "bo5"} else "bo3",
                         "pre_veto", None, None if projected else match.id,
+                        **({"tournament_id": tournament_id} if self.default_comparator else {}),
                     )
                     reliability_value = float(matchup.get("reliability", 0))
                     if matchup.get("status") != "insufficient_data" and reliability_value >= MIN_PREDICTION_CONFIDENCE:

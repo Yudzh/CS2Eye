@@ -89,7 +89,7 @@ class AnalyticsAsOfService:
         positives=sum(item.target for item in examples)
         return examples,{"total_series":total,"eligible":len(examples),"excluded":total-len(examples),"coverage":len(examples)/total if total else 0,"excluded_reasons":dict(excluded),"target_distribution":{"team_a_wins":positives,"team_b_wins":len(examples)-positives},"date_range":{"first":examples[0].match_date.isoformat() if examples else None,"last":examples[-1].match_date.isoformat() if examples else None},"analysis_mode":analysis_mode,"model_version":"matchup_v3","cutoff_policy":"strictly_before_match_date; same-day series are added after all predictions for that date"}
 
-    async def calculate(self,a:int,b:int,as_of:date,format:str="bo3",analysis_mode:str="pre_veto",series_id:int|None=None)->dict:
+    async def calculate(self,a:int,b:int,as_of:date,format:str="bo3",analysis_mode:str="pre_veto",series_id:int|None=None,*,tournament_id:int|None=None)->dict:
         data=await self._preload();state=HistoricalState();rankings=self._ranking_index(data["rankings"])
         team_names={team.id:team.name for team in data["teams"]}
         maps_by_match=defaultdict(list);veto_by_match=defaultdict(list);stats_by_demo=defaultdict(list)
@@ -119,7 +119,7 @@ class AnalyticsAsOfService:
         # Re-run scripts/verify_historical_v3.py after touching this branch or
         # _matchup_v3: it checks agreement with build_dataset_v3 across match ages and
         # regression-tests this exact date-leakage scenario.
-        v3_pseudo=SimpleNamespace(id=pseudo.id,match_date=as_of,team_a_id=a,team_b_id=b,format=format,winner_team_id=getattr(pseudo,"winner_team_id",None))
+        v3_pseudo=SimpleNamespace(tournament_id=tournament_id or getattr(target,"tournament_id",None),id=pseudo.id,match_date=as_of,team_a_id=a,team_b_id=b,format=format,winner_team_id=getattr(pseudo,"winner_team_id",None))
         form_pair=await FormContextService(self.session).compare(
             a,b,as_of,getattr(target,"tournament_id",None),series_id)
         context=await self._matchup_v3(v3_pseudo,state,actual,form_pair,MapStrengthV3Service(self.session),TeamStrengthV3Service(self.session))
@@ -175,15 +175,15 @@ class AnalyticsAsOfService:
 
     async def _matchup_v3(self,match,state,actual_veto,form_pair,map_service:MapStrengthV3Service,strength_service:TeamStrengthV3Service)->dict:
         a,b=match.team_a_id,match.team_b_id;cutoff=match.match_date
-        strength_a=await strength_service.calculate(a,cutoff,match_id=match.id);strength_b=await strength_service.calculate(b,cutoff,match_id=match.id)
+        strength_a=await strength_service.calculate(a,cutoff,match_id=match.id or None,tournament_id=getattr(match,"tournament_id",None));strength_b=await strength_service.calculate(b,cutoff,match_id=match.id or None,tournament_id=getattr(match,"tournament_id",None))
         sa,ca=strength_a["score"],(strength_a["reliability"] or 0)/100
         sb,cb=strength_b["score"],(strength_b["reliability"] or 0)/100
         chosen=self._select_maps(a,b,state,match.format,actual_veto)
         weights={row["map"]:(row["playability_weight"],row["role"]) for row in chosen}
         maps_v3={}
         for row in chosen:
-            maps_v3[(a,row["map"])]=await map_service.calculate(a,row["map"],cutoff)
-            maps_v3[(b,row["map"])]=await map_service.calculate(b,row["map"],cutoff)
+            maps_v3[(a,row["map"])]=await map_service.calculate(a,row["map"],cutoff,match_id=match.id or None,tournament_id=getattr(match,"tournament_id",None))
+            maps_v3[(b,row["map"])]=await map_service.calculate(b,row["map"],cutoff,match_id=match.id or None,tournament_id=getattr(match,"tournament_id",None))
         map_score,map_rows,tactical=aggregate_maps_v3(a,b,weights,maps_v3)
         h2h=self._h2h(a,b,state);hcount=len(state.h2h[frozenset((a,b))])
         map_conf=sum(row["confidence"]*row["playability_weight"] for row in map_rows) if map_rows else 0

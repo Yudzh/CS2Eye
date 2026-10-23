@@ -61,8 +61,8 @@ export interface FormContext {as_of:string;window_days:number;tournament_id:numb
 export type AnalystFactorType = "positive" | "negative";
 export type AnalystEnvironment = "lan" | "online" | "any";
 export type AnalystCategory = "overall"|"ct_defense"|"t_attack"|"tactics"|"veto"|"form"|"communication"|"roles"|"individual"|"teamplay"|"mental"|"coach"|"roster"|"other";
-export interface AnalystFactor {id:number;team_id:number;team_name:string;factor_type:AnalystFactorType;text:string;category:AnalystCategory|null;map_name:string|null;environment:AnalystEnvironment;players:Array<{id:number;nickname:string}>;coach:{id:number;nickname:string}|null;valid_from:string|null;valid_until:string|null;is_active:boolean;status:"active"|"expired"|"inactive"|"scheduled";created_at:string;updated_at:string}
-export interface AnalystFactorPayload {team_id:number;factor_type:AnalystFactorType;text:string;category:AnalystCategory|null;map_name:string|null;environment:AnalystEnvironment;player_ids:number[];coach_id:number|null;valid_from:string|null;valid_until:string|null;is_active:boolean}
+export interface AnalystFactor {probability_bonus_pp?:number;match_id?:number|null;id:number;team_id:number;team_name:string;factor_type:AnalystFactorType;text:string;category:AnalystCategory|null;map_name:string|null;environment:AnalystEnvironment;players:Array<{id:number;nickname:string}>;coach:{id:number;nickname:string}|null;valid_from:string|null;valid_until:string|null;is_active:boolean;status:"active"|"expired"|"inactive"|"scheduled";created_at:string;updated_at:string}
+export interface AnalystFactorPayload {probability_bonus_pp?:number;match_id?:number|null;team_id:number;factor_type:AnalystFactorType;text:string;category:AnalystCategory|null;map_name:string|null;environment:AnalystEnvironment;player_ids:number[];coach_id:number|null;valid_from:string|null;valid_until:string|null;is_active:boolean}
 export interface LeadershipFactor {key:string;label:string;raw_value:unknown;normalized_score:number|null;weight:number;effective_weight:number;impact:number;sample_size:number|null;confidence:number|null;reason:string|null;available:boolean}
 export interface LeadershipScore {score:number;raw_score:number;reliability:number;model_version:string;management_residual:number|null;actual_performance:number|null;expected_performance:number|null;sample:{maps:number;available_factors:number;total_factors:number};factors:LeadershipFactor[]}
 export interface Leadership {management_context:{roster_id:number|null;period_started_at:string|null;role_history_status:string};igl:(LeadershipScore&{player_id:number;name:string;player_strength:number|null;captain_strength:number|null;period:{started_at:string|null;ended_at:string|null;source:string}})|null;coach:(LeadershipScore&{id:number;name:string;roster_attribution_factor:number;tenure:{started_at:string|null;ended_at:string|null;source:string}})|null}
@@ -270,6 +270,8 @@ export type MatchEnvironment = "lan" | "online" | "unknown";
 export type MatchResolution = "resolved" | "needs_review" | "unresolved";
 export type TournamentStructure = "single_elimination"|"double_elimination"|"swiss"|"groups"|"groups_playoff"|"mixed"|"unknown";
 export interface MatchSeries {
+  prediction_history_coverage?: {as_of: string; required_maps: number; teams: Array<{team_id: number | null; name: string | null; available_maps: number}>} | null;
+  starts_at?: string | null;
   id: number; tournament: null | { id: number; name: string; year: number; tier: string | null; environment: MatchEnvironment; start_date: string | null; end_date: string | null; structure_type:TournamentStructure };
   match_date: string; format: MatchFormat; stage: MatchStage; environment: MatchEnvironment;
   status: string; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean;
@@ -294,6 +296,7 @@ export interface CalculatedVeto {calculated_veto_model_version:string;method:"ex
 export interface MatchupFactor {key:string;label:string;score:number|null;weight:number;effective_weight:number;impact:number;confidence:number|null;sample:number|null;reason:string|null;available:boolean}
 export interface MatchupScore {model_version:string;score_semantics:"analytical_score_0_100_not_probability";analysis_mode:"pre_veto"|"post_veto";format:"bo1"|"bo3"|"bo5";as_of:string;historical_policy:string;team_a:{id:number;name:string;score:number;advantage:number};team_b:{id:number;name:string;score:number;advantage:number};raw_score:number;reliability:number;raw_coverage?:number|null;effective_coverage?:number|null;factor_agreement_score?:number|null;confidence_level:"low"|"medium"|"high";advantage:{team_id:number|null;team_name:string|null;level:"neutral"|"slight"|"moderate"|"strong"};factors:MatchupFactor[];maps:Array<{map:string;map_matchup_score:number;team_b_score:number;playability_weight:number;role:string;confidence:number;contribution:number}>;tactical:Record<string,unknown>&{score:number|null};veto:{basis:string;series_id:number|null;calculated_veto_model_version?:string};limitations:string[]}
 export interface WinProbability {
+  manual_adjustment?:{base_team_a_probability:number;adjusted_team_a_probability:number;impact_team_a_pp:number;factors:Array<{id:number;team_id:number;text:string;impact_team_a_pp:number;match_id:number|null}>}|null;
   model_version:string|null;feature_schema_version?:string;trained_at?:string;
   model_status:"active"|"experimental"|"unavailable";quality_gate_passed:boolean;
   prediction_status:"available"|"insufficient_data"|"model_not_trained";
@@ -354,7 +357,7 @@ export interface TournamentProblem {match_id:number;code:string;message:string}
 export interface TournamentView {tournament:Omit<TournamentListItem,"summary">;summary:TournamentSummary;matches:MatchSeries[];stages:string[];bracket_links:Array<{from_match_id:number;to_match_id:number;source:"manual"|"inferred"}>;problems:TournamentProblem[];participants:Array<{team_id:number;name:string;seed:number|null}>}
 export interface RosterPlayerRef {id:number;nickname:string}
 export interface TournamentRosterReplacement {id:number;player_out:RosterPlayerRef;player_in:RosterPlayerRef;status:"MANUAL"|"CONFIRMED"|"DETECTED";source_type:"MANUAL"|"AUTO";source_reference:string|null}
-export interface EffectiveTournamentRoster {team_id:number;tournament_id:number;permanent_roster:RosterPlayerRef[];effective_roster:RosterPlayerRef[];replacements:TournamentRosterReplacement[];has_temporary_replacement:boolean;stand_in_penalty:number;roster_source:string;override_status:string|null;reliability:string;warnings:string[]}
+export interface EffectiveTournamentRoster {roster_check?: {status:string;baseline:RosterPlayerRef[];roster:RosterPlayerRef[];added:RosterPlayerRef[];missing:RosterPlayerRef[];checked_at:string|null;source:string;source_label:string;error:string|null}|null;team_id:number;tournament_id:number;permanent_roster:RosterPlayerRef[];effective_roster:RosterPlayerRef[];replacements:TournamentRosterReplacement[];has_temporary_replacement:boolean;stand_in_penalty:number;roster_source:string;override_status:string|null;reliability:string;warnings:string[]}
 export interface TournamentPredictionMatch {id:number;source_match_id:number|null;round_number:number|null;round_label:string|null;stage:MatchStage;bracket_section:MatchSeries["bracket_section"];bracket_position:number|null;format:MatchFormat;team_a:{id:number|null;name:string|null};team_b:{id:number|null;name:string|null};team_a_probability:number|null;team_b_probability:number|null;team_a_score:number|null;team_b_score:number|null;predicted_winner_id:number|null;predicted_winner_name:string|null;confidence:number|null;reliability:number|null;prediction_type:"actual_match"|"projected_match";prediction_basis:"win_probability"|"matchup_score";status:"available"|"comparison_fallback"|"insufficient_data"|"model_not_trained"|"actual_result";model_version:string|null;created_at:string;invalidated_at:string|null}
 export interface TournamentPredictions {tournament_id:number;prediction_run_id:number;generated_at:string;model_version:string|null;model_status?:"active"|"experimental"|null;quality_gate_passed?:boolean|null;status:string;outdated:boolean;matches:TournamentPredictionMatch[]}
 export interface TournamentCreate {name:string;year:number;tier:string|null;environment:"lan"|"online";start_date:string;end_date:string;structure_type:TournamentStructure;team_ids:number[];matches:Array<{team_a_id:number|null;team_b_id:number|null;match_date:string;format:"bo1"|"bo3"|"bo5";stage:MatchStage;round_number:number|null;round_label:string|null;group:string|null;bracket_section:MatchSeries["bracket_section"];bracket_position:number|null}>}
@@ -865,3 +868,46 @@ export interface DemoTournamentOption {
 export interface MatchupCalibrationModelReport{version:string;matches:number;predictions:number;abstentions:number;coverage:number|null;correct:number;accuracy:number|null;overall_correct_rate:number|null;average_winner_margin:number|null;high_margin_accuracy:number|null;margin_buckets:Record<string,{samples:number;accuracy:number|null}>;error_drivers:Record<string,number>}
 export interface CalibrationChangedMatch{match_id:number;match:string;baseline_winner_id:number|null;candidate_winner_id:number|null;actual_winner_id:number;baseline_score:number;candidate_score:number;result?:string;main_changed_factors:Array<{factor:string;baseline_contribution:number;candidate_contribution:number;change:number}>}
 export interface MatchupCalibrationReport{baseline:MatchupCalibrationModelReport;candidate:MatchupCalibrationModelReport;delta:{accuracy:number|null};sample_size:number;gate_status:"insufficient_sample"|"passed"|"failed";gate_checks:Record<string,boolean>;flips:{total:number;v2_fixed_v1_error:number;v2_broke_v1_correct:number;net_improvement:number;matches:CalibrationChangedMatch[]};abstention_changes:{lost_predictions:number;lost_correct_predictions:number;avoided_baseline_errors:number;new_predictions:number;new_correct_predictions:number;new_incorrect_predictions:number;lost_prediction_matches:CalibrationChangedMatch[];new_prediction_matches:CalibrationChangedMatch[]};factor_impact_comparison:Record<string,{baseline_average_absolute_contribution:number|null;candidate_average_absolute_contribution:number|null}>}
+
+export interface PredictionResult {
+  id: string;
+  match_id: number;
+  tournament_id: number | null;
+  tournament: string | null;
+  match_date: string;
+  format: string;
+  score: {team_a: number; team_b: number};
+  team_a: {id: number; name: string | null};
+  team_b: {id: number; name: string | null};
+  model_version: string;
+  source: "pre_match" | "retrospective";
+  archived_correct?: boolean | null;
+  manual_adjustment?: WinProbability["manual_adjustment"];
+  captured_at: string;
+  team_a_probability: number;
+  predicted_winner: string | null;
+  probability: number | null;
+  actual_winner: string | null;
+  correct: boolean | null;
+}
+
+export interface PredictionFeedItem {
+  match_id: number;
+  match_date: string;
+  starts_at: string | null;
+  status: "scheduled" | "in_progress" | "completed";
+  tournament_id: number | null;
+  tournament: string | null;
+  format: string;
+  team_a: {id: number; name: string | null};
+  team_b: {id: number; name: string | null};
+  team_a_probability: number | null;
+  probability: number | null;
+  predicted_winner: string | null;
+  actual_winner: string | null;
+  correct: boolean | null;
+  score: {team_a: number; team_b: number} | null;
+  source: "pre_match" | "retrospective" | null;
+  model_version: string | null;
+  captured_at: string | null;
+}

@@ -766,3 +766,31 @@ async def test_split_demo_rebuilds_when_first_part_arrives_late(db_session, tmp_
     saved = await db_session.get(DemoFile, final_id, populate_existing=True)
     assert saved.match_id is not None
     assert await db_session.scalar(select(func.count()).select_from(DemoFile).where(DemoFile.match_id == saved.match_id)) == 1
+
+
+@pytest.mark.parametrize("cleanup,status,removed", [
+    (True, "parsed", True), (False, "parsed", False),
+    (True, "failed", False), (True, "skipped", False),
+])
+async def test_source_cleanup_only_for_successful_opted_in_files(
+    db_session, tmp_path, cleanup, status, removed,
+):
+    from cs2eye.api.schemas.demos import DemoParseFileResult
+
+    demo = DemoFile(
+        tournament_name="Cup", tournament_slug="cup",
+        match_date=__import__("datetime").date(2026, 2, 1),
+        original_filename="map.dem", storage_path="map.dem",
+        file_size_bytes=4, sha256="d" * 64,
+    )
+    db_session.add(demo)
+    await db_session.commit()
+    path = tmp_path / "map.dem"
+    path.write_bytes(b"demo")
+    service = DemoParseService(db_session, tmp_path, cleanup)
+    await service._cleanup_sources([
+        DemoParseFileResult(demo_file_id=demo.id, filename="map.dem", status=status),
+    ])
+    assert path.exists() is not removed
+    assert (demo.source_deleted_at is not None) is removed
+    assert await db_session.get(DemoFile, demo.id) is not None

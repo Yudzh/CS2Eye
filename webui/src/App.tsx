@@ -1,3 +1,4 @@
+import {PredictionsPage} from "./pages/PredictionsPage";
 import { MapsV3Panel, MapV3Page } from "./components/MapsV3";
 
 import {
@@ -40,6 +41,7 @@ import type {
 } from "./types";
 import { TeamComparePage } from "./pages/TeamComparePage";
 import { DemosPage } from "./pages/DemosPage";
+import { MatchDetailPage } from "./pages/MatchDetailPage";
 import { MatchesPage } from "./pages/MatchesPage";
 import { TournamentsPage } from "./pages/TournamentsPage";
 import { AddTournamentPage } from "./pages/AddTournamentPage";
@@ -351,13 +353,13 @@ function TeamPage({ id }: { id: number }) {
   useEffect(() => {
     let active = true;
     setTeam(null); setError(null); setTeamStrength(null); setTeamStrengthError(null); setTeamForm(null);
-    getTeam(id).then((value)=>{if(active)setTeam(value)}).catch((value: unknown) => {
+    const basicTeam = getTeam(id).then((value)=>{if(active)setTeam(value)}).catch((value: unknown) => {
       if(active)setError(value instanceof Error ? value.message : "Не удалось загрузить команду.");
     });
-    void getTeamStrengthV3(id).then((value)=>{if(active)setTeamStrength(value)}).catch((value:unknown) => {
+    void basicTeam.then(() => active ? getTeamStrengthV3(id) : null).then((value)=>{if(active && value)setTeamStrength(value)}).catch((value:unknown) => {
       if(active)setTeamStrengthError(value instanceof Error?value.message:"Team Strength V3 недоступен.");
     });
-    void getTeamFormV3(id).then((value)=>{if(active)setTeamForm(value)}).catch(() => undefined);
+    void basicTeam.then(() => active ? getTeamFormV3(id) : null).then((value)=>{if(active && value)setTeamForm(value)}).catch(() => undefined);
     return ()=>{active=false};
   }, [id]);
 
@@ -594,13 +596,15 @@ export default function App() {
   // Disabled: unused pages, kept on disk in case they're needed again.
   // if (/^\/model-sandbox\/?$/.test(window.location.pathname)) return <ModelSandboxPage />;
   // if (/^\/matchup-calibration\/?$/.test(window.location.pathname)) return <MatchupCalibrationPage />;
+  if (/^\/predictions\/?$/.test(window.location.pathname)) return <PredictionsPage />;
+  if (/^\/prediction-results\/?$/.test(window.location.pathname)) return <PredictionsPage initialTab="completed" />;
   if (/^\/prediction-history\/?$/.test(window.location.pathname)) return <PredictionHistoryPage />;
   if (/^\/ml\/models\/?$/.test(window.location.pathname)) return <MLModelsPage />;
   // if (/^\/ml\/feature-diagnostics\/?$/.test(window.location.pathname)) return <MLFeatureDiagnosticsPage />;
   if (/^\/demos\/?$/.test(window.location.pathname)) return <DemosPage />;
   if (/^\/matches\/?$/.test(window.location.pathname)) return <MatchesPage />;
   const seriesMatch = window.location.pathname.match(/^\/matches\/(\d+)\/?$/);
-  if (seriesMatch) return <MatchesPage matchId={Number(seriesMatch[1])} />;
+  if (seriesMatch) return <MatchDetailPage matchId={Number(seriesMatch[1])} />;
   if (/^\/tournaments\/new\/?$/.test(window.location.pathname)) return <AddTournamentPage />;
   const tournamentMatchNew = window.location.pathname.match(/^\/tournaments\/(\d+)\/matches\/new\/?$/);
   if (tournamentMatchNew) return <AddTournamentMatchPage tournamentId={Number(tournamentMatchNew[1])} />;
@@ -716,7 +720,7 @@ export default function App() {
         </span>
       </header>
 
-      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a><a className="button" href="/prediction-history">Prediction History</a>{/* Disabled: unused pages, kept on disk in case they're needed again.
+      <nav className="home-navigation"><a className="button" href="/demos">Демки</a><a className="button" href="/compare">Сравнение команд</a><a className="button" href="/predictions">Прогнозы</a>{/* Disabled: unused pages, kept on disk in case they're needed again.
       <a className="button" href="/matchup-calibration" title="Read-only сравнение готовых Matchup V1 и V2">Matchup V1 ↔ V2</a>
       <a className="button" href="/model-sandbox" title="Ручные временные эксперименты с Matchup и ML features">Model Sandbox</a> */}<a className="button" href="/ml/models">ML-модели и активация</a>{/* <a className="button" href="/ml/feature-diagnostics" title="Read-only диагностика признаков текущей активной ML-модели">ML: диагностика текущей модели</a> */}</nav>
 

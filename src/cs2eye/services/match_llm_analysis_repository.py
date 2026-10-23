@@ -105,7 +105,8 @@ class SQLAlchemyMatchLLMAnalysisRepository:
         run.grounding_valid = error.grounding_valid
         run.repair_attempted = error.repair_attempted
         run.error_code = error.code
-        run.error_message = str(error)[:1000]
+        details = "; ".join(error.validation_errors)
+        run.error_message = (str(error) + (f" {details}" if details else ""))[:1000]
         run.validation_error_codes = list(error.validation_error_codes) or None
         run.grounding_error_codes = [item.code for item in error.grounding_errors] or None
         run.completed_at = datetime.now(UTC)

@@ -31,7 +31,7 @@ async def response(view: MatchView, session: AsyncSession) -> MatchResponse:
     ))).all()) if item.tournament_id is not None else {}
     veto = await VetoService(session).actions(item.id)
     return MatchResponse(
-        id=item.id,
+        id=item.id, starts_at=item.starts_at,
         tournament=TournamentResponse.model_validate(view.tournament, from_attributes=True) if view.tournament else None,
         match_date=item.match_date, format=item.format, stage=item.stage, environment=item.environment,
         status=item.status, resolution_status=item.resolution_status, is_playoff=item.is_playoff,
@@ -80,7 +80,12 @@ async def list_matches(
 
 @router.get("/matches/{match_id}", response_model=MatchResponse)
 async def get_match(match_id: int, session: AsyncSession = Depends(get_db_session)) -> MatchResponse:
-    try: return await response(await MatchService(session).get(match_id), session)
+    try:
+        result = await response(await MatchService(session).get(match_id), session)
+        from cs2eye.services.prediction_history_coverage import historical_map_coverage
+        from cs2eye.api.schemas.matches import PredictionHistoryCoverage
+        result.prediction_history_coverage = PredictionHistoryCoverage.model_validate(await historical_map_coverage(session, result))
+        return result
     except MatchNotFoundError as error: raise expected_error(error) from error
 
 

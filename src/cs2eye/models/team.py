@@ -208,6 +208,8 @@ class AnalystFactor(Base):
     coach_id: Mapped[int | None] = mapped_column(ForeignKey("players.id", ondelete="SET NULL"), index=True)
     factor_type: Mapped[str] = mapped_column(String(16), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    probability_bonus_pp: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
     category: Mapped[str | None] = mapped_column(String(32), index=True)
     map_name: Mapped[str | None] = mapped_column(String(32), index=True)
     environment: Mapped[str] = mapped_column(String(16), nullable=False, default="any", server_default="any", index=True)
@@ -272,7 +274,7 @@ class TeamRoster(Base):
         Index("uq_team_rosters_one_current", "team_id", unique=True,
               postgresql_where=text("is_current"), sqlite_where=text("is_current = 1")),
         CheckConstraint(
-            "source IN ('team_import', 'manual', 'demo', 'migration')",
+            "source IN ('team_import', 'manual', 'demo', 'migration', 'tournament')",
             name="ck_team_rosters_source",
         ),
         CheckConstraint(

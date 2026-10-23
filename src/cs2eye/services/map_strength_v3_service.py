@@ -4,8 +4,9 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from math import isfinite, sqrt
+from types import SimpleNamespace
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.analytics.map_strength_v3_config import (
@@ -147,6 +148,7 @@ class MapStrengthV3Service:
         if roster is None:
             roster = await self.session.scalar(select(TeamRoster).where(
                 TeamRoster.team_id == team.id, TeamRoster.resolution_status == "complete",
+                TeamRoster.source != "tournament",
                 TeamRoster.active_from < cutoff,
                 TeamRoster.active_to.is_(None) | (TeamRoster.active_to >= cutoff)
             ).order_by(TeamRoster.active_from.desc()).limit(1))
@@ -154,7 +156,7 @@ class MapStrengthV3Service:
             TeamRosterMember.roster_id == roster.id, TeamRosterMember.player_id.is_not(None)))).all()) if roster else []
         effective = await EffectiveRosterService(self.session).get_effective_roster(
             team.id, tournament_id, match_id, cutoff, permanent_player_ids=permanent,
-            known_before=cutoff if historical else None)
+            known_before=cutoff if cutoff < date.today() else None)
         result = {"roster_id": roster.id if roster else None, "permanent_player_ids": sorted(permanent),
                   "effective_player_ids": sorted(x["id"] for x in effective["players"]),
                   "tournament_id": effective["tournament_id"], "match_id": match_id,
@@ -217,15 +219,33 @@ class MapStrengthV3Service:
                            "combat_available": result.combat_data_status == "complete",
                            "side_stat": side, "players": by_demo[demo.id],
                            **adjusted_map_quality(won=own>other, round_diff=own-other, opponent_rank=rank)})
-        rounds = list((await self.session.scalars(select(DemoRound).where(
+        # Map metrics use round outcomes/economy and kill attribution only;
+        # avoid loading large round-state JSON and unused event fields.
+        rounds = (await self.session.execute(select(
+            DemoRound.id, DemoRound.demo_file_id, DemoRound.round_number,
+            DemoRound.team_a_side, DemoRound.team_b_side, DemoRound.winner_team_id,
+            DemoRound.is_pistol_round, DemoRound.team_a_economy, DemoRound.team_b_economy,
+            DemoRound.bomb_planted,
+        ).where(
             DemoRound.demo_file_id.in_(ids), DemoRound.is_complete.is_(True),
             DemoRound.is_warmup.is_(False), DemoRound.is_restart.is_(False)
-        ).order_by(DemoRound.demo_file_id, DemoRound.round_number))).all()) if ids else []
-        kills = list((await self.session.scalars(select(DemoKill).where(DemoKill.demo_file_id.in_(ids)).order_by(
-            DemoKill.demo_file_id, DemoKill.tick, DemoKill.id))).all()) if ids else []
-        damages = list((await self.session.scalars(select(DemoDamageEvent).where(
-            DemoDamageEvent.demo_file_id.in_(ids), DemoDamageEvent.attacker_player_id.in_({p.player_id for p in players if p.player_id})
-        ))).all()) if ids else []
+        ).order_by(DemoRound.demo_file_id, DemoRound.round_number))).all() if ids else []
+        kills = (await self.session.execute(select(
+            DemoKill.demo_file_id, DemoKill.round_id, DemoKill.is_teamkill, DemoKill.is_suicide,
+            DemoKill.attacker_team_id, DemoKill.victim_team_id,
+            DemoKill.attacker_side, DemoKill.victim_side, DemoKill.weapon,
+        ).where(DemoKill.demo_file_id.in_(ids)).order_by(
+            DemoKill.demo_file_id, DemoKill.tick, DemoKill.id))).all() if ids else []
+        damage_side = func.lower(func.coalesce(DemoDamageEvent.attacker_side, ""))
+        damage_rows = (await self.session.execute(select(
+            DemoDamageEvent.demo_file_id, DemoDamageEvent.attacker_player_id,
+            damage_side, func.sum(DemoDamageEvent.health_damage),
+        ).where(DemoDamageEvent.demo_file_id.in_(ids),
+                DemoDamageEvent.attacker_player_id.in_({p.player_id for p in players if p.player_id})
+        ).group_by(DemoDamageEvent.demo_file_id, DemoDamageEvent.attacker_player_id, damage_side))).all() if ids else []
+        damages = [SimpleNamespace(demo_file_id=demo_id, attacker_player_id=pid,
+                                   attacker_side=side, health_damage=total)
+                   for demo_id, pid, side, total in damage_rows]
         value = (events, rounds, kills, damages)
         self._data_cache[key] = value
         return value
@@ -401,15 +421,20 @@ class MapStrengthV3Service:
         combined = compose(components, COMPONENT_WEIGHTS)
         score = combined["score"] if selected else None
         # Baseline is computed after the independent score and cannot feed its inputs.
-        baseline_key = (team_id, cutoff, exclude_match_id, as_of is not None or match_id is not None)
+        baseline_key = (team_id, cutoff, exclude_match_id, as_of is not None or match_id is not None, tournament_id, match_id)
         if baseline_key not in self._baseline_cache:
             # The existing service validates its calculation revision. A raw Team JSON
             # cache can be stale, so it must not be used directly as the baseline.
             # Isolate any on-demand Team V3 writes: Maps recalculate commits only Maps.
             async with AsyncSession(bind=self.session.bind, expire_on_commit=False) as baseline_session:
+                # Preserve the independent write transaction, but share immutable
+                # profile aggregates with the parent request instead of rebuilding
+                # the full population for each team's baseline.
+                baseline_session.info["performance_profile_datasets"] = self.session.info.setdefault(
+                    "performance_profile_datasets", {})
                 baseline = await TeamStrengthV3Service(baseline_session).calculate(
                     team_id, cutoff if as_of is not None or match_id is not None else None,
-                    exclude_match_id=exclude_match_id)
+                    exclude_match_id=exclude_match_id, tournament_id=tournament_id, match_id=match_id)
             self._baseline_cache[baseline_key] = baseline.get("score")
         team_score = self._baseline_cache[baseline_key]
         delta = map_delta(score, team_score)

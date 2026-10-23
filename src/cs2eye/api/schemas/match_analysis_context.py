@@ -191,6 +191,7 @@ class PredictionContext(MatchAnalysisContextModel):
     team_b_probability: Probability | None
     confidence: Reliability | None
     top_model_drivers: list[ModelDriver]
+    manual_adjustment: dict | None = None
 
 
 class MatchupFactor(MatchAnalysisContextModel):

@@ -18,7 +18,7 @@ from cs2eye.analytics.scoring.core import FactorInput, sample_reliability, score
 from cs2eye.models.demo import TeamMapAggregate
 from cs2eye.models.match import MapPoolEntry
 from cs2eye.models.team import Team, TeamRosterMember
-from cs2eye.services.round_swing_service import compose_roster_swing_profile, player_round_swing
+from cs2eye.services.round_swing_service import compose_roster_swing_profile, player_round_swings
 from cs2eye.services.team_h2h_service import TeamH2HService
 from cs2eye.services.team_map_strength_service import calculate_map_strength, scope_performance
 from cs2eye.services.veto_service import VALID_MAPS, VetoService
@@ -268,14 +268,24 @@ class CalculatedVetoService:
             veto_recents.append(next((p for p in candidates if p["sample"]["series"]>=3),None))
         historical=as_of is not None and as_of < date.today()
         h2h=None if historical else await TeamH2HService(self.session,today=self.today).compare(a_id,b_id,recent_limit=20)
+        roster_ids = {team.current_roster_id for team in teams if team.current_roster_id}
+        players_by_roster = {roster_id: [] for roster_id in roster_ids}
+        if roster_ids:
+            members = (await self.session.execute(select(
+                TeamRosterMember.roster_id, TeamRosterMember.player_id
+            ).where(TeamRosterMember.roster_id.in_(roster_ids),
+                    TeamRosterMember.player_id.is_not(None)))).all()
+            for roster_id, player_id in members:
+                players_by_roster[roster_id].append(player_id)
+        swings = await player_round_swings(self.session, list(dict.fromkeys(
+            player_id for players in players_by_roster.values() for player_id in players
+        )))
         signals=[]
         for idx,team_id in enumerate((a_id,b_id)):
             org={} if historical else await self._load(team_id,"organization",None); roster={} if historical else await self._load(team_id,"roster",teams[idx].current_roster_id)
             if teams[idx].current_roster_id:
-                player_ids=list((await self.session.execute(select(TeamRosterMember.player_id).where(
-                    TeamRosterMember.roster_id==teams[idx].current_roster_id,
-                    TeamRosterMember.player_id.is_not(None)))).scalars())
-                swing_players=[{"player_id":player_id,**await player_round_swing(self.session,player_id)} for player_id in player_ids]
+                player_ids=players_by_roster[teams[idx].current_roster_id]
+                swing_players=[{"player_id":player_id,**swings[player_id]} for player_id in player_ids]
                 for map_name,value in roster.items():
                     profile=compose_roster_swing_profile(swing_players,map_name)
                     if profile.get("status") not in {"not_calculated"}:

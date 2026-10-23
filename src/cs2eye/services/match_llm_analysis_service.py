@@ -1,3 +1,5 @@
+import re
+
 from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
 from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
 from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
@@ -148,8 +150,21 @@ class MatchLLMAnalysisService:
             lowered = manual_text.casefold()
             if "ручн" not in lowered or "аналит" not in lowered:
                 manual_text = f"Ручные комментарии аналитика: {manual_text}"
-        return analysis.model_copy(update={
-            "expected_winner_text": expected_text,
-            "manual_text": manual_text,
-        })
+        # Normalize known CS terminology before entity validation. In particular,
+        # "force buy" is a spelling of force_buy, not two invented player names.
+        # Never whitelist the individual English words: unknown entities must
+        # still fail validation, and manual notes remain verbatim.
+        aliases = (
+            (r"(?<!\w)force[ _-]+buys?(?!\w)", "форс-закуп"),
+            (r"(?<!\w)full[ _-]+buys?(?!\w)", "полный закуп"),
+            (r"(?<!\w)anti[ _-]+eco(?!\w)", "антиэко"),
+            (r"(?<!\w)post[ _-]+plant(?!\w)", "постплант"),
+        )
+        updates = {"expected_winner_text": expected_text, "manual_text": manual_text}
+        for field in ("conclusion_text", "form_text", "maps_text", "teamplay_text"):
+            text = getattr(analysis, field)
+            for pattern, replacement in aliases:
+                text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+            updates[field] = text
+        return analysis.model_copy(update=updates)
 

@@ -326,8 +326,8 @@ async def round_swing_audit(session: AsyncSession) -> dict:
     artifact.metrics={**artifact.metrics,"audit":audit};await session.flush();return audit
 
 
-async def player_round_swing(session: AsyncSession, player_id: int) -> dict:
-    stats = (await session.execute(
+async def player_round_swing(session: AsyncSession, player_id: int, *, _loaded=None) -> dict:
+    stats = _loaded[0] if _loaded is not None else (await session.execute(
         select(DemoPlayerStat, DemoMapResult.map_name, DemoFile.match_date)
         .join(DemoMapResult, DemoMapResult.demo_file_id == DemoPlayerStat.demo_file_id)
         .join(DemoFile, DemoFile.id == DemoPlayerStat.demo_file_id)
@@ -336,12 +336,12 @@ async def player_round_swing(session: AsyncSession, player_id: int) -> dict:
     )).all()
     if not stats: return {"status":"not_calculated","overall":None,"maps":{},"rank_scopes":{},"recent":{}}
     stat_rows=[row[0] for row in stats];keys = {row.identity_key for row in stat_rows};demo_ids = {row.demo_file_id for row in stat_rows}
-    events = list((await session.execute(select(DemoRoundSwingEvent).where(DemoRoundSwingEvent.demo_file_id.in_(demo_ids)))).scalars())
+    events = _loaded[1] if _loaded is not None else list((await session.execute(select(DemoRoundSwingEvent).where(DemoRoundSwingEvent.demo_file_id.in_(demo_ids)))).scalars())
     if not events:
         statuses = list((await session.execute(select(DemoMapResult.round_swing_status).where(DemoMapResult.demo_file_id.in_(demo_ids)))).scalars())
         status="model_not_trained" if "model_not_trained" in statuses else "not_calculated"
         return {"status":status,"overall":None,"maps":{},"rank_scopes":{},"recent":{}}
-    artifact=await active_model(session);normalization=artifact.normalization if artifact else None
+    artifact=_loaded[2] if _loaded is not None else await active_model(session);normalization=artifact.normalization if artifact else None
     def scope(selected_rows) -> dict | None:
         selected_stats=[row[0] for row in selected_rows]
         selected_ids={row.demo_file_id for row in selected_stats}
@@ -357,6 +357,36 @@ async def player_round_swing(session: AsyncSession, player_id: int) -> dict:
         "round_swing_model_version":ROUND_SWING_MODEL_VERSION,"trained_at":artifact.trained_at if artifact else None}
     return {"status":"complete" if overall else "partial",**(overall or {}),"overall":overall,
         "maps":maps,"rank_scopes":rank_scopes,"recent":recent,"model":metadata}
+
+
+async def player_round_swings(session: AsyncSession, player_ids: list[int]) -> dict[int, dict]:
+    """Load overlapping roster histories and their event JSON only once."""
+    if not player_ids:
+        return {}
+    stats = (await session.execute(
+        select(DemoPlayerStat, DemoMapResult.map_name, DemoFile.match_date)
+        .join(DemoMapResult, DemoMapResult.demo_file_id == DemoPlayerStat.demo_file_id)
+        .join(DemoFile, DemoFile.id == DemoPlayerStat.demo_file_id)
+        .where(DemoPlayerStat.player_id.in_(player_ids))
+        .order_by(DemoFile.match_date.desc(), DemoFile.id.desc())
+    )).all()
+    by_player = defaultdict(list)
+    for row in stats:
+        by_player[row[0].player_id].append(row)
+    demo_ids = {row[0].demo_file_id for row in stats}
+    events = list((await session.scalars(select(DemoRoundSwingEvent).where(
+        DemoRoundSwingEvent.demo_file_id.in_(demo_ids)))).all()) if demo_ids else []
+    artifact = await active_model(session) if events else None
+    by_demo = defaultdict(list)
+    for event in events:
+        by_demo[event.demo_file_id].append(event)
+    result = {}
+    for pid in player_ids:
+        player_stats = by_player[pid]
+        ids = {row[0].demo_file_id for row in player_stats}
+        player_events = [event for did in ids for event in by_demo[did]]
+        result[pid] = await player_round_swing(session, pid, _loaded=(player_stats, player_events, artifact))
+    return result
 
 
 def compose_roster_swing_profile(players: list[dict], map_name: str | None = None) -> dict:

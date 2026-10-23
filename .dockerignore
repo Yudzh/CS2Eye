@@ -12,3 +12,6 @@ __pycache__
 webui
 storage
 uploads
+.env.prod
+deploy/secrets
+backups

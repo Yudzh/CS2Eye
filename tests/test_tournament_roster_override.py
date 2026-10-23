@@ -34,7 +34,7 @@ async def test_permanent_and_manual_effective_rosters_are_separate(roster_db):
         service=EffectiveRosterService(s)
         before=await service.get_effective_roster(1,1,as_of=date(2026,9,2))
         assert [x["id"] for x in before["effective_roster"]]==[1,2,3,4,5]
-        await service.create_manual(1,1,5,6);await s.commit()
+        manual=await service.create_manual(1,1,5,6);manual.created_at=datetime(2026,8,20,tzinfo=UTC);await s.commit()
         factor = await s.scalar(select(AnalystFactor).where(AnalystFactor.team_id == 1))
         assert factor is not None
         assert factor.factor_type == "negative" and factor.category == "roster"
@@ -54,10 +54,10 @@ async def test_priority_dates_scope_multiple_and_disable(roster_db):
             TournamentRosterOverride(tournament_id=1,team_id=1,player_out_id=5,player_in_id=7,status="CONFIRMED",source_type="AUTO",valid_from=date(2026,9,1),valid_until=date(2026,9,10),detected_at=now),
             TournamentRosterOverride(tournament_id=1,team_id=1,player_out_id=4,player_in_id=7,status="DETECTED",source_type="AUTO",valid_from=date(2026,9,1),valid_until=date(2026,9,10),detected_at=now),
         ]);await s.commit()
-        manual=await EffectiveRosterService(s).create_manual(1,1,5,6);await s.commit()
+        manual=await EffectiveRosterService(s).create_manual(1,1,5,6);manual.created_at=datetime(2026,8,20,tzinfo=UTC);await s.commit()
         service=EffectiveRosterService(s);active=await service.get_effective_roster(1,1,as_of=date(2026,9,5))
         assert {x["id"] for x in active["effective_roster"]}=={1,2,3,6,7}
-        assert active["stand_in_penalty"]==-6 and active["replacements"][0]["status"]=="MANUAL"
+        assert active["stand_in_penalty"]==-3 and active["replacements"][0]["status"]=="MANUAL"
         assert (await service.get_effective_roster(1,1,as_of=date(2026,8,31)))["replacements"]==[]
         assert (await service.get_effective_roster(1,1,as_of=date(2026,9,11)))["replacements"]==[]
         assert (await service.get_effective_roster(1,2,as_of=date(2026,10,2)))["replacements"]==[]
@@ -71,7 +71,7 @@ async def test_auto_never_overwrites_manual(roster_db):
         async def get_tournament_lineup(self,*_): return LineupResult("available",[1,2,3,4,7],"confirmed","test")
         async def get_match_lineup(self,*_): return LineupResult("unavailable")
     async with roster_db() as s:
-        await EffectiveRosterService(s).create_manual(1,1,5,6);await s.commit()
+        manual=await EffectiveRosterService(s).create_manual(1,1,5,6);manual.created_at=datetime(2026,8,20,tzinfo=UTC);await s.commit()
         result=await TournamentLineupMonitor(s,Adapter()).check(1,1);await s.commit()
         assert result["created"]==0
         effective=await EffectiveRosterService(s).get_effective_roster(1,1,as_of=date(2026,9,5))

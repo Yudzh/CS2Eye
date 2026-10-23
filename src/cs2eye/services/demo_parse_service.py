@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -79,6 +80,17 @@ def merge_player_stats(parts: list[list[ParsedDemoPlayerStat]]) -> list[ParsedDe
             ),
         ))
     return sorted(merged, key=lambda item: item.nickname.casefold())
+
+
+def reconcile_split_player_teams(stats, kills):
+    """Use in-game identities rather than a restarted fragment's clan labels."""
+    votes = defaultdict(Counter)
+    for event in kills:
+        for player in (event.victim, event.attacker):
+            if player and player.team_name:
+                votes[player.key][player.team_name] += 1
+    return [replace(row, team_name=votes[row.identity_key].most_common(1)[0][0])
+            if votes[row.identity_key] else row for row in stats]
 
 
 class DemoParseService:
@@ -280,6 +292,8 @@ class DemoParseService:
         if process_pool is not None:
             process_pool.shutdown()
         recalculated = await recalculate_players_internal_rating(self.session, affected)
+        await self.session.commit()
+        await self._cleanup_sources(results)
         return DemoParseResponse(
             tournament_name=tournament_name, year=year, total_files=len(demo_ids),
             parsed_count=sum(item.status == "parsed" for item in results),
@@ -296,7 +310,32 @@ class DemoParseService:
             return None
         result, affected = await self.parse_one(demo, replace_existing)
         await recalculate_players_internal_rating(self.session, affected)
+        await self.session.commit()
+        await self._cleanup_sources([result])
         return result, affected
+
+    async def _cleanup_sources(self, results: list[DemoParseFileResult]) -> None:
+        if not self.delete_after_successful_parse:
+            return
+        for result in results:
+            if result.status != "parsed":
+                continue
+            demo = await self.session.get(DemoFile, result.demo_file_id)
+            if demo is None:
+                continue
+            # Split demos may be needed to stitch a later uploaded continuation.
+            if _part_number(demo.original_filename) is not None:
+                result.diagnostics.append("source_retained_split_demo")
+                continue
+            try:
+                path = (self.storage_root / demo.storage_path).resolve()
+                path.relative_to(self.storage_root.resolve())
+                await asyncio.to_thread(path.unlink, missing_ok=True)
+                demo.source_deleted_at = datetime.now(UTC)
+                await self.session.commit()
+            except (OSError, ValueError):
+                result.diagnostics.append("source_cleanup_failed")
+                logging.getLogger(__name__).exception("Demo source cleanup failed: %s", result.demo_file_id)
 
     async def _replace_swing_source_events(self, demo_file_id: int, parsed_demo: ParsedDemo) -> None:
         """Persist parser-independent inputs so future Swing versions only recalculate."""
@@ -488,6 +527,9 @@ class DemoParseService:
                             for event in item.bomb_events
                         ],
                     )
+            if merged_previous_parts:
+                parsed_demo = replace(parsed_demo, player_stats=reconcile_split_player_teams(
+                    parsed_demo.player_stats, parsed_demo.kills))
             # Keep third-party/test adapters using the pre-iteration list contract
             # operational; their map result is intentionally partial, never guessed.
             if isinstance(parsed_demo, list):

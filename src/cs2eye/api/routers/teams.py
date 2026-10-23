@@ -30,7 +30,7 @@ from cs2eye.services.team_comparison_service import (
     TeamNotFoundError,
 )
 from cs2eye.services.leadership_service import LeadershipService
-from cs2eye.services.round_swing_service import active_model, compose_roster_swing_profile, player_round_swing
+from cs2eye.services.round_swing_service import active_model, compose_roster_swing_profile, player_round_swings
 from cs2eye.models.team import Player, Team, TeamParticipantMembership, TeamRoster, TeamRosterMember
 from cs2eye.services.analyst_context_service import AnalystContextService
 from cs2eye.api.routers.analyst_factors import response as analyst_factor_response
@@ -233,8 +233,12 @@ async def compare_teams(
             leadership=leadership,
         )
 
-    swing_players_a=[{"player_id":player.id,**await player_round_swing(session,player.id)} for player in comparison.team_a.roster]
-    swing_players_b=[{"player_id":player.id,**await player_round_swing(session,player.id)} for player in comparison.team_b.roster]
+    # Both rosters share demo histories; fetch their events once for the request.
+    swings = await player_round_swings(session, [
+        player.id for side in (comparison.team_a, comparison.team_b) for player in side.roster
+    ])
+    swing_players_a=[{"player_id":player.id,**swings[player.id]} for player in comparison.team_a.roster]
+    swing_players_b=[{"player_id":player.id,**swings[player.id]} for player in comparison.team_b.roster]
     swing_a=compose_roster_swing_profile(swing_players_a);swing_b=compose_roster_swing_profile(swing_players_b)
     swing_maps=sorted({name for item in [*swing_players_a,*swing_players_b] for name in item.get("maps",{})})
     swing_model=await active_model(session)
@@ -247,8 +251,12 @@ async def compare_teams(
     relevant_a, all_a = await context_service.relevant(team_a_id, maps=maps, environment=environment)
     relevant_b, all_b = await context_service.relevant(team_b_id, maps=maps, environment=environment)
     async def context_side(relevant, all_active):
-        return {"relevant": [await analyst_factor_response(session, item) for item in relevant],
-                "all_active": [await analyst_factor_response(session, item) for item in all_active]}
+        responses = {}
+        for item in [*relevant, *all_active]:
+            if item.id not in responses:
+                responses[item.id] = await analyst_factor_response(session, item)
+        return {"relevant": [responses[item.id] for item in relevant],
+                "all_active": [responses[item.id] for item in all_active]}
     form_context = await FormContextService(session).compare(team_a_id, team_b_id, as_of, tournament_id)
     return TeamComparisonResponse(
         team_a=side_response(comparison.team_a,leadership_a),
@@ -293,7 +301,7 @@ async def get_team(
                 "supporting_strength":player.supporting_strength_v3,"player_strength":player.player_strength_v3,
                 "reliability":player.player_strength_v3_reliability,"breakdown":player.player_strength_v3_breakdown,
                 "model_version":player.player_strength_v3_model_version}
-    swings={player.id:await player_round_swing(session,player.id) for player,_ in roster}
+    swings=await player_round_swings(session,[player.id for player,_ in roster])
     participants = [
         TeamParticipantResponse(
             id=player.id,

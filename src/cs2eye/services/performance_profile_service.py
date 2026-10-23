@@ -5,7 +5,7 @@ from datetime import date
 from math import sqrt
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.analytics.combat.core import CombatKill, calculate_combat
@@ -113,7 +113,10 @@ def _raw_profile(*, rounds: float, kills: float, deaths: float, damage: float, a
 
 
 class PerformanceProfileService:
-    def __init__(self, session: AsyncSession): self.session = session; self._cache: dict[tuple[date | None, date | None, str | None, int | None], dict] = {}
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        # Reuse the same dataset across services in this request, never across sessions.
+        self._cache = (session.info if session is not None else {}).setdefault("performance_profile_datasets", {})
 
     async def _dataset(self, as_of: date | None, since: date | None = None, map_name: str | None = None,
                        exclude_match_id: int | None = None) -> dict:
@@ -128,11 +131,30 @@ class PerformanceProfileService:
             query = query.join(DemoMapResult, DemoMapResult.demo_file_id == DemoFile.id).where(DemoMapResult.map_name == map_name)
         rows = [row for row, _ in (await self.session.execute(query)).all()]
         demo_ids = {row.demo_file_id for row in rows}; player_ids = {row.player_id for row in rows}; team_ids = {row.demo_team_id for row in rows if row.demo_team_id}
-        kill_q = select(DemoKill).where(DemoKill.demo_file_id.in_(demo_ids)) if demo_ids else select(DemoKill).where(False)
-        damage_q = select(DemoDamageEvent).where(DemoDamageEvent.demo_file_id.in_(demo_ids)) if demo_ids else select(DemoDamageEvent).where(False)
-        kills = list((await self.session.scalars(kill_q)).all()); damages = list((await self.session.scalars(damage_q)).all())
-        round_q = select(DemoRound).where(DemoRound.demo_file_id.in_(demo_ids), DemoRound.is_complete.is_(True)) if demo_ids else select(DemoRound).where(False)
-        rounds = list((await self.session.scalars(round_q)).all())
+        kill_q = select(DemoKill.demo_file_id, DemoKill.round_id, DemoKill.tick,
+            DemoKill.attacker_identity_key, DemoKill.victim_identity_key,
+            DemoKill.attacker_team_name, DemoKill.victim_team_name,
+            DemoKill.attacker_side, DemoKill.victim_side, DemoKill.weapon,
+            DemoKill.is_headshot, DemoKill.assister_identity_key, DemoKill.is_teamkill,
+            DemoKill.is_suicide, DemoKill.attacker_player_id, DemoKill.attacker_team_id,
+            DemoKill.victim_player_id, DemoKill.victim_team_id,
+        ).where(DemoKill.demo_file_id.in_(demo_ids))
+        # Millions of damage ORM objects are unnecessary: only per-player/side
+        # totals are used below. Keep demo_id for the correct historical team mapping.
+        damage_side = func.lower(func.coalesce(DemoDamageEvent.attacker_side, ""))
+        damage_q = select(DemoDamageEvent.demo_file_id, DemoDamageEvent.attacker_player_id,
+                          damage_side, func.sum(DemoDamageEvent.health_damage)).where(
+            DemoDamageEvent.demo_file_id.in_(demo_ids),
+            DemoDamageEvent.attacker_player_id.is_not(None),
+        ).group_by(DemoDamageEvent.demo_file_id, DemoDamageEvent.attacker_player_id, damage_side)
+        kills = (await self.session.execute(kill_q)).all() if demo_ids else []
+        damages = (await self.session.execute(damage_q)).all() if demo_ids else []
+        # Combat derivation only needs round identity and winner, not the large
+        # per-round state/economy JSON payloads.
+        round_q = select(DemoRound.id, DemoRound.demo_file_id, DemoRound.round_number,
+                         DemoRound.winner_team_name).where(
+            DemoRound.demo_file_id.in_(demo_ids), DemoRound.is_complete.is_(True))
+        rounds = (await self.session.execute(round_q)).all() if demo_ids else []
         by_player = defaultdict(list); by_team = defaultdict(list); map_team_by_player = {}
         for row in rows:
             by_player[row.player_id].append(row)
@@ -157,8 +179,9 @@ class PerformanceProfileService:
             for row in stat_rows:
                 if row.demo_team_name and row.identity_key: rosters[row.demo_team_name].add(row.identity_key)
                 if row.player_id: identity_to_player[row.identity_key] = row.player_id
+            round_numbers = {r.id: r.round_number for r in rounds_by_demo[demo_id]}
             combat_events = [CombatKill(
-                next((r.round_number for r in rounds_by_demo[demo_id] if r.id == kill.round_id), 0),
+                round_numbers.get(kill.round_id, 0),
                 kill.tick, kill.attacker_identity_key, kill.victim_identity_key,
                 kill.attacker_team_name, kill.victim_team_name, kill.attacker_side, kill.victim_side,
                 kill.weapon, kill.is_headshot, kill.assister_identity_key, kill.is_teamkill, kill.is_suicide,
@@ -178,12 +201,11 @@ class PerformanceProfileService:
             victim_side = (kill.victim_side or "").lower()
             for kind, entity in (("player", kill.victim_player_id), ("team", kill.victim_team_id)):
                 if entity: event[(kind, entity, victim_side)]["deaths"] += 1
-        for damage in damages:
-            side = (damage.attacker_side or "").lower(); pid = damage.attacker_player_id
+        for demo_id, pid, side, total_damage in damages:
             if pid:
-                event[("player", pid, side)]["damage"] += damage.health_damage
-                tid = map_team_by_player.get((damage.demo_file_id, pid))
-                if tid: event[("team", tid, side)]["damage"] += damage.health_damage
+                event[("player", pid, side)]["damage"] += total_damage
+                tid = map_team_by_player.get((demo_id, pid))
+                if tid: event[("team", tid, side)]["damage"] += total_damage
 
         def build(kind: str, entity: int, entity_rows: list[DemoPlayerStat], event_entity: int | None = None) -> dict:
             utility_items = [r.utility_data for r in entity_rows if r.utility_data]

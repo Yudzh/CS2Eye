@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -271,13 +271,10 @@ async def test_match_callback_loads_context_from_backend() -> None:
     event = callback()
     client = SimpleNamespace(
         get_match=AsyncMock(return_value=match_payload()),
-        get_match_analysis_context=AsyncMock(return_value=context_payload()),
+        get_match_summary=AsyncMock(return_value=context_payload()),
     )
     await match_card(event, MatchCallback(match_id=42, tournament_id=7), client)
-    kwargs = client.get_match_analysis_context.await_args.kwargs
-    assert kwargs["team_a_id"] == 1
-    assert kwargs["team_b_id"] == 2
-    assert kwargs["match_id"] == 42
+    client.get_match_summary.assert_awaited_once_with(42)
     assert "Confidence: Medium" in event.message.edit_text.await_args.args[0]
     keyboard = event.message.edit_text.await_args.kwargs["reply_markup"]
     assert keyboard.inline_keyboard[0][0].callback_data == "ai:latest:42:7:0"
@@ -289,6 +286,7 @@ async def test_he_kill_navigation_reuses_cached_match_context() -> None:
     first = callback(user_id=777)
     client = SimpleNamespace(
         get_match=AsyncMock(return_value=match_payload()),
+        get_match_summary=AsyncMock(return_value=context_payload()),
         get_match_analysis_context=AsyncMock(return_value=context_payload()),
     )
     await match_card(first, MatchCallback(match_id=42, tournament_id=7), client, state)
@@ -302,6 +300,7 @@ async def test_he_kill_navigation_reuses_cached_match_context() -> None:
     assert keyboard.inline_keyboard[0][0].text == "← Назад к матчу"
     back = callback(user_id=777)
     await match_card(back, MatchCallback(match_id=42, tournament_id=7), client, state)
+    client.get_match_summary.assert_awaited_once_with(42)
     client.get_match.assert_awaited_once()
     client.get_match_analysis_context.assert_awaited_once()
 
@@ -406,9 +405,8 @@ async def test_latest_analysis_exists() -> None:
     await latest_analysis(event, data, client)
     assert "По расчётам должна выиграть FURIA — 57%" in event.message.edit_text.await_args.args[0]
     keyboard = event.message.edit_text.await_args.kwargs["reply_markup"]
-    assert keyboard.inline_keyboard[0][0].text == "Обновить анализ"
     assert [button.text for row in keyboard.inline_keyboard for button in row] == [
-        "Обновить анализ", "← Назад",
+        "← Назад",
     ]
 
 
@@ -421,36 +419,38 @@ async def test_latest_analysis_absent() -> None:
     await latest_analysis(
         event, AnalysisCallback(action="latest", match_id=42, tournament_id=7), client,
     )
-    assert event.message.edit_text.await_args.args[0] == "AI-анализ для этого матча ещё не создан."
+    assert event.message.edit_text.await_args.args[0] == "AI-отчёт для этого матча пока не опубликован. Он будет доступен в день турнира."
     keyboard = event.message.edit_text.await_args.kwargs["reply_markup"]
-    assert keyboard.inline_keyboard[0][0].text == "Сгенерировать анализ"
+    assert [button.text for row in keyboard.inline_keyboard for button in row] == ["← Назад"]
 
 
-async def test_generate_analysis_uses_backend_and_displays_new_run() -> None:
+async def test_old_generate_button_only_opens_saved_report() -> None:
     event = callback()
     client = SimpleNamespace(
         get_match=AsyncMock(return_value=match_payload()),
-        generate_llm_analysis=AsyncMock(return_value=analysis_payload(run_id=102)),
+        get_latest_llm_analysis=AsyncMock(return_value=analysis_payload(run_id=102)),
+        generate_llm_analysis=AsyncMock(),
     )
     await generate_analysis(
         event, AnalysisCallback(action="generate", match_id=42, tournament_id=7), client,
     )
-    assert event.message.edit_text.await_count == 2
-    assert event.message.edit_text.await_args_list[0].args[0] == "Генерирую анализ..."
-    assert "📌 <b>Итог</b>" in event.message.edit_text.await_args_list[1].args[0]
-    assert client.generate_llm_analysis.await_args.kwargs["match_id"] == 42
+    client.generate_llm_analysis.assert_not_awaited()
+    client.get_latest_llm_analysis.assert_awaited_once()
+    assert "📌 <b>Итог</b>" in event.message.edit_text.await_args.args[0]
 
 
-async def test_generate_analysis_error_is_safe() -> None:
+async def test_old_generate_button_does_not_generate_missing_report() -> None:
     event = callback()
     client = SimpleNamespace(
         get_match=AsyncMock(return_value=match_payload()),
-        generate_llm_analysis=AsyncMock(side_effect=CS2EyeAPIError("provider failed")),
+        get_latest_llm_analysis=AsyncMock(side_effect=CS2EyeNotFoundError("missing")),
+        generate_llm_analysis=AsyncMock(),
     )
     await generate_analysis(
         event, AnalysisCallback(action="generate", match_id=42, tournament_id=7), client,
     )
-    assert event.message.edit_text.await_args.args[0] == "Не удалось сгенерировать анализ. Попробуйте ещё раз."
+    client.generate_llm_analysis.assert_not_awaited()
+    assert event.message.edit_text.await_args.args[0] == "AI-отчёт для этого матча пока не опубликован. Он будет доступен в день турнира."
 
 
 async def test_history_and_navigation_buttons() -> None:
@@ -477,23 +477,21 @@ async def test_opens_specific_saved_run_without_generation() -> None:
     )
     client.get_llm_analysis_run.assert_awaited_once_with(101)
     keyboard = event.message.edit_text.await_args.kwargs["reply_markup"]
-    assert keyboard.inline_keyboard[0][0].callback_data == "ai:regenerate:42:7:101"
-    assert keyboard.inline_keyboard[1][0].callback_data == "ai:history:42:7:0"
+    assert keyboard.inline_keyboard[0][0].callback_data == "ai:history:42:7:0"
 
 
-async def test_regenerate_creates_and_opens_new_run() -> None:
+async def test_old_regenerate_button_cannot_generate() -> None:
     event = callback()
-    client = SimpleNamespace(
-        regenerate_llm_analysis=AsyncMock(return_value=analysis_payload(run_id=202)),
-    )
+    client = SimpleNamespace(regenerate_llm_analysis=AsyncMock())
     await regenerate_analysis(
         event,
         AnalysisCallback(action="regenerate", match_id=42, tournament_id=7, run_id=101),
         client,
     )
-    client.regenerate_llm_analysis.assert_awaited_once_with(101)
-    keyboard = event.message.edit_text.await_args.kwargs["reply_markup"]
-    assert keyboard.inline_keyboard[0][0].callback_data == "ai:regenerate:42:7:202"
+    client.regenerate_llm_analysis.assert_not_awaited()
+    event.answer.assert_awaited_once_with(
+        "Перегенерация отчётов через Telegram отключена.", show_alert=True,
+    )
 
 
 async def test_api_client_latest_404_has_distinct_error() -> None:
@@ -515,7 +513,7 @@ async def test_api_client_latest_404_has_distinct_error() -> None:
         await http_client.aclose()
 
 
-async def test_back_to_matches_reuses_navigation_snapshot() -> None:
+async def test_back_to_matches_reloads_matches_instead_of_indefinite_snapshot() -> None:
     state = NavigationState()
     client = SimpleNamespace(
         get_tournament=AsyncMock(return_value={"id": 7, "name": "IEM Chengdu"}),
@@ -529,7 +527,7 @@ async def test_back_to_matches_reuses_navigation_snapshot() -> None:
         NavigationCallback(destination="matches", tournament_id=7), client, state,
     )
     client.get_tournament.assert_awaited_once_with(7)
-    client.get_tournament_matches.assert_awaited_once_with(7)
+    assert client.get_tournament_matches.await_count == 2
 
 
 async def test_open_tournament_reuses_selected_item_from_tournaments_screen() -> None:
@@ -596,21 +594,22 @@ async def test_api_client_reuses_one_async_client_and_closes_owned_client() -> N
         assert owned_client.is_closed
 
 
-async def test_generate_replaces_session_analysis() -> None:
+async def test_old_generate_button_refreshes_saved_session_analysis() -> None:
     state = NavigationState()
     event = callback(user_id=502)
     state.for_callback(event).analyses[42] = analysis_payload(run_id=101)
     client = SimpleNamespace(
         get_match=AsyncMock(return_value=match_payload()),
         generate_llm_analysis=AsyncMock(return_value=analysis_payload(run_id=202)),
-        get_latest_llm_analysis=AsyncMock(),
+        get_latest_llm_analysis=AsyncMock(return_value=analysis_payload(run_id=202)),
     )
     data = AnalysisCallback(action="generate", match_id=42, tournament_id=7)
     await generate_analysis(event, data, client, state)
     reopened = callback(user_id=502)
     await latest_analysis(reopened, data, client, state)
     assert state.for_callback(reopened).analyses[42]["analysis_run_id"] == 202
-    client.get_latest_llm_analysis.assert_not_awaited()
+    assert client.get_latest_llm_analysis.await_count == 2
+    client.generate_llm_analysis.assert_not_awaited()
 
 
 async def test_callback_is_answered_before_backend_request() -> None:
@@ -679,9 +678,7 @@ def test_detail_formatters_handle_empty_data() -> None:
 async def test_match_detail_and_back_use_cached_card_without_backend_request() -> None:
     state = NavigationState()
     detail_event = callback(user_id=601)
-    state.for_callback(detail_event).match_cards[42] = (
-        match_payload(), detail_context_payload(),
-    )
+    state.for_callback(detail_event).store_card(42, match_payload(), detail_context_payload())
     client = SimpleNamespace(
         get_match=AsyncMock(), get_match_analysis_context=AsyncMock(),
     )
@@ -708,3 +705,225 @@ async def test_backend_error_for_one_detail_keeps_back_button() -> None:
     assert event.message.edit_text.await_args.args[0] == ERROR_TEXT
     keyboard = event.message.edit_text.await_args.kwargs["reply_markup"]
     assert keyboard.inline_keyboard[0][0].text == "← Назад к матчу"
+
+
+async def test_expired_card_reloads_active_model_and_manual_input():
+    state=NavigationState()
+    event=callback(user_id=900)
+    session=state.for_callback(event)
+    session.store_card(42,match_payload(),context_payload())
+    session.match_card_times[42]-=31
+    fresh=context_payload()
+    fresh['generated_at']='2026-10-13T11:00:00Z'
+    fresh['prediction'].update(model_version='v13',team_a_probability=.69,team_b_probability=.31,
+        manual_adjustment={'base_team_a_probability':.54,'impact_team_a_pp':15})
+    client=SimpleNamespace(get_match=AsyncMock(return_value=match_payload()),
+        get_match_summary=AsyncMock(return_value=fresh))
+    await match_card(event,MatchCallback(match_id=42,tournament_id=7),client,state)
+    text=event.message.edit_text.await_args.args[0]
+    assert 'Модель: v13' in text and 'FURIA — 69%' in text
+    assert 'Ручной анализ: FURIA +15.0 п.п.' in text
+    assert '13.10.2026 11:00 UTC' in text
+    client.get_match_summary.assert_awaited_once()
+
+
+async def test_refresh_button_bypasses_even_fresh_card():
+    state=NavigationState()
+    event=callback(user_id=901)
+    state.for_callback(event).store_card(42,match_payload(),context_payload())
+    changed=context_payload()
+    changed['prediction']['team_a_probability']=.8
+    changed['prediction']['team_b_probability']=.2
+    client=SimpleNamespace(get_match=AsyncMock(return_value=match_payload()),
+        get_match_summary=AsyncMock(return_value=changed))
+    await match_detail(event,MatchDetailCallback(section='refresh',match_id=42,tournament_id=7),client,state)
+    assert 'FURIA — 80%' in event.message.edit_text.await_args.args[0]
+    event.answer.assert_awaited_once()
+    client.get_match_summary.assert_awaited_once()
+
+
+async def test_latest_analysis_does_not_keep_a_cached_missing_or_old_run():
+    state=NavigationState()
+    event=callback(user_id=902)
+    state.for_callback(event).analyses[42]=None
+    client=SimpleNamespace(get_match=AsyncMock(return_value=match_payload()),
+        get_latest_llm_analysis=AsyncMock(return_value=analysis_payload(run_id=202)))
+    await latest_analysis(event,AnalysisCallback(action='latest',match_id=42,tournament_id=7),client,state)
+    client.get_latest_llm_analysis.assert_awaited_once()
+    assert state.for_callback(event).analyses[42]['analysis_run_id']==202
+
+
+async def test_api_client_regenerates_with_new_context_and_long_analytics_timeout():
+    seen=[]
+    async def respond(request):
+        seen.append(request)
+        return httpx.Response(200,request=request,json={'analysis_run_id':202})
+    async with httpx.AsyncClient(base_url='http://backend',transport=httpx.MockTransport(respond)) as http:
+        client=CS2EyeAPIClient('http://backend',client=http,analytics_timeout=120)
+        await client.get_match_analysis_context(team_a_id=1,team_b_id=2,as_of=datetime.now(UTC),match_id=42,tournament_id=7)
+        assert seen[-1].extensions['timeout']['read']==120
+        await client.regenerate_llm_analysis(101)
+        import json
+        body=json.loads(seen[-1].content)
+        assert body['reuse_context'] is False and body['as_of']
+
+
+def test_completed_match_card_distinguishes_current_forecast_from_archive():
+    match=match_payload()|{'status':'completed','score':{'team_a':2,'team_b':0}}
+    text=format_match_card(match,context_payload())
+    assert 'Матч завершён · 2:0' in text
+    assert 'не архив предматчевого прогноза' in text
+
+
+def test_past_tournaments_order_and_missing_history_card():
+    from cs2eye.bot.formatters import past_tournaments, format_past_match_card
+    from cs2eye.bot.keyboards import main_menu_keyboard
+    items = past_tournaments([{"id":1,"start_date":"2026-08-26","end_date":"2026-09-01"}, {"id":2,"name":"ESL Pro League Season 24","start_date":"2026-10-03","end_date":"2026-10-12"}, {"id":3,"start_date":"2026-10-20","end_date":"2026-11-01"}], today=date(2026,10,14))
+    assert [item["id"] for item in items] == [2]
+    assert any(button.text == "Прошлые турниры" for row in main_menu_keyboard().inline_keyboard for button in row)
+    match = match_payload() | {"status":"completed", "score":{"team_a":2,"team_b":0}, "winner_team_id":1,
+        "prediction_history_coverage":{"as_of":"2026-10-03","required_maps":3,"teams":[{"name":"1win","available_maps":0}]}}
+    text = format_past_match_card(match, [])
+    assert "Прогноз до матча не был сохранён" in text
+    assert "1win: 0 карт" in text
+    assert "Счёт: 2 : 0" in text
+
+
+async def test_archived_navigation_and_saved_forecast_without_live_analysis():
+    from cs2eye.bot.handlers import archived_tournaments
+    state = NavigationState()
+    event = callback(user_id=9991)
+    match = match_payload() | {"status":"completed","score":{"team_a":2,"team_b":0},"winner_team_id":1}
+    forecast = {"match_id":42,"source":"pre_match","versions":{"ml":"v12"},"created_at":"2026-10-02",
+                "team_a":{"name":"Alpha"},"team_b":{"name":"Bravo"},"ml":{"predicted_winner":"Alpha","team_a_value":.7,"team_b_value":.3,"correct":True}}
+    client = SimpleNamespace(get_tournaments=AsyncMock(return_value=[{"id":7,"name":"Cup","start_date":"2026-10-03","end_date":"2026-10-12"}]),
+        get_tournament_matches=AsyncMock(return_value=[match, match | {"id":43,"status":"scheduled"}]),
+        get_match=AsyncMock(return_value=match),get_saved_match_forecasts=AsyncMock(return_value=[forecast]),
+        get_match_analysis_context=AsyncMock())
+    await archived_tournaments(event,client,state)
+    await tournament_matches(event,TournamentCallback(tournament_id=7),client,state)
+    keyboard=event.message.edit_text.await_args.kwargs["reply_markup"]
+    assert keyboard.inline_keyboard[0][0].callback_data == "match:42:7"
+    assert len(keyboard.inline_keyboard) == 2
+    assert keyboard.inline_keyboard[-1][0].callback_data == "nav:past_tournaments:0"
+    await match_card(event,MatchCallback(match_id=42,tournament_id=7),client,state)
+    text=event.message.edit_text.await_args.args[0]
+    assert "Alpha: 70.0%" in text
+    assert "✓ Угадали" in text
+    client.get_match_analysis_context.assert_not_awaited()
+
+
+async def test_restart_command_clears_only_current_user_and_opens_menu():
+    from cs2eye.bot.handlers import start
+    state = NavigationState()
+    user = state.for_user(101)
+    user.past_tournaments = True
+    user.analyses[42] = {"old": True}
+    user.bot_messages.add((101, 5))
+    other = state.for_user(202)
+    other.analyses[43] = {"keep": True}
+    other.bot_messages.add((202, 8))
+    chat = SimpleNamespace(id=101, type="private")
+    bot = SimpleNamespace(delete_message=AsyncMock())
+    message = SimpleNamespace(from_user=SimpleNamespace(id=101), bot=bot,
+        answer=AsyncMock(side_effect=[SimpleNamespace(chat=chat,message_id=10), SimpleNamespace(chat=chat,message_id=11)]))
+    await start(message, state)
+    bot.delete_message.assert_awaited_once_with(101, 5)
+    assert state.for_user(101).analyses == {}
+    assert not state.for_user(101).past_tournaments
+    assert state.for_user(101).bot_messages == {(101,10),(101,11)}
+    assert state.for_user(202) is other
+    assert other.analyses == {43:{"keep":True}}
+    keyboard = message.answer.await_args_list[0].kwargs["reply_markup"]
+    assert keyboard.is_persistent
+    assert [button.text for button in keyboard.keyboard[0]] == ["/start"]
+
+
+async def test_restart_button_handles_undeletable_message_and_private_chat_only():
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import DeleteMessage
+    from cs2eye.bot.handlers import restart_navigation
+    state = NavigationState()
+    bot = SimpleNamespace(delete_message=AsyncMock(side_effect=TelegramBadRequest(method=DeleteMessage(chat_id=101,message_id=5),message="message can't be deleted")))
+    chat = SimpleNamespace(id=101,type="private")
+    message = SimpleNamespace(chat=chat,message_id=5,answer=AsyncMock(side_effect=[SimpleNamespace(chat=chat,message_id=10),SimpleNamespace(chat=chat,message_id=11)]))
+    event = SimpleNamespace(from_user=SimpleNamespace(id=101),message=message,bot=bot,answer=AsyncMock())
+    await restart_navigation(event,state)
+    event.answer.assert_awaited_once()
+    assert message.answer.await_count == 2
+    assert state.for_user(101).bot_messages == {(101,10),(101,11)}
+    state.track_message(state.for_user(101),SimpleNamespace(chat=SimpleNamespace(id=-1,type="group"),message_id=20))
+    assert (-1,20) not in state.for_user(101).bot_messages
+
+
+async def test_card_shows_navigation_before_forecast_and_loads_details_lazily():
+    import asyncio
+    state = NavigationState()
+    event = callback(user_id=950)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def summary(match_id):
+        entered.set()
+        await release.wait()
+        return context_payload()
+
+    client = SimpleNamespace(get_match=AsyncMock(return_value=match_payload()),
+        get_match_summary=AsyncMock(side_effect=summary),
+        get_match_analysis_context=AsyncMock(return_value=context_payload()))
+    task = asyncio.create_task(match_card(event, MatchCallback(match_id=42, tournament_id=7), client, state))
+    await asyncio.wait_for(entered.wait(), 1)
+    try:
+        text = event.message.edit_text.await_args.args[0]
+        assert 'Рассчитываю прогноз' in text
+        assert event.message.edit_text.await_args.kwargs['reply_markup']
+        client.get_match_analysis_context.assert_not_awaited()
+        assert state.for_callback(event).fresh_card(42) is None
+    finally:
+        release.set()
+        await task
+    assert 'Confidence: Medium' in event.message.edit_text.await_args.args[0]
+    assert state.for_callback(event).fresh_summary(42) is not None
+    assert state.for_callback(event).fresh_card(42) is None
+    await match_detail(event, MatchDetailCallback(section='he_kill', match_id=42, tournament_id=7), client, state)
+    await match_detail(event, MatchDetailCallback(section='h2h', match_id=42, tournament_id=7), client, state)
+    client.get_match_analysis_context.assert_awaited_once()
+    client.get_match_summary.assert_awaited_once_with(42)
+
+
+async def test_late_card_forecast_does_not_overwrite_open_detail():
+    import asyncio
+    state = NavigationState()
+    event = callback(user_id=951)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def summary(match_id):
+        entered.set()
+        await release.wait()
+        return context_payload()
+
+    client = SimpleNamespace(get_match=AsyncMock(return_value=match_payload()),
+        get_match_summary=AsyncMock(side_effect=summary),
+        get_match_analysis_context=AsyncMock(return_value=context_payload()))
+    task = asyncio.create_task(match_card(event, MatchCallback(match_id=42, tournament_id=7), client, state))
+    await asyncio.wait_for(entered.wait(), 1)
+    try:
+        await match_detail(event, MatchDetailCallback(section='he_kill', match_id=42, tournament_id=7), client, state)
+        detail_text = event.message.edit_text.await_args.args[0]
+        assert 'HE Kill' in detail_text
+    finally:
+        release.set()
+        await task
+    assert event.message.edit_text.await_args.args[0] == detail_text
+    assert event.message.edit_text.await_count == 2
+
+
+async def test_summary_api_uses_light_endpoint():
+    seen = []
+    async def respond(request):
+        seen.append(request)
+        return httpx.Response(200, json=context_payload())
+    async with httpx.AsyncClient(base_url='http://backend', transport=httpx.MockTransport(respond)) as http:
+        client = CS2EyeAPIClient('http://backend', client=http)
+        await client.get_match_summary(42)
+    assert seen[0].url.path == '/api/v1/analysis/match-card-context'
+    assert seen[0].url.params['match_id'] == '42'

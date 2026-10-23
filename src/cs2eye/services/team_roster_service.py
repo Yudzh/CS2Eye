@@ -92,6 +92,8 @@ async def set_current_roster(
     # A single flush may update an older roster first, violating the index.
     if previous:
         await session.flush()
+    if roster.source == "tournament":
+        roster.source = source
     roster.is_current = True
     roster.active_from = roster.active_from or active_from
     if roster.active_from == active_from and active_from is not None:

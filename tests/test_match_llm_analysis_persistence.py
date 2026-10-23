@@ -354,11 +354,28 @@ async def test_generate_detail_history_latest_and_regenerate_api(monkeypatch):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test",
     ) as client:
-        generated = await client.post(
-            "/api/v1/analysis/llm-match-analysis/generate", json=request,
-        )
+        import asyncio
+        generated, simultaneous = await asyncio.gather(*(
+            client.post(
+                "/api/v1/analysis/llm-match-analysis/generate",
+                json={**request, "reuse_existing": True},
+            ) for _ in range(2)
+        ))
         assert generated.status_code == 200, generated.text
+        assert simultaneous.status_code == 200, simultaneous.text
+        assert simultaneous.json()["analysis_run_id"] == generated.json()["analysis_run_id"]
         run_id = generated.json()["analysis_run_id"]
+        # Telegram requests reuse the saved result, even on simultaneous clicks.
+        duplicates = await asyncio.gather(*(
+            client.post(
+                "/api/v1/analysis/llm-match-analysis/generate",
+                json={**request, "reuse_existing": True},
+            ) for _ in range(2)
+        ))
+        assert all(response.status_code == 200 for response in duplicates)
+        assert all(response.json()["analysis_run_id"] == run_id for response in duplicates)
+        assert build_calls == 1
+
         source = context({**full_context_payload(), "generated_at": "2026-09-02T00:00:00Z"})
         detail = await client.get(f"/api/v1/analysis/llm-match-analysis/{run_id}")
         assert detail.json()["context"]["generated_at"] == "2026-08-27T08:00:00Z"

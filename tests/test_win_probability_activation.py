@@ -61,7 +61,7 @@ async def test_passed_gate_activates_without_forced_status(model_db) -> None:
 async def test_forced_model_is_used_and_reported_as_experimental(model_db, monkeypatch) -> None:
     async with model_db() as session:
         row = artifact("v1", passed=False, active=True, forced=True)
-        session.add_all([row, Team(id=1, bo3_id=1, bo3_slug="a", name="A"), Team(id=2, bo3_id=2, bo3_slug="b", name="B")]); await session.commit()
+        session.add_all([row, Team(id=1, bo3_id=1, bo3_slug="a", name="A", current_rank=7), Team(id=2, bo3_id=2, bo3_slug="b", name="B", current_rank=45)]); await session.commit()
         async def matchup(*_args, **_kwargs):
             return {"team_a":{"id":1,"name":"A","score":55},"team_b":{"id":2,"name":"B","score":45},"raw_score":55,"reliability":.8,"factors":[],"limitations":[]}
         monkeypatch.setattr(service.MatchupService, "calculate", matchup)
@@ -70,6 +70,69 @@ async def test_forced_model_is_used_and_reported_as_experimental(model_db, monke
         assert result["prediction_status"] == "available"
         assert result["model_status"] == "experimental" and result["quality_gate_passed"] is False
         assert result["team_a"]["probability"] == .62
+
+
+@pytest.mark.parametrize("historical", [False, True])
+@pytest.mark.parametrize("reliability", [.8, .01])
+async def test_precomputed_matchup_preserves_prediction_without_recalculation(
+    model_db, monkeypatch, historical, reliability,
+) -> None:
+    async with model_db() as session:
+        row = artifact("v1", passed=True, active=True)
+        row.artifact = {
+            "features": WIN_PROBABILITY_FEATURES,
+            "means": [0.] * len(WIN_PROBABILITY_FEATURES),
+            "scales": [1.] * len(WIN_PROBABILITY_FEATURES),
+            "coefficients": [.5] * len(WIN_PROBABILITY_FEATURES),
+            "intercept": .1,
+        }
+        session.add_all([
+            row,
+            Team(id=1, bo3_id=1, bo3_slug="a", name="A", current_rank=3),
+            Team(id=2, bo3_id=2, bo3_slug="b", name="B", current_rank=12),
+        ])
+        await session.commit()
+        cutoff = date.today() - timedelta(days=int(historical))
+        matchup = {
+            "team_a": {"id": 1, "name": "A", "score": 55},
+            "team_b": {"id": 2, "name": "B", "score": 45},
+            "raw_score": 58, "reliability": reliability,
+            "factors": [], "limitations": [],
+        }
+        if historical:
+            matchup["prediction_features"] = {key: .2 for key in WIN_PROBABILITY_FEATURES}
+        calls = []
+
+        async def calculate(_self, *args):
+            calls.append(args)
+            return matchup
+
+        monkeypatch.setattr(service.MatchupService, "calculate", calculate)
+        expected = await service.predict_win_probability(session, 1, 2, as_of=cutoff, series_id=10)
+        assert calls == [(1, 2, "bo3", "pre_veto", cutoff, 10)]
+
+        async def unexpected_calculation(*args, **kwargs):
+            raise AssertionError("precomputed Matchup must not be recalculated")
+
+        monkeypatch.setattr(service.MatchupService, "calculate", unexpected_calculation)
+        actual = await service.predict_win_probability(
+            session, 1, 2, as_of=cutoff, series_id=10, precomputed_matchup=matchup,
+        )
+        assert actual == expected
+        assert actual["matchup"] is matchup
+        assert actual["prediction_status"] == ("available" if reliability == .8 else "insufficient_data")
+
+
+async def test_precomputed_matchup_does_not_require_a_trained_model(model_db, monkeypatch) -> None:
+    async def unexpected_calculation(*args, **kwargs):
+        raise AssertionError("missing model must not trigger Matchup")
+
+    monkeypatch.setattr(service.MatchupService, "calculate", unexpected_calculation)
+    async with model_db() as session:
+        expected = await service.predict_win_probability(session, 1, 2)
+        actual = await service.predict_win_probability(session, 1, 2, precomputed_matchup={})
+        assert actual == expected
+        assert actual["prediction_status"] == "model_not_trained"
 
 
 async def test_retrain_creates_fresh_inactive_version_and_preserves_old(model_db, monkeypatch) -> None:
@@ -131,3 +194,28 @@ async def test_train_uses_v3_dataset_and_schema_by_default(model_db, monkeypatch
                    "format_bo1_strength", "format_bo3_strength", "format_bo5_strength", *WIN_PROBABILITY_FEATURES_V3_CANDIDATES}
         assert dropped.isdisjoint(row.artifact["features"])
         assert set(row.metrics["coefficients"]) == set(WIN_PROBABILITY_FEATURES_V3)
+
+
+@pytest.mark.parametrize("ranks", [(7, None), (None, 45), (None, None), (7, 0), (-1, 45)])
+async def test_missing_or_invalid_rank_blocks_probability(model_db, monkeypatch, ranks):
+    async with model_db() as session:
+        row = artifact("v12", passed=True, active=True)
+        session.add_all([row,
+            Team(id=1, bo3_id=1, bo3_slug="a", name="A", current_rank=ranks[0]),
+            Team(id=2, bo3_id=2, bo3_slug="b", name="B", current_rank=ranks[1]),
+        ])
+        await session.commit()
+        def unexpected_prediction(*args, **kwargs):
+            raise AssertionError("Incomplete rankings must not reach model inference")
+        monkeypatch.setattr(service.WinProbabilityModel, "predict_symmetric", unexpected_prediction)
+        result = await service.predict_win_probability(session, 1, 2, precomputed_matchup={
+            "team_a": {"id": 1, "name": "A", "score": 49.45},
+            "team_b": {"id": 2, "name": "B", "score": 50.55},
+            "raw_score": 49.33, "reliability": .8238, "factors": [],
+        })
+        assert result["prediction_status"] == "insufficient_data"
+        assert result["team_a"]["probability"] is None
+        assert result["team_b"]["probability"] is None
+        assert result["missing_rank_team_ids"] == [i for i, rank in enumerate(ranks, 1) if rank is None or rank <= 0]
+        assert "рейтинг" in result["limitations"][-1]
+        assert result["explanation"] is None

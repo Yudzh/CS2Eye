@@ -74,10 +74,11 @@ def _block(metrics:dict,weights:dict[str,float],references:dict[str,list[float]]
 class PlayerStrengthV3Service:
     def __init__(self,session:AsyncSession):
         self.session=session
-        self._datasets={}
-        self._aggregates={}
-        self._references={}
-        self._match_dates={}
+        cache = (session.info if session is not None else {}).setdefault("player_strength_v3_data", {})
+        self._datasets=cache.setdefault("datasets", {})
+        self._aggregates=cache.setdefault("aggregates", {})
+        self._references=cache.setdefault("references", {})
+        self._match_dates=cache.setdefault("match_dates", {})
 
     async def calculate(self,player_id:int,as_of:date|None=None,exclude_match_id:int|None=None)->dict:
         dataset_key=(as_of,exclude_match_id)

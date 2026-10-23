@@ -3,7 +3,7 @@ import {afterEach,describe,expect,it,vi} from "vitest";
 import {GroupBracket,PredictionCard,TournamentsPage} from "./TournamentsPage";
 import type {MatchSeries,TournamentPredictionMatch,TournamentPredictions,TournamentView} from "../types";
 
-const api=vi.hoisted(()=>({getTournamentView:vi.fn(),getTournamentPredictions:vi.fn(),generateTournamentPredictions:vi.fn()}));
+const api=vi.hoisted(()=>({getTournamentView:vi.fn(),getTournamentPredictions:vi.fn(),generateTournamentPredictions:vi.fn(),getEffectiveTournamentRoster:vi.fn(),checkTournamentRoster:vi.fn(),createTournamentRosterOverride:vi.fn(),disableTournamentRosterOverride:vi.fn()}));
 vi.mock("../api",()=>({...api,captureTournamentPredictionHistory:vi.fn(),getTournaments:vi.fn(),patchMatchSeries:vi.fn(),patchTournament:vi.fn(),updateMatchVeto:vi.fn(),updateMatchVetoText:vi.fn()}));
 afterEach(()=>cleanup());
 
@@ -48,4 +48,19 @@ describe("tournament prediction UI",()=>{
     fireEvent.click(screen.getByRole("button",{name:"Пересчитать"}));
     await waitFor(()=>expect(api.generateTournamentPredictions).toHaveBeenCalledWith(1));
   });
+});
+
+
+it("opens tournament rosters and checks the selected team through the button",async()=>{
+  const view={tournament:{id:11,name:"Cup",year:2026,environment:"lan",start_date:"2026-10-01",end_date:"2026-10-12",structure_type:"single_elimination"},summary:{series_count:0,map_count:0,parsed_maps:0,review_series:0,missing_veto_series:0},matches:[],stages:[],bracket_links:[],problems:[],participants:[{team_id:1,name:"1win"}]};
+  api.getTournamentView.mockResolvedValue(view);
+  api.getTournamentPredictions.mockResolvedValue(null);
+  api.getEffectiveTournamentRoster.mockResolvedValue({team_id:1,permanent_roster:[{id:5,nickname:"Artfr0st"}],effective_roster:[{id:5,nickname:"Artfr0st"}],replacements:[],warnings:[],stand_in_penalty:0});
+  api.checkTournamentRoster.mockResolvedValue({status:"changed"});
+  render(<TournamentsPage tournamentId={11}/>);
+  fireEvent.click(await screen.findByRole("button",{name:"Составы"}));
+  expect(await screen.findByRole("heading",{name:"Составы на турнир"})).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button",{name:"Проверить состав"}));
+  await waitFor(()=>expect(api.checkTournamentRoster).toHaveBeenCalledWith(11,1));
+  expect(await screen.findByText("Проверка: changed")).toBeTruthy();
 });

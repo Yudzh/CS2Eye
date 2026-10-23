@@ -32,7 +32,6 @@ from cs2eye.services.team_h2h_service import TeamH2HService
 from cs2eye.services.team_map_strength_service import calculate_map_strength
 from cs2eye.services.win_probability_service import predict_win_probability
 from cs2eye.services.effective_roster_service import EffectiveRosterService
-from cs2eye.services.tournament_lineup_monitor import TournamentLineupMonitor
 
 
 MAX_CURRENT_TOURNAMENT_EVIDENCE = 5
@@ -84,6 +83,40 @@ class MatchAnalysisContextBuilder:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def build_card(self, match_id: int) -> dict:
+        """Current forecast for the card; detailed context is loaded separately."""
+        match = await self.session.get(Match, match_id)
+        if match is None:
+            raise LookupError("Матч не найден.")
+        if match.team_a_id is None or match.team_b_id is None:
+            raise ValueError("Команды матча пока не определены.")
+        a, b = match.team_a_id, match.team_b_id
+        _, tournament = await self._match_metadata(a, b, match_id, match.tournament_id)
+        teams = list((await self.session.scalars(select(Team).where(Team.id.in_((a, b))))).all())
+        by_id = {team.id: team for team in teams}
+        now = datetime.now(UTC)
+        match_format = match.format if match.format in {"bo1", "bo3", "bo5"} else None
+        prediction = await self._prediction(a, b, match_format, "pre_veto", now.date(), match_id,
+            **({"tournament_id": match.tournament_id} if match.tournament_id is not None else {}))
+        matchup = prediction.get("matchup")
+        if matchup is None and match_format:
+            try:
+                matchup = await MatchupService(self.session).calculate(
+                    a, b, match_format, "pre_veto", now.date(), match_id,
+                    **({"tournament_id": match.tournament_id} if match.tournament_id is not None else {}))
+            except ValueError:
+                pass
+        return {
+            "schema_version": "match_card_context.v1",
+            "generated_at": now, "as_of": now,
+            "match": self._match_context(match, tournament, match_format),
+            "teams": {side: {"id": team_id, "name": by_id[team_id].name}
+                      for side, team_id in (("team_a", a), ("team_b", b))},
+            "prediction": self._prediction_context(prediction),
+            "matchup": self._matchup_context(matchup),
+            "betting_restrictions": betting_restrictions_for_teams(teams, is_playoff=match.is_playoff),
+        }
+
     async def build(
         self,
         team_a_id: int,
@@ -130,8 +163,6 @@ class MatchAnalysisContextBuilder:
         effective_rosters: dict[int, dict] = {}
         if effective_tournament_id is not None:
             for team_id in (team_a_id, team_b_id):
-                if not historical:
-                    await TournamentLineupMonitor(self.session).check(effective_tournament_id, team_id, match_id)
                 effective_rosters[team_id] = await EffectiveRosterService(self.session).get_effective_roster(
                     team_id, effective_tournament_id, match_id, as_of)
                 warnings.extend(effective_rosters[team_id]["warnings"])
@@ -139,6 +170,7 @@ class MatchAnalysisContextBuilder:
         matchup_payload: dict | None = None
         prediction_payload = await self._prediction(
             team_a_id, team_b_id, match_format, service_mode, cutoff, match_id,
+            **({"tournament_id": effective_tournament_id} if effective_tournament_id is not None else {}),
         )
         if prediction_payload.get("matchup"):
             matchup_payload = prediction_payload["matchup"]
@@ -146,6 +178,7 @@ class MatchAnalysisContextBuilder:
             try:
                 matchup_payload = await MatchupService(self.session).calculate(
                     team_a_id, team_b_id, match_format, service_mode, cutoff, match_id,
+                    **({"tournament_id": effective_tournament_id} if effective_tournament_id is not None else {}),
                 )
             except ValueError as error:
                 limitations.append(f"Matchup unavailable: {error}")
@@ -339,7 +372,7 @@ class MatchAnalysisContextBuilder:
 
     async def _prediction(
         self, a: int, b: int, match_format: str | None, mode: str,
-        cutoff: date, match_id: int | None,
+        cutoff: date, match_id: int | None, *, tournament_id: int | None = None,
     ) -> dict:
         if match_format is None:
             return {
@@ -352,6 +385,7 @@ class MatchAnalysisContextBuilder:
             return await predict_win_probability(
                 self.session, a=a, b=b, format=match_format, mode=mode,
                 as_of=cutoff, series_id=match_id,
+                **({"tournament_id": tournament_id} if tournament_id is not None else {}),
             )
         except ValueError:
             return {
@@ -385,6 +419,7 @@ class MatchAnalysisContextBuilder:
             "team_b_probability": (payload.get("team_b") or {}).get("probability"),
             "confidence": payload.get("confidence"),
             "top_model_drivers": drivers,
+            "manual_adjustment": payload.get("manual_adjustment"),
         }
 
     @staticmethod
@@ -436,7 +471,7 @@ class MatchAnalysisContextBuilder:
         self, team_ids: tuple[int, int], cutoff: date, teams: dict[int, Team],
     ) -> dict[int, dict]:
         rows = list((await self.session.scalars(select(TeamRoster).where(
-            TeamRoster.team_id.in_(team_ids),
+            TeamRoster.team_id.in_(team_ids), TeamRoster.source != "tournament",
             or_(TeamRoster.active_from.is_(None), TeamRoster.active_from <= cutoff),
             or_(TeamRoster.active_to.is_(None), TeamRoster.active_to > cutoff),
         ).order_by(TeamRoster.team_id, TeamRoster.active_from, TeamRoster.id))).all())

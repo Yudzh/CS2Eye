@@ -158,7 +158,7 @@ export function getPredictionHistory(filters:{tournamentId?:number;date?:string;
 export function createMatchSeries(demoFileIds: number[], format: MatchFormat, stage: MatchStage, environment: MatchEnvironment): Promise<MatchSeries> {
   return request<MatchSeries>("/api/v1/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ demo_file_ids: demoFileIds, format, stage, environment, resolution_status: "resolved" }) });
 }
-export function patchMatchSeries(id: number, payload: Partial<{tournament_id:number;format: MatchFormat; stage: MatchStage; environment: MatchEnvironment; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean;round_number:number|null;round_label:string|null;group_name:string|null;bracket_section:"main"|"upper"|"lower"|"group"|"swiss"|null;bracket_position:number|null;next_match_id:number|null;next_match_slot:"team_a"|"team_b"|null;loser_next_match_id:number|null;loser_next_match_slot:"team_a"|"team_b"|null}>): Promise<MatchSeries> {
+export function patchMatchSeries(id: number, payload: Partial<{starts_at:string|null;tournament_id:number;format: MatchFormat; stage: MatchStage; environment: MatchEnvironment; resolution_status: MatchResolution; is_playoff: boolean; is_elimination: boolean;round_number:number|null;round_label:string|null;group_name:string|null;bracket_section:"main"|"upper"|"lower"|"group"|"swiss"|null;bracket_position:number|null;next_match_id:number|null;next_match_slot:"team_a"|"team_b"|null;loser_next_match_id:number|null;loser_next_match_slot:"team_a"|"team_b"|null}>): Promise<MatchSeries> {
   return request<MatchSeries>(`/api/v1/matches/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 }
 export function reorderMatchSeries(id: number, demoFileIds: number[]): Promise<MatchSeries> {
@@ -398,4 +398,18 @@ export function reclassifyOpponentRanks(
       }),
     },
   );
+}
+
+export function getPredictionResults(): Promise<{items: import("./types").PredictionResult[]; active_model_version: string | null}> {
+  return request("/api/v1/prediction-history/results");
+}
+
+export function getForecast(a:number,b:number,format:"bo1"|"bo3"|"bo5",mode:"pre_veto"|"post_veto",seriesId?:number):Promise<{matchup:MatchupScore;probability:WinProbability}> {
+  const q = new URLSearchParams({team_a_id:String(a),team_b_id:String(b),format,analysis_mode:mode});
+  if (seriesId) q.set("series_id",String(seriesId));
+  return request(`/api/v1/analysis/forecast?${q}`);
+}
+
+export function getPredictionFeed(): Promise<{items: import("./types").PredictionFeedItem[]}> {
+  return request("/api/v1/prediction-history/feed");
 }

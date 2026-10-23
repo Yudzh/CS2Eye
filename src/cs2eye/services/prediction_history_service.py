@@ -54,11 +54,18 @@ class PredictionHistoryService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def capture(self, match_id: int, *, as_of: datetime | None = None, retrospective: bool = False) -> PredictionHistorySnapshot:
+    async def capture(self, match_id: int, *, as_of: datetime | None = None, retrospective: bool = False, precomputed_matchup: dict | None = None, precomputed_ml: dict | None = None) -> PredictionHistorySnapshot:
+        match = await self.session.scalar(select(Match).where(Match.id == match_id).with_for_update())
+        if match is None:
+            raise LookupError("Матч не найден.")
         existing = await self.session.scalar(select(PredictionHistorySnapshot).where(
             PredictionHistorySnapshot.match_id == match_id,
         ))
         if existing is not None:
+            if not retrospective and existing.source != "pre_match":
+                raise ValueError("До матча прогноз не был сохранён.")
+            if {existing.team_a_id, existing.team_b_id} != {match.team_a_id, match.team_b_id}:
+                raise ValueError("Участники матча изменились; сохранённый прогноз относится к другой паре.")
             return existing
         match = await self.session.get(Match, match_id)
         if match is None:
@@ -67,6 +74,10 @@ class PredictionHistoryService:
             raise ValueError("У матча ещё не определены обе команды.")
         if (match.status == "completed" or match.winner_team_id is not None) and not retrospective:
             raise ValueError("Нельзя создавать предматчевый snapshot после завершения матча.")
+        if not retrospective:
+            self.ensure_before_start(match)
+            if as_of is not None:
+                raise ValueError("Время предматчевого прогноза устанавливает сервер.")
         captured_at = as_of or (datetime.combine(match.match_date, datetime.min.time(), UTC) if retrospective else datetime.now(UTC))
         if retrospective:
             matchup = await AnalyticsAsOfService(self.session).calculate(
@@ -82,16 +93,21 @@ class PredictionHistoryService:
             comparison = await TeamComparisonService(self.session, now=captured_at).compare(
                 match.team_a_id, match.team_b_id,
             )
-            matchup = await MatchupService(self.session).calculate(
+            matchup = precomputed_matchup if precomputed_matchup is not None else await MatchupService(self.session).calculate(
                 match.team_a_id, match.team_b_id, match.format, "pre_veto",
                 captured_at.date(), match.id,
             )
             strength_a = float(comparison.team_a.strength.team_strength_score)
             strength_b = float(comparison.team_b.strength.team_strength_score)
-            ml = await predict_win_probability(
+            ml = precomputed_ml if precomputed_ml is not None else await predict_win_probability(
                 self.session, a=match.team_a_id, b=match.team_b_id,
                 format=match.format, mode="pre_veto", as_of=captured_at.date(), series_id=match.id,
+                precomputed_matchup=matchup,
             )
+        if not retrospective:
+            self.ensure_before_start(match)
+            if not ml or ml.get("prediction_status") != "available":
+                raise ValueError("Модель пока не может рассчитать вероятность. Повторите запрос до начала матча.")
         matchup_a = float(matchup["team_a"]["score"])
         matchup_b = float(matchup["team_b"]["score"])
         ml_a = ml.get("team_a", {}).get("probability") if ml and ml.get("prediction_status") == "available" else None
@@ -128,6 +144,18 @@ class PredictionHistoryService:
             if existing is not None:
                 return existing
             raise
+
+    @staticmethod
+    def ensure_before_start(match: Match, now: datetime | None = None) -> None:
+        now = now or datetime.now(UTC)
+        if match.status != "scheduled" or match.winner_team_id is not None:
+            raise ValueError("Матч уже начался или не имеет подтверждённого расписания.")
+        if match.starts_at is not None:
+            start = match.starts_at.replace(tzinfo=UTC) if match.starts_at.tzinfo is None else match.starts_at
+            if now >= start:
+                raise ValueError("Матч уже начался. До матча прогноз не был сохранён.")
+        elif match.match_date < now.date():
+            raise ValueError("Дата матча уже прошла. До матча прогноз не был сохранён.")
 
     async def capture_tournament(self, tournament_id: int) -> dict:
         if await self.session.get(Tournament, tournament_id) is None:

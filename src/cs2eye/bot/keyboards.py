@@ -1,7 +1,7 @@
 from typing import Any
 
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 
 
 class TournamentCallback(CallbackData, prefix="tournament"):
@@ -37,7 +37,7 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
             text="Будущие турниры",
             callback_data=NavigationCallback(destination="tournaments").pack(),
         ),
-    ]])
+    ], [InlineKeyboardButton(text="Прошлые турниры", callback_data=NavigationCallback(destination="past_tournaments").pack())], [InlineKeyboardButton(text="Начать заново", callback_data=NavigationCallback(destination="restart").pack())]])
 
 
 def tournaments_keyboard(tournaments: list[dict[str, Any]]) -> InlineKeyboardMarkup:
@@ -53,21 +53,21 @@ def tournaments_keyboard(tournaments: list[dict[str, Any]]) -> InlineKeyboardMar
 
 
 def matches_keyboard(
-    matches: list[dict[str, Any]], tournament_id: int,
+    matches: list[dict[str, Any]], tournament_id: int, *, past: bool = False,
 ) -> InlineKeyboardMarkup:
     rows = []
     for item in matches:
         team_a = (item.get("team_a") or {}).get("name") or "?"
         team_b = (item.get("team_b") or {}).get("name") or "?"
         rows.append([InlineKeyboardButton(
-            text=f"{team_a} vs {team_b}",
+            text=f"{team_a} vs {team_b}" + (f" · {(item.get("score") or {}).get("team_a", 0)}:{(item.get("score") or {}).get("team_b", 0)}" if past else ""),
             callback_data=MatchCallback(
                 match_id=int(item["id"]), tournament_id=tournament_id,
             ).pack(),
         )])
     rows.append([InlineKeyboardButton(
         text="← Назад",
-        callback_data=NavigationCallback(destination="tournaments").pack(),
+        callback_data=NavigationCallback(destination="past_tournaments" if past else "tournaments").pack(),
     )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -92,6 +92,8 @@ def match_keyboard(match_id: int, tournament_id: int) -> InlineKeyboardMarkup:
                 section=section, match_id=match_id, tournament_id=tournament_id,
             ).pack(),
         )])
+    rows.append([InlineKeyboardButton(text="Обновить данные", callback_data=MatchDetailCallback(
+        section="refresh", match_id=match_id, tournament_id=tournament_id).pack())])
     rows.append([
         InlineKeyboardButton(
             text="← Назад к матчам",
@@ -114,22 +116,11 @@ def match_detail_keyboard(match_id: int, tournament_id: int) -> InlineKeyboardMa
     ]])
 
 
-def analysis_keyboard(
-    match_id: int, tournament_id: int, *, analysis_exists: bool,
-) -> InlineKeyboardMarkup:
-    action = "generate"
-    label = "Обновить анализ" if analysis_exists else "Сгенерировать анализ"
-    rows = [[InlineKeyboardButton(
-        text=label,
-        callback_data=AnalysisCallback(
-            action=action, match_id=match_id, tournament_id=tournament_id,
-        ).pack(),
-    )]]
-    rows.append([InlineKeyboardButton(
+def analysis_keyboard(match_id: int, tournament_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
         text="← Назад",
         callback_data=MatchCallback(match_id=match_id, tournament_id=tournament_id).pack(),
-    )])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    )]])
 
 
 def history_keyboard(
@@ -156,17 +147,14 @@ def analysis_run_keyboard(
 ) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text="Перегенерировать эту версию",
-            callback_data=AnalysisCallback(
-                action="regenerate", match_id=match_id,
-                tournament_id=tournament_id, run_id=run_id,
-            ).pack(),
-        ),
-    ], [
-        InlineKeyboardButton(
             text="← Назад к истории",
             callback_data=AnalysisCallback(
                 action="history", match_id=match_id, tournament_id=tournament_id,
             ).pack(),
         ),
     ]])
+
+
+def persistent_navigation_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="/start")]],
+                               resize_keyboard=True, is_persistent=True)

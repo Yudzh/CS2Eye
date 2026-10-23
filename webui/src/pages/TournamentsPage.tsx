@@ -125,7 +125,7 @@ function TournamentRosters({ view }: { view: TournamentView }) {
   };
   return (
     <section className="tournament-rosters">
-      <h2>Roster for tournament</h2>
+      <h2>Составы на турнир</h2>
       {view.participants.map((p) => {
         const r = items[p.team_id];
         return (
@@ -141,6 +141,15 @@ function TournamentRosters({ view }: { view: TournamentView }) {
                   <b>Effective:</b>{" "}
                   {r.effective_roster.map((x) => x.nickname).join(" / ") || "—"}
                 </p>
+                {r.roster_check && <div>
+                  <p>{r.roster_check.source_label}</p>
+                  <p>Проверка: {r.roster_check.status} · {r.roster_check.checked_at ? new Date(r.roster_check.checked_at).toLocaleString() : "—"}</p>
+                  <p>BO3: {r.roster_check.roster.map(x => x.nickname).join(" / ") || "—"}</p>
+                  <p>Добавлены: {r.roster_check.added.map(x => x.nickname).join(", ") || "—"}</p>
+                  <p>Отсутствуют: {r.roster_check.missing.map(x => x.nickname).join(", ") || "—"}</p>
+                  <p>Источник: {r.roster_check.source}</p>
+                  {r.roster_check.error && <p className="warning">{r.roster_check.error}</p>}
+                </div>}
                 {r.replacements.map((x) => (
                   <p className="warning" key={x.id}>
                     ⚠ {x.player_out.nickname} → {x.player_in.nickname} ·{" "}
@@ -168,8 +177,8 @@ function TournamentRosters({ view }: { view: TournamentView }) {
                     void checkTournamentRoster(view.tournament.id, p.team_id)
                       .then((x) =>
                         setMessage(
-                          x.status === "unavailable"
-                            ? "BO3.gg не предоставляет lineup турнира/серии."
+                          x.status === "not_due"
+                            ? "Проверка доступна с даты старта турнира (UTC)."
                             : `Проверка: ${x.status}`,
                         ),
                       )
@@ -244,7 +253,8 @@ function SeriesCard({
   return (
     <article
       className="tournament-match-card"
-      onClick={() => onEdit(match)}
+      onClick={() => { window.location.href = `/matches/${match.id}`; }}
+      onKeyDown={(event) => { if (event.target === event.currentTarget && event.key === "Enter") window.location.href = `/matches/${match.id}`; }}
       tabIndex={0}
     >
       <div className="series-score">
@@ -1087,7 +1097,7 @@ export function TournamentsPage({ tournamentId }: { tournamentId?: number }) {
   const [items, setItems] = useState<TournamentListItem[]>([]);
   const [period, setPeriod] = useState<"future" | "past" | "all">("future");
   const [view, setView] = useState<TournamentView | null>(null);
-  const [tab, setTab] = useState<"bracket" | "all" | "problems">("bracket");
+  const [tab, setTab] = useState<"bracket" | "all" | "problems" | "rosters">("bracket");
   const [bracketMode, setBracketMode] = useState<"actual" | "prediction">(
     "actual",
   );
@@ -1290,8 +1300,8 @@ export function TournamentsPage({ tournamentId }: { tournamentId?: number }) {
         >
           {historyBusy ? "Сохраняю snapshots…" : "Snapshot всего турнира"}
         </button>
-        <a className="back-link" href="/prediction-history">
-          Prediction History →
+        <a className="back-link" href="/predictions">
+          Прогнозы →
         </a>
         <a className="back-link" href="/demos">
           Demo →
@@ -1370,7 +1380,14 @@ export function TournamentsPage({ tournamentId }: { tournamentId?: number }) {
         >
           Проблемы ({view.problems.length})
         </button>
+        <button
+          onClick={() => setTab("rosters")}
+          className={tab === "rosters" ? "active" : ""}
+        >
+          Составы
+        </button>
       </div>
+      {tab === "rosters" && <TournamentRosters key={view.tournament.id} view={view} />}
       {error && <div className="empty-state empty-state--error">{error}</div>}
       {tab === "bracket" && (
         <>

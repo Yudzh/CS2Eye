@@ -16,6 +16,8 @@ class AnalystPerson(BaseModel):
 class AnalystFactorBase(BaseModel):
     team_id: int
     factor_type: FactorType
+    probability_bonus_pp: int = Field(default=0, ge=0, le=30)
+    match_id: int | None = Field(default=None, gt=0)
     text: str = Field(min_length=1, max_length=5000)
     category: Category | None = None
     map_name: str | None = None
@@ -39,6 +41,8 @@ class AnalystFactorCreate(AnalystFactorBase):
 
 
 class AnalystFactorUpdate(BaseModel):
+    probability_bonus_pp: int | None = Field(default=None, ge=0, le=30)
+    match_id: int | None = Field(default=None, gt=0)
     factor_type: FactorType | None = None
     text: str | None = Field(default=None, min_length=1, max_length=5000)
     category: Category | None = None
@@ -56,6 +60,8 @@ class AnalystFactorResponse(BaseModel):
     team_id: int
     team_name: str
     factor_type: FactorType
+    probability_bonus_pp: int = Field(default=0, ge=0, le=30)
+    match_id: int | None = Field(default=None, gt=0)
     text: str
     category: Category | None
     map_name: str | None

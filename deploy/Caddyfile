@@ -1,0 +1,3 @@
+cs2eye.ru {
+    reverse_proxy webui:80
+}

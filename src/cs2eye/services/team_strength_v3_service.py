@@ -14,6 +14,7 @@ from cs2eye.models.team import Player, Team, TeamRoster, TeamRosterMember, TeamS
 from cs2eye.services.opponent_adjusted_results_service import OpponentAdjustedResultsService
 from cs2eye.services.performance_profile_service import PerformanceProfileService
 from cs2eye.services.player_strength_v3_service import PlayerStrengthV3Service
+from cs2eye.services.team_roster_service import build_roster_fingerprint
 from cs2eye.services.effective_roster_service import EffectiveRosterService, resolve_roster
 
 
@@ -102,7 +103,8 @@ class TeamStrengthV3Service:
             TeamRosterMember.roster_id == roster.id, TeamRosterMember.player_id.is_not(None)))).all()) if roster else []
         permanent_ids = [int(member.player_id) for member in members if member.player_id is not None]
         effective = (await EffectiveRosterService(self.session).get_effective_roster(
-            team_id, tournament_id, match_id, as_of or today)) if tournament_id is not None or match_id is not None else None
+            team_id, tournament_id, match_id, as_of or today,
+            known_before=cutoff if cutoff < today else None)) if tournament_id is not None or match_id is not None else None
         effective_ids = [x["id"] for x in effective["effective_roster"]] if effective else permanent_ids
         player_values = []
         baseline_player_values = []
@@ -116,6 +118,11 @@ class TeamStrengthV3Service:
                 "supporting_strength": value["supporting_strength"], "reliability": value["reliability"]}
             if player_id in effective_ids: player_values.append(item)
             if player_id in permanent_ids: baseline_player_values.append(item)
+        if effective and len(set(effective_ids)) == 5:
+            event_roster = await self.session.scalar(select(TeamRoster).where(
+                TeamRoster.team_id == team_id,
+                TeamRoster.fingerprint == build_roster_fingerprint(effective_ids)))
+            roster = event_roster or roster
         roster_component = roster_quality(player_values)
         baseline_roster_component = roster_quality(baseline_player_values)
         performance = await self.performance_service.team_roster(
@@ -155,7 +162,7 @@ class TeamStrengthV3Service:
                           "components": result["components"],
                           "reliability": result["reliability_breakdown"],
                           "roster": result["roster"], "invariants": result["invariants"]})
-        if force and not historical and exclude_match_id is None:
+        if force and not historical and exclude_match_id is None and tournament_id is None and match_id is None:
             team.team_strength_v3=result["score"]; team.team_strength_v3_reliability=result["reliability"]
             team.team_strength_v3_breakdown=_json_safe(result); team.team_strength_v3_model_version=MODEL_VERSION
             team.team_strength_v3_calculated_at=datetime.now(UTC)

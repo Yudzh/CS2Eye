@@ -98,3 +98,24 @@ def test_v3_rank_boundaries():
     assert [(x, rank_group_v3(x)) for x in (10, 11, 20, 21, 30, 31, None)] == [
         (10, "top_1_10"), (11, "top_11_20"), (20, "top_11_20"),
         (21, "top_21_30"), (30, "top_21_30"), (31, "others"), (None, "unknown")]
+
+
+async def test_profile_dataset_shared_within_session_but_not_across_requests():
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from cs2eye.db.base import Base
+    from cs2eye.services.performance_profile_service import PerformanceProfileService
+    engine=create_async_engine('sqlite+aiosqlite:///:memory:')
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    try:
+        async with AsyncSession(engine) as first:
+            service=PerformanceProfileService(first)
+            data=await service._dataset(None)
+            async def unexpected(*args,**kwargs):
+                raise AssertionError('Duplicate population query in the same request')
+            first.execute=unexpected
+            assert await PerformanceProfileService(first)._dataset(None) is data
+        async with AsyncSession(engine) as second:
+            assert await PerformanceProfileService(second)._dataset(None) is not data
+    finally:
+        await engine.dispose()

@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer,
-    String, Text, UniqueConstraint, func,
+    String, Text, JSON, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -83,6 +83,7 @@ class Match(Base):
 
     id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
     tournament_id: Mapped[int | None] = mapped_column(ForeignKey("tournaments.id", ondelete="SET NULL"), index=True)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     match_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     team_a_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), index=True)
     team_b_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), index=True)
@@ -142,3 +143,20 @@ class MapPoolEntry(Base):
     active_from: Mapped[date | None] = mapped_column(Date)
     active_to: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+
+class TournamentRosterCheck(Base):
+    """Immutable successful BO3 team roster capture, scoped to one event."""
+    __tablename__ = "tournament_roster_checks"
+    __table_args__ = (UniqueConstraint("tournament_id", "team_id", name="uq_tournament_roster_check"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tournament_id: Mapped[int] = mapped_column(ForeignKey("tournaments.id", ondelete="CASCADE"), index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
+    baseline_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    roster_ids: Mapped[list | None] = mapped_column(JSON)
+    added_ids: Mapped[list | None] = mapped_column(JSON)
+    missing_ids: Mapped[list | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)

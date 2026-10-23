@@ -1,7 +1,7 @@
 """Import SQLAlchemy models here for Alembic autogeneration."""
 
 from cs2eye.models.demo_file import DemoFile
-from cs2eye.models.match import MapPoolEntry, Match, MatchVetoAction, Tournament, TournamentTeam, TournamentRosterOverride
+from cs2eye.models.match import MapPoolEntry, Match, MatchVetoAction, Tournament, TournamentTeam, TournamentRosterOverride, TournamentRosterCheck
 from cs2eye.models.demo import (
     DemoMapResult,
     DemoParseRun,
@@ -49,6 +49,7 @@ __all__ = [
     "Tournament",
     "TournamentTeam",
     "TournamentRosterOverride",
+    "TournamentRosterCheck",
     "DemoParseRun",
     "DemoMapResult",
     "DemoPlayerStat",

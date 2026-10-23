@@ -1,7 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 
 from cs2eye.api.schemas.match_analysis_context import BettingRestrictionsContext
 
@@ -41,7 +41,21 @@ class MatchVetoActionResponse(BaseModel):
     source: str; source_external_id: str | None
 
 
+class PredictionHistoryCoverageTeam(BaseModel):
+    team_id: int | None
+    name: str | None
+    available_maps: int
+
+
+class PredictionHistoryCoverage(BaseModel):
+    as_of: date
+    required_maps: int
+    teams: list[PredictionHistoryCoverageTeam]
+
+
 class MatchResponse(BaseModel):
+    prediction_history_coverage: PredictionHistoryCoverage | None = None
+    starts_at: datetime | None = None
     id: int; tournament: TournamentResponse | None; match_date: date
     format: MatchFormat; stage: MatchStage; environment: MatchEnvironment
     status: str; resolution_status: MatchResolution; is_playoff: bool; is_elimination: bool
@@ -72,6 +86,7 @@ class MatchCreateRequest(BaseModel):
 
 
 class MatchPatchRequest(BaseModel):
+    starts_at: AwareDatetime | None = None
     format: MatchFormat | None = None; stage: MatchStage | None = None
     environment: MatchEnvironment | None = None; resolution_status: MatchResolution | None = None
     is_playoff: bool | None = None; is_elimination: bool | None = None

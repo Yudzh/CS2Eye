@@ -1,0 +1,118 @@
+name: cs2eye-prod
+
+x-api-environment: &api-environment
+  APP_ENV: production
+  DEBUG: "false"
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cs2eye}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}@db:5432/${POSTGRES_DB:-cs2eye}
+  DEMO_STORAGE_ROOT: /app/storage
+  DEMO_DELETE_AFTER_SUCCESSFUL_PARSE: "false"
+  DEMO_PARSE_CONCURRENCY: "1"
+  MATCH_LLM_ENABLED: "false"
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cs2eye}
+      POSTGRES_USER: ${POSTGRES_USER:-cs2eye}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+  migrate:
+    image: cs2eye-api:production
+    build: .
+    environment: *api-environment
+    depends_on:
+      db:
+        condition: service_healthy
+    command: [alembic, upgrade, head]
+    restart: "no"
+    logging: *logging
+
+  api:
+    image: cs2eye-api:production
+    build: .
+    restart: unless-stopped
+    environment: *api-environment
+    volumes:
+      - demo_storage:/app/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: [uvicorn, 'cs2eye.main:app', --host, '0.0.0.0', --port, '8000', --workers, '1']
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *logging
+
+  webui:
+    build: ./webui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./deploy/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+    secrets:
+      - web_htpasswd
+    depends_on:
+      api:
+        condition: service_healthy
+    logging: *logging
+
+  https:
+    image: caddy:2-alpine
+    profiles: [https]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      webui:
+        condition: service_started
+    logging: *logging
+
+  bot:
+    image: cs2eye-api:production
+    build: .
+    restart: unless-stopped
+    environment:
+      DEBUG: "false"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env.prod}
+      CS2EYE_API_BASE_URL: http://api:8000
+      CS2EYE_API_TIMEOUT_SECONDS: "15"
+    depends_on:
+      api:
+        condition: service_healthy
+    command: [python, -m, cs2eye.bot.main]
+    logging: *logging
+
+secrets:
+  web_htpasswd:
+    file: ./deploy/secrets/web.htpasswd
+
+volumes:
+  pg_data:
+  demo_storage:
+  caddy_data:
+  caddy_config:

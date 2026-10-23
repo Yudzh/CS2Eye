@@ -20,6 +20,7 @@ class MatchLLMAnalysisRequest(BaseModel):
     match_format: Literal["bo1", "bo3", "bo5"] | None = None
     analysis_mode: Literal["pre_match", "post_match"] = "pre_match"
     language: Literal["ru", "en"] = "ru"
+    reuse_existing: bool = False
 
 
 class MatchLLMRuntimeMetadata(BaseModel):

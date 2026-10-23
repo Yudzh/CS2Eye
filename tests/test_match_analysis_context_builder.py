@@ -424,3 +424,42 @@ async def test_endpoint_returns_match_analysis_context_v1(builder_db, monkeypatc
         )
     assert response.status_code == 200
     assert response.json()["schema_version"] == "match_analysis_context.v1"
+
+
+async def test_light_card_keeps_forecast_and_rules_without_detailed_context(builder_db, monkeypatch):
+    from unittest.mock import AsyncMock
+    await seed_context(builder_db)
+    install_full_service_fakes(monkeypatch)
+    async with builder_db() as session:
+        builder = MatchAnalysisContextBuilder(session)
+        full = await builder.build(1, 2, as_of=AS_OF, match_id=20, tournament_id=1)
+        prediction = full.prediction.model_dump()
+        prediction['manual_adjustment'] = {'base_team_a_probability': .57, 'impact_team_a_pp': 5}
+        # The light endpoint must preserve the adjustment returned by ML.
+        payload = {'prediction_status': 'available', 'model_version': 'wp-v1',
+            'quality_gate_passed': True, 'team_a': {'probability': .62},
+            'team_b': {'probability': .38}, 'confidence': .8,
+            'manual_adjustment': prediction['manual_adjustment'], 'matchup': matchup_payload()}
+        builder._prediction = AsyncMock(return_value=payload)
+        builder.build = AsyncMock(side_effect=AssertionError('Full context must remain lazy'))
+        card = await builder.build_card(20)
+        assert card['schema_version'] == 'match_card_context.v1'
+        assert card['match'] == full.match.model_dump()
+        assert card['matchup'] == full.matchup.model_dump()
+        assert card['prediction']['team_a_probability'] == .62
+        assert card['prediction']['manual_adjustment'] == prediction['manual_adjustment']
+        assert card['betting_restrictions'] == full.betting_restrictions.model_dump()
+        assert not {'h2h', 'map_matchups', 'recent_series_evidence', 'secondary_bets', 'data_quality'} & card.keys()
+        builder.build.assert_not_awaited()
+
+
+async def test_light_card_endpoint_handles_missing_or_unpaired_match(builder_db):
+    await seed_context(builder_db)
+    async with builder_db() as session:
+        with pytest.raises(LookupError):
+            await MatchAnalysisContextBuilder(session).build_card(9999)
+        match = await session.get(Match, 20)
+        match.team_b_id = None
+        await session.flush()
+        with pytest.raises(ValueError, match='не определены'):
+            await MatchAnalysisContextBuilder(session).build_card(20)

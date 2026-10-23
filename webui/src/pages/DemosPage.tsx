@@ -131,8 +131,8 @@ export function DemosPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<DemoUploadResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [parseAfterUpload, setParseAfterUpload] = useState(false);
-  const [deleteAfterSuccessfulParse, setDeleteAfterSuccessfulParse] = useState(false);
+  const [parseAfterUpload, setParseAfterUpload] = useState(true);
+  const [deleteAfterSuccessfulParse, setDeleteAfterSuccessfulParse] = useState(true);
   const [filterTournament, setFilterTournament] = useState("");
   const [tournaments, setTournaments] = useState<DemoTournamentOption[]>([]);
   const [year, setYear] = useState(new Date().getFullYear());
@@ -367,7 +367,7 @@ export function DemosPage() {
 
   return (
     <main className="page demos-page">
-      <nav className="page-links"><a className="back-link" href="/">← К командам</a><span><a className="back-link" href="/matches">Матчи →</a> <a className="back-link" href="/tournaments">Турниры →</a> <a className="back-link" href="/prediction-history">Prediction History →</a></span></nav>
+      <nav className="page-links"><a className="back-link" href="/">← К командам</a><span><a className="back-link" href="/matches">Матчи →</a> <a className="back-link" href="/tournaments">Турниры →</a> <a className="back-link" href="/predictions">Прогнозы →</a></span></nav>
       <section className="demo-heading">
         <p className="eyebrow">Файловое хранилище</p>
         <h1>Демки</h1>

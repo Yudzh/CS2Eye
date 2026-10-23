@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from math import exp
@@ -139,11 +140,32 @@ class VetoService:
         if opponent_id: matches = [m for m in matches if opponent_id in {m.team_a_id, m.team_b_id}]
         if context: matches = [m for m in matches if (context == m.environment or context == m.stage or context == "playoff" and m.is_playoff or context == "elimination" and m.is_elimination)]
         if aggregation_level == "current_roster":
-            matches = [] if not team.current_roster_id else [m for m in matches if await self._uses_roster(m.id, team_id, team.current_roster_id)]
+            roster_matches = await self._matches_using_roster(
+                [m.id for m in matches], team_id, team.current_roster_id
+            ) if team.current_roster_id else set()
+            matches = [m for m in matches if m.id in roster_matches]
         if rank_scope: matches = [m for m in matches if await self._rank_ok(m, team_id, rank_scope)]
         if recent: matches = matches[:recent]
         entries = list((await self.session.execute(select(MapPoolEntry))).scalars()); active = {e.map_name for e in entries if e.is_active}
-        actions_by_match={m.id:await self.actions(m.id) for m in matches}
+        match_ids = [m.id for m in matches]
+        actions_by_match = {match_id: [] for match_id in match_ids}
+        results_by_match_map = defaultdict(list)
+        if match_ids:
+            actions = (await self.session.scalars(select(MatchVetoAction).where(
+                MatchVetoAction.match_series_id.in_(match_ids)
+            ).order_by(MatchVetoAction.order_index))).all()
+            for action in actions:
+                actions_by_match[action.match_series_id].append(action)
+            # Veto needs scores only, not the maps' combat/economy JSON payloads.
+            results = (await self.session.execute(select(
+                DemoFile.match_id, DemoMapResult.map_name,
+                DemoMapResult.team_a_id, DemoMapResult.team_b_id,
+                DemoMapResult.team_a_score, DemoMapResult.team_b_score,
+            ).join(DemoMapResult, DemoMapResult.demo_file_id == DemoFile.id).where(
+                DemoFile.match_id.in_(match_ids)
+            ))).all()
+            for result in results:
+                results_by_match_map[(result.match_id, result.map_name)].append(result)
         maps = sorted(VALID_MAPS | {a.map_name for m in matches for a in actions_by_match[m.id]})
         breakdown = []
         for map_name in maps:
@@ -169,7 +191,8 @@ class VetoService:
                 scoped=[m for m in eligible if actor_role(m)==scope]
                 scoped_ids={m.id for m in scoped}
                 actor_scopes[scope]={"eligible_series":len(scoped),"opening_ban":{"count":sum(m.id in scoped_ids for m,_,_ in first_bans),"rate":rate(sum(m.id in scoped_ids for m,_,_ in first_bans),len(scoped))},"pick":{"count":sum(m.id in scoped_ids for m,_,_ in picks),"rate":rate(sum(m.id in scoped_ids for m,_,_ in picks),len(scoped))},"closing_ban":{"count":sum(m.id in scoped_ids for m,_,_ in closing_bans),"rate":rate(sum(m.id in scoped_ids for m,_,_ in closing_bans),len(scoped))}}
-            perf = await self._performance(eligible, team_id, map_name)
+            perf = await self._performance(eligible, team_id, map_name,
+                actions_by_match=actions_by_match, results_by_match_map=results_by_match_map)
             reference_date=cutoff or date.today()
             n, freshness = len(eligible), (1 if not eligible else exp(-max(0, (reference_date-eligible[0].match_date).days)/180))
             ban_rate, pick_rate = rate(len(bans), n), rate(len(picks), n)
@@ -185,23 +208,50 @@ class VetoService:
                       + (usable / len(matches) * 100 if matches else 0) * .2)
         return {"team_id":team.id,"team_name":team.name,"aggregation_level":aggregation_level,"roster_id":team.current_roster_id if aggregation_level=="current_roster" else None,"sample":{"series":len(matches),"complete_series":complete},"veto_confidence":round(confidence,2) if matches else 0,"denominator":"eligible series with complete/partial veto and map in the series map-pool version; when version is unknown, every valid-veto series", "maps":breakdown}
 
-    async def _uses_roster(self, match_id:int, team_id:int, roster_id:int)->bool:
-        demos=list((await self.session.execute(select(DemoFile.id).where(DemoFile.match_id==match_id))).scalars())
-        if not demos:return False
-        rows=list((await self.session.execute(select(DemoTeamRoster).where(DemoTeamRoster.demo_file_id.in_(demos),DemoTeamRoster.team_id==team_id))).scalars())
-        return len(rows)==len(demos) and all(r.resolution_status=="complete" and r.roster_id==roster_id for r in rows)
+    async def _matches_using_roster(self, match_ids:list[int], team_id:int, roster_id:int)->set[int]:
+        if not match_ids:
+            return set()
+        demos = (await self.session.execute(select(DemoFile.match_id, DemoFile.id).where(
+            DemoFile.match_id.in_(match_ids)))).all()
+        demos_by_match = defaultdict(list)
+        for match_id, demo_id in demos:
+            demos_by_match[match_id].append(demo_id)
+        if not demos:
+            return set()
+        rows = (await self.session.scalars(select(DemoTeamRoster).where(
+            DemoTeamRoster.demo_file_id.in_([demo_id for _, demo_id in demos]),
+            DemoTeamRoster.team_id == team_id))).all()
+        by_demo = defaultdict(list)
+        for row in rows:
+            by_demo[row.demo_file_id].append(row)
+        result = set()
+        for match_id, demo_ids in demos_by_match.items():
+            roster_rows = [row for demo_id in demo_ids for row in by_demo[demo_id]]
+            if len(roster_rows) == len(demo_ids) and all(
+                row.resolution_status == "complete" and row.roster_id == roster_id
+                for row in roster_rows
+            ):
+                result.add(match_id)
+        return result
     async def _rank_ok(self,m:Match,team_id:int,scope:str)->bool:
         demos=list((await self.session.execute(select(DemoFile.id).where(DemoFile.match_id==m.id))).scalars())
         groups=set((await self.session.execute(select(DemoTeamOpponentContext.opponent_rank_group).where(DemoTeamOpponentContext.demo_file_id.in_(demos),DemoTeamOpponentContext.team_id==team_id))).scalars())
         return scope in groups
-    async def _performance(self,matches:list[Match],team_id:int,map_name:str)->dict:
+    async def _performance(self,matches:list[Match],team_id:int,map_name:str, *,
+                           actions_by_match=None, results_by_match_map=None)->dict:
         out={k:{"maps":0,"wins":0,"losses":0,"win_rate":None} for k in ("own","opponent","decider")}
         for m in matches:
-            action=next((a for a in await self.actions(m.id) if a.map_name==map_name and a.action in {"pick","decider"}),None)
+            actions = actions_by_match[m.id] if actions_by_match is not None else await self.actions(m.id)
+            action=next((a for a in actions if a.map_name==map_name and a.action in {"pick","decider"}),None)
             if not action:continue
             key="decider" if action.action=="decider" else "own" if action.team_id==team_id else "opponent"
-            rows=(await self.session.execute(select(DemoFile,DemoMapResult).join(DemoMapResult,DemoMapResult.demo_file_id==DemoFile.id).where(DemoFile.match_id==m.id,DemoMapResult.map_name==map_name))).all()
-            for demo,result in rows:
+            if results_by_match_map is None:
+                results = (await self.session.scalars(select(DemoMapResult).join(
+                    DemoFile, DemoMapResult.demo_file_id == DemoFile.id
+                ).where(DemoFile.match_id == m.id, DemoMapResult.map_name == map_name))).all()
+            else:
+                results = results_by_match_map.get((m.id, map_name), [])
+            for result in results:
                 scores=(result.team_a_score,result.team_b_score); won=(result.team_a_id==team_id and scores[0]>scores[1]) or (result.team_b_id==team_id and scores[1]>scores[0])
                 out[key]["maps"]+=1; out[key]["wins" if won else "losses"]+=1
         for x in out.values():x["win_rate"]=rate(x["wins"],x["maps"])

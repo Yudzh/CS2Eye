@@ -271,14 +271,43 @@ class MatchService:
                     "Resolved-серия не может содержать одну карту дважды."
                 )
         tournament = await self._tournament(first_demo)
-        match = Match(tournament_id=tournament.id, match_date=first_demo.match_date,
-            team_a_id=first_result.team_a_id, team_b_id=first_result.team_b_id, format=format,
-            stage=stage, environment=environment, resolution_status=resolution_status,
-            is_playoff=stage in {"round_of_32", "round_of_16", "quarterfinal", "semifinal", "final"})
         session_dates = {demo.match_date for demo, _ in ordered}; tournaments = {(demo.tournament_name, demo.match_date.year) for demo, _ in ordered}
         if len(session_dates) != 1 or len(tournaments) != 1:
             raise MatchValidationError("Карты разных дат или турниров нельзя объединить.")
-        self.session.add(match); await self.session.flush()
+        # Manual grouping must attach results to the existing bracket slot too.
+        # Require a unique exact-date candidate: repeat meetings are legitimate.
+        targets = list((await self.session.scalars(select(Match).where(
+            Match.tournament_id == tournament.id,
+            Match.match_date == first_demo.match_date,
+            or_(
+                and_(Match.team_a_id == first_result.team_a_id, Match.team_b_id == first_result.team_b_id),
+                and_(Match.team_a_id == first_result.team_b_id, Match.team_b_id == first_result.team_a_id),
+            ),
+            Match.format == format,
+            or_(Match.status == "scheduled", and_(
+                Match.status == "completed",
+                ~select(DemoFile.id).where(DemoFile.match_id == Match.id).exists(),
+            )),
+        ))).all())
+        if stage != "unknown":
+            targets = [item for item in targets if item.stage in {stage, "unknown"}]
+        if len(targets) > 1:
+            raise MatchValidationError("Найдено несколько матчей расписания для этой пары и даты.")
+        if targets:
+            match = targets[0]
+            match.resolution_status = resolution_status
+            if match.stage == "unknown" and stage != "unknown":
+                match.stage = stage
+                match.is_playoff = stage in {"round_of_32", "round_of_16", "quarterfinal", "semifinal", "final"}
+            if match.environment == "unknown":
+                match.environment = environment
+        else:
+            match = Match(tournament_id=tournament.id, match_date=first_demo.match_date,
+                team_a_id=first_result.team_a_id, team_b_id=first_result.team_b_id, format=format,
+                stage=stage, environment=environment, resolution_status=resolution_status,
+                is_playoff=stage in {"round_of_32", "round_of_16", "quarterfinal", "semifinal", "final"})
+            self.session.add(match)
+        await self.session.flush()
         old_match_ids = {demo.match_id for demo, _ in ordered if demo.match_id is not None}
         for number, (demo, _) in enumerate(ordered, 1): demo.match_id, demo.map_number = match.id, number
         for old_id in old_match_ids:
@@ -294,7 +323,7 @@ class MatchService:
             key in changes and changes[key] is not None and changes[key] != getattr(match, key)
             for key in ("format", "resolution_status")
         )
-        allowed = {"tournament_id", "format", "stage", "environment", "is_playoff", "is_elimination", "resolution_status",
+        allowed = {"starts_at", "tournament_id", "format", "stage", "environment", "is_playoff", "is_elimination", "resolution_status",
                    "round_number", "round_label", "group_name", "bracket_section", "bracket_position", "next_match_id", "next_match_slot",
                    "loser_next_match_id", "loser_next_match_slot"}
         for transition_field in ("next_match_id", "loser_next_match_id"):

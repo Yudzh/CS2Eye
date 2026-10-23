@@ -309,3 +309,24 @@ def test_v3_has_identical_output_fields_prompt_v5_and_fixed_telegram_headers():
     rendered = format_llm_analysis({"analysis": analysis.model_dump(), "status": "completed"})
     for title in ("📌 <b>Итог</b>", "📈 <b>Форма</b>", "🗺 <b>Карты</b>", "🎯 <b>Тимплей и свинги</b>", "📝 <b>Ручная аналитика</b>"):
         assert title in rendered
+
+
+@pytest.mark.parametrize('term',['force buy','Force-Buy','force_buy','FORCE BUY'])
+def test_known_technical_phrase_is_translated_before_entity_validation(term):
+    source_plan=plan()
+    analysis=wording(source_plan).model_copy(update={
+        'teamplay_text':f'Команда показывает сильный {term}.'})
+    normalized=MatchLLMAnalysisService._normalize_fixed_analysis(source_plan,analysis)
+    assert 'форс-закуп' in normalized.teamplay_text
+    MatchLLMAnalysisV3Validator().validate(source_plan,normalized)
+
+
+def test_technical_normalization_does_not_allow_unknown_players_or_teams():
+    source_plan=plan()
+    analysis=wording(source_plan).model_copy(update={
+        'teamplay_text':'Команда показывает сильный force buy, но Donk сильнее.'})
+    normalized=MatchLLMAnalysisService._normalize_fixed_analysis(source_plan,analysis)
+    with pytest.raises(MatchLLMV3ValidationError) as caught:
+        MatchLLMAnalysisV3Validator().validate(source_plan,normalized)
+    assert 'unknown_entity' in caught.value.codes
+    assert 'Donk' in str(caught.value)
