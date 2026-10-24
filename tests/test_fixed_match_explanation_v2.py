@@ -58,6 +58,47 @@ def test_fixed_plan_has_five_sections_and_is_deterministic():
     assert first.schema_version == "match_explanation_plan.v2"
 
 
+def test_team_names_with_digits_are_not_invented_statistics():
+    source_plan = plan(lambda payload: payload["teams"]["team_a"].update(name="9z"))
+    analysis = wording(source_plan)
+    analysis = analysis.model_copy(update={"manual_text": "Ручных комментариев по команде 9z нет."})
+    MatchLLMAnalysisV3Validator().validate(source_plan, analysis)
+    with pytest.raises(MatchLLMV3ValidationError, match="new number"):
+        MatchLLMAnalysisV3Validator().validate(source_plan, analysis.model_copy(
+            update={"manual_text": "Для 9z указано 98765 побед."}))
+
+
+def test_correct_map_comparison_can_name_both_teams():
+    source_plan = plan()
+    edge = source_plan.maps.key_map_edges[0]
+    a, b = source_plan.maps.team_a.team_name, source_plan.maps.team_b.team_name
+    favorite, opponent = (a, b) if edge.favored_team == "team_a" else (b, a)
+    correct = wording(source_plan).model_copy(update={"maps_text":
+        f"На карте {edge.map} {favorite} имеет явное преимущество перед {opponent}."})
+    MatchLLMAnalysisV3Validator().validate(source_plan, correct)
+    with pytest.raises(MatchLLMV3ValidationError, match="reverses edge"):
+        MatchLLMAnalysisV3Validator().validate(source_plan, correct.model_copy(update={"maps_text":
+            f"На карте {edge.map} {opponent} имеет явное преимущество перед {favorite}."}))
+
+
+async def test_repair_request_enables_reasoning_after_fast_initial_draft(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    client = OllamaMatchAnalysisClient(host="http://localhost:11434", model="qwen3:8b",
+                                       timeout_seconds=30, think=False)
+    source_plan = plan()
+    chat = AsyncMock(return_value=SimpleNamespace(message=SimpleNamespace(
+        content=wording(source_plan).model_dump_json()), prompt_eval_count=10, eval_count=20))
+    monkeypatch.setattr(client._client, "chat", chat)
+    try:
+        await client.generate_fixed_plan(source_plan)
+        await client.generate_fixed_plan(source_plan, repair_errors=("teamplay contains unknown entities",))
+        assert chat.await_args_list[0].kwargs["think"] is False
+        assert chat.await_args_list[1].kwargs["think"] is True
+    finally:
+        await client.close()
+
+
 def test_early_v2_snapshot_without_display_names_remains_readable():
     source_context = context()
     snapshot = plan().model_dump(mode="json")

@@ -5,7 +5,7 @@ from cs2eye.api.schemas.match_explanation_plan_v2 import MatchExplanationPlanV2
 from cs2eye.api.schemas.match_llm_analysis_v3 import MatchLLMAnalysisV3
 
 
-NUMBER_RE = re.compile(r"(?<![\w:])[-+]?\d+(?:[.,]\d+)?\s*%?")
+NUMBER_RE = re.compile(r"(?<![\w:])[-+]?\d+(?:[.,]\d+)?\s*%?(?!\w)")
 CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 LATIN_WORD_RE = re.compile(r"\b[A-Za-z]{3,}\b")
 KNOWN_MAPS = {"ancient", "anubis", "cache", "cobblestone", "dust2", "inferno", "mirage", "nuke", "overpass", "train", "vertigo"}
@@ -141,8 +141,10 @@ class MatchLLMAnalysisV3Validator:
             for sentence in claims:
                 if (
                     re.search(rf"(?<!\w){re.escape(edge.map)}(?!\w)", sentence, re.IGNORECASE)
-                    and re.search(re.escape(opponent), sentence, re.IGNORECASE)
-                    and re.search(r"(?:имеет|получает|сторон\w+)\s+(?:\w+\s+)?преимуществ|преимущество\s+(?:у|за)\s*", sentence, re.IGNORECASE)
+                    and (
+                        re.search(rf"{re.escape(opponent)}\s+(?:\w+\s+){{0,2}}(?:имеет|получает|сохраняет)\s+(?:\w+\s+){{0,2}}преимуществ", sentence, re.IGNORECASE)
+                        or re.search(rf"преимуществ\w*\s+(?:у|за|на\s+стороне)\s+{re.escape(opponent)}", sentence, re.IGNORECASE)
+                    )
                 ):
                     errors.append(f"maps reverses edge for {edge.map}"); codes.append("map_edge_reversed")
         if errors:

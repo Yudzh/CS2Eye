@@ -73,7 +73,9 @@ class OllamaMatchAnalysisClient:
                     {"role": "user", "content": user_input(plan, repair_errors, previous_analysis)},
                 ],
                 format=self._fixed_plan_output_schema(),
-                options={"temperature": 0}, think=self.think, tools=[],
+                # A rejected draft needs reasoning about the reported violations,
+                # even when the initial wording request uses the faster mode.
+                options={"temperature": 0}, think=self.think or bool(repair_errors), tools=[],
             )
         except httpx.TimeoutException as error:
             raise MatchAnalysisProviderTimeoutError("Ollama request timed out") from error

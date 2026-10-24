@@ -1,0 +1,1215 @@
+{
+  "match": {
+    "date": "2026-11-02",
+    "format": "bo3",
+    "round_number": 1
+  },
+  "origin": "fae704d4-559f-4b4a-b6a4-d57109b35009",
+  "run": {
+    "analysis_mode": "pre_match",
+    "analysis_schema_version": "match_llm_analysis.v3",
+    "analysis_snapshot": {
+      "conclusion_text": "Aurora имеет преимущество с очевидным преимуществом, но уверенность средняя. Преимущество основано на внутренней статистике CS2Eye. Форма на текущем турнире рассматривается отдельно от общей статистики.",
+      "expected_winner_text": "По расчётам должна выиграть Aurora — 79.41%.",
+      "explanation_plan_version": "match_explanation_plan.v2",
+      "form_text": "Турнир только начинается, поэтому команды ещё не сформировали турнирную форму.",
+      "manual_text": "Ручных комментариев по этому матчу нет.",
+      "maps_text": "Aurora сильны на anubis и mirage. Liquid сильны на nuke. На anubis Aurora имеют небольшое преимущество, на nuke Liquid — умеренное.",
+      "schema_version": "match_llm_analysis.v3",
+      "teamplay_text": "Aurora показывают сильную стрельбу из положения и умение контролировать карту. Liquid также демонстрируют сильную стрельбу из положения, но с меньшей уверенностью."
+    },
+    "as_of": "2026-10-24T08:09:05.462160+00:00",
+    "attempts": 1,
+    "business_valid": true,
+    "completed_at": "2026-10-24T08:09:27.986185+00:00",
+    "context_schema_version": "match_analysis_context.v1",
+    "context_snapshot": {
+      "analysis_mode": "pre_match",
+      "as_of": "2026-10-24T08:09:05.462160Z",
+      "betting_restrictions": {
+        "message": "НЕ СТАВИТЬ НА ПОБЕДИТЕЛЯ МАТЧА.\n\nРассматривать только сторонние рынки:\nтоталы, HE kill, пистолетки и другие ставки, не зависящие напрямую от победителя матча.",
+        "restricted": true,
+        "restrictions": [
+          {
+            "message": "НЕ СТАВИТЬ НА ПОБЕДИТЕЛЯ МАТЧА.\n\nРассматривать только сторонние рынки:\nтоталы, HE kill, пистолетки и другие ставки, не зависящие напрямую от победителя матча.",
+            "rule": "group_stage_no_match_winner_bets"
+          }
+        ],
+        "rule": "group_stage_no_match_winner_bets"
+      },
+      "data_quality": {
+        "limitations": [
+          "map_veto playability weighting (which maps are relevant) still comes from the legacy Calculated Veto v1.1 pick/ban engine; only map quality is V3-sourced."
+        ],
+        "missing_sections": [],
+        "overall_status": "partial",
+        "warnings": [
+          "Tournament form unavailable for team_a.",
+          "Tournament form unavailable for team_b.",
+          "Recent series evidence unavailable for team_b.",
+          "Organization H2H is unavailable.",
+          "Current rosters have no applicable H2H."
+        ]
+      },
+      "generated_at": "2026-10-24T08:09:22.897446Z",
+      "h2h": {
+        "current_rosters": {
+          "confidence": 0.0,
+          "maps_played": 0,
+          "series_played": 0,
+          "status": "no_meetings",
+          "team_a_maps_won": 0,
+          "team_a_rating": null,
+          "team_a_score": null,
+          "team_a_series_won": 0,
+          "team_b_maps_won": 0,
+          "team_b_rating": null,
+          "team_b_score": null,
+          "team_b_series_won": 0
+        },
+        "history_applicability": "none",
+        "organizations": {
+          "confidence": 0.0,
+          "maps_played": 0,
+          "series_played": 0,
+          "status": "no_meetings",
+          "team_a_maps_won": 0,
+          "team_a_rating": null,
+          "team_a_score": null,
+          "team_a_series_won": 0,
+          "team_b_maps_won": 0,
+          "team_b_rating": null,
+          "team_b_score": null,
+          "team_b_series_won": 0
+        },
+        "preferred_scope": "organizations"
+      },
+      "manual_context": {
+        "source_type": "manual_analyst_note",
+        "team_a": [],
+        "team_b": []
+      },
+      "map_matchups": [
+        {
+          "key_edges": [
+            {
+              "evidence_id": "map:anubis:pistol",
+              "favored_team": "team_a",
+              "metric": "pistol",
+              "reliability": 0.7725,
+              "strength": "clear"
+            },
+            {
+              "evidence_id": "map:anubis:opening",
+              "favored_team": "team_a",
+              "metric": "opening",
+              "reliability": 0.7725,
+              "strength": "moderate"
+            },
+            {
+              "evidence_id": "map:anubis:ct_side",
+              "favored_team": "team_a",
+              "metric": "ct_side",
+              "reliability": 0.7725,
+              "strength": "moderate"
+            },
+            {
+              "evidence_id": "map:anubis:clutch",
+              "favored_team": "team_a",
+              "metric": "clutch",
+              "reliability": 0.7725,
+              "strength": "moderate"
+            },
+            {
+              "evidence_id": "map:anubis:retake",
+              "favored_team": "team_a",
+              "metric": "retake",
+              "reliability": 0.7725,
+              "strength": "moderate"
+            }
+          ],
+          "map": "anubis",
+          "matchup_score_team_a": 55.43,
+          "relevance": 0.7528944804226212,
+          "team_a": {
+            "map_strength": 66.96377216,
+            "reliability": 0.96,
+            "sample_maps": 13
+          },
+          "team_b": {
+            "map_strength": 49.878118426250005,
+            "reliability": 0.7725,
+            "sample_maps": 4
+          }
+        },
+        {
+          "key_edges": [
+            {
+              "evidence_id": "map:mirage:pistol",
+              "favored_team": "team_b",
+              "metric": "pistol",
+              "reliability": 0.7475,
+              "strength": "clear"
+            },
+            {
+              "evidence_id": "map:mirage:postplant",
+              "favored_team": "team_b",
+              "metric": "postplant",
+              "reliability": 0.7475,
+              "strength": "moderate"
+            },
+            {
+              "evidence_id": "map:mirage:opening",
+              "favored_team": "team_b",
+              "metric": "opening",
+              "reliability": 0.7475,
+              "strength": "moderate"
+            },
+            {
+              "evidence_id": "map:mirage:ct_side",
+              "favored_team": "team_b",
+              "metric": "ct_side",
+              "reliability": 0.7475,
+              "strength": "moderate"
+            },
+            {
+              "evidence_id": "map:mirage:t_side",
+              "favored_team": "team_a",
+              "metric": "t_side",
+              "reliability": 0.7475,
+              "strength": "small"
+            }
+          ],
+          "map": "mirage",
+          "matchup_score_team_a": 51.55,
+          "relevance": 0.553620553620608,
+          "team_a": {
+            "map_strength": 55.314224843750004,
+            "reliability": 0.9375,
+            "sample_maps": 11
+          },
+          "team_b": {
+            "map_strength": 49.64696253089286,
+            "reliability": 0.7475,
+            "sample_maps": 4
+          }
+        },
+        {
+          "key_edges": [
+            {
+              "evidence_id": "map:nuke:pistol",
+              "favored_team": "team_b",
+              "metric": "pistol",
+              "reliability": 0.78625,
+              "strength": "moderate"
+            },
+            {
+              "evidence_id": "map:nuke:force_buy",
+              "favored_team": "team_b",
+              "metric": "force_buy",
+              "reliability": 0.78625,
+              "strength": "small"
+            },
+            {
+              "evidence_id": "map:nuke:anti_eco",
+              "favored_team": "team_b",
+              "metric": "anti_eco",
+              "reliability": 0.78625,
+              "strength": "small"
+            }
+          ],
+          "map": "nuke",
+          "matchup_score_team_a": 42.87,
+          "relevance": 0.5455224214853205,
+          "team_a": {
+            "map_strength": 50.16764086911765,
+            "reliability": 0.975,
+            "sample_maps": 15
+          },
+          "team_b": {
+            "map_strength": 60.830844956875,
+            "reliability": 0.78625,
+            "sample_maps": 6
+          }
+        }
+      ],
+      "match": {
+        "date": "2026-11-02",
+        "environment": "lan",
+        "format": "bo3",
+        "id": 404,
+        "is_elimination": false,
+        "is_playoff": false,
+        "round_label": "Group B · Upper quarterfinal 3",
+        "round_number": 1,
+        "section": "upper",
+        "stage": "group",
+        "tournament": {
+          "id": 14,
+          "name": "IEM Beijing 2026",
+          "tier": "S"
+        }
+      },
+      "matchup": {
+        "confidence_level": "medium",
+        "factors": [
+          {
+            "factor_id": "matchup:map_veto",
+            "key": "map_veto",
+            "reliability": 0.0441,
+            "sample_size": 6,
+            "team_a_score": 52.99,
+            "team_b_score": 47.01
+          },
+          {
+            "factor_id": "matchup:team_strength",
+            "key": "team_strength",
+            "reliability": 0.666,
+            "sample_size": null,
+            "team_a_score": 49.55,
+            "team_b_score": 50.45
+          },
+          {
+            "factor_id": "matchup:form_context",
+            "key": "form_context",
+            "reliability": 0.0,
+            "sample_size": 0,
+            "team_a_score": null,
+            "team_b_score": null
+          },
+          {
+            "factor_id": "matchup:tactical_matchup",
+            "key": "tactical_matchup",
+            "reliability": 0.0441,
+            "sample_size": null,
+            "team_a_score": 48.63,
+            "team_b_score": 51.37
+          },
+          {
+            "factor_id": "matchup:h2h",
+            "key": "h2h",
+            "reliability": 0.0,
+            "sample_size": 0,
+            "team_a_score": null,
+            "team_b_score": null
+          },
+          {
+            "factor_id": "matchup:leadership_context",
+            "key": "leadership_context",
+            "reliability": 1.0,
+            "sample_size": null,
+            "team_a_score": 48.53,
+            "team_b_score": 51.47
+          }
+        ],
+        "model_version": "matchup_v3",
+        "reliability": 0.8446,
+        "source_type": "deterministic_analytics",
+        "team_a_score": 49.87,
+        "team_b_score": 50.13
+      },
+      "opponent_context": {
+        "team_a": {
+          "adjusted_form_version": "opponent_adjusted_form_v1_candidate",
+          "dynamic_sos_score": 59.75,
+          "matches": [
+            {
+              "opponent": {
+                "id": 2,
+                "name": "Falcons"
+              },
+              "opponent_dynamic_strength": 64.43,
+              "opponent_reliability": 0.9947,
+              "result": "win",
+              "result_quality_label": "strong_win",
+              "result_quality_score": 0.5893,
+              "series_score": "2-1"
+            },
+            {
+              "opponent": {
+                "id": 5,
+                "name": "FURIA"
+              },
+              "opponent_dynamic_strength": 66.64,
+              "opponent_reliability": 0.9897,
+              "result": "loss",
+              "result_quality_label": "loss",
+              "result_quality_score": -0.4005,
+              "series_score": "0-2"
+            },
+            {
+              "opponent": {
+                "id": 12,
+                "name": "9z"
+              },
+              "opponent_dynamic_strength": 60.23,
+              "opponent_reliability": 0.9947,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.5485,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 28,
+                "name": "Ninjas in Pyjamas"
+              },
+              "opponent_dynamic_strength": 50.25,
+              "opponent_reliability": 0.6281,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.3849,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 12,
+                "name": "9z"
+              },
+              "opponent_dynamic_strength": 54.7,
+              "opponent_reliability": 0.9218,
+              "result": "loss",
+              "result_quality_label": "loss",
+              "result_quality_score": -0.4117,
+              "series_score": "0-2"
+            },
+            {
+              "opponent": {
+                "id": 1,
+                "name": "Spirit"
+              },
+              "opponent_dynamic_strength": 67.74,
+              "opponent_reliability": 0.9947,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.4965,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 3,
+                "name": "Vitality"
+              },
+              "opponent_dynamic_strength": 69.11,
+              "opponent_reliability": 0.9947,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.2806,
+              "series_score": "1-2"
+            },
+            {
+              "opponent": {
+                "id": 51,
+                "name": "1win"
+              },
+              "opponent_dynamic_strength": 61.99,
+              "opponent_reliability": 0.8014,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.3932,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 5,
+                "name": "FURIA"
+              },
+              "opponent_dynamic_strength": 62.78,
+              "opponent_reliability": 0.9947,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.377,
+              "series_score": "2-1"
+            },
+            {
+              "opponent": {
+                "id": 10,
+                "name": "BetBoom"
+              },
+              "opponent_dynamic_strength": 52.42,
+              "opponent_reliability": 0.8114,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.2923,
+              "series_score": "2-1"
+            },
+            {
+              "opponent": {
+                "id": 2,
+                "name": "Falcons"
+              },
+              "opponent_dynamic_strength": 66.66,
+              "opponent_reliability": 0.9947,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.2523,
+              "series_score": "0-2"
+            },
+            {
+              "opponent": {
+                "id": 12,
+                "name": "9z"
+              },
+              "opponent_dynamic_strength": 52.75,
+              "opponent_reliability": 0.7563,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.2788,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 9,
+                "name": "G2"
+              },
+              "opponent_dynamic_strength": 63.96,
+              "opponent_reliability": 0.9947,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.0732,
+              "series_score": "1-2"
+            },
+            {
+              "opponent": {
+                "id": 24,
+                "name": "M80"
+              },
+              "opponent_dynamic_strength": 51.91,
+              "opponent_reliability": 0.9031,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.0888,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 35,
+                "name": "DENDELE"
+              },
+              "opponent_dynamic_strength": 51.97,
+              "opponent_reliability": 0.7147,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.0745,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 9,
+                "name": "G2"
+              },
+              "opponent_dynamic_strength": 58.48,
+              "opponent_reliability": 0.8388,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.0651,
+              "series_score": "0-2"
+            }
+          ],
+          "opponent_adjusted_form_score": 62.57,
+          "raw_form_score": 62.5,
+          "reliability": 0.9478,
+          "tournament_opponent_adjusted_form_score": null,
+          "version": "opponent_context_v1"
+        },
+        "team_b": {
+          "adjusted_form_version": "opponent_adjusted_form_v1_candidate",
+          "dynamic_sos_score": null,
+          "matches": [],
+          "opponent_adjusted_form_score": 50.0,
+          "raw_form_score": 50.0,
+          "reliability": 0.0,
+          "tournament_opponent_adjusted_form_score": null,
+          "version": "opponent_context_v1"
+        }
+      },
+      "prediction": {
+        "confidence": 0.8446,
+        "manual_adjustment": null,
+        "model_version": "v12",
+        "quality_gate_passed": true,
+        "source_type": "ml_prediction",
+        "status": "available",
+        "team_a_probability": 0.7941177550883831,
+        "team_b_probability": 0.20588224491161689,
+        "top_model_drivers": [
+          {
+            "driver_id": "ml:ranking_advantage",
+            "favored_team": "team_a",
+            "importance": 31.446,
+            "key": "ranking_advantage",
+            "reliability": 0.8446
+          },
+          {
+            "driver_id": "ml:matchup_score_centered",
+            "favored_team": "team_b",
+            "importance": 0.742,
+            "key": "matchup_score_centered",
+            "reliability": 0.8446
+          },
+          {
+            "driver_id": "ml:team_strength_difference",
+            "favored_team": "team_b",
+            "importance": 0.57,
+            "key": "team_strength_difference",
+            "reliability": 0.8446
+          },
+          {
+            "driver_id": "ml:tactical_advantage",
+            "favored_team": null,
+            "importance": 0.005,
+            "key": "tactical_advantage",
+            "reliability": 0.8446
+          }
+        ]
+      },
+      "recent_series_evidence": {
+        "team_a": [
+          {
+            "current_tournament": false,
+            "date": "2026-10-11",
+            "evidence_id": "series:333",
+            "expected_win_probability": 0.256,
+            "opponent": {
+              "id": 1,
+              "name": "Spirit",
+              "rank": 1
+            },
+            "performance_vs_expectation": 0.6287,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "ESL Pro League Season 24"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-10-04",
+            "evidence_id": "series:304",
+            "expected_win_probability": 0.2315,
+            "opponent": {
+              "id": 2,
+              "name": "Falcons",
+              "rank": 3
+            },
+            "performance_vs_expectation": -0.1212,
+            "reliability": null,
+            "result": "loss",
+            "series_score": "0-2",
+            "tournament": "ESL Pro League Season 24"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-10-10",
+            "evidence_id": "series:330",
+            "expected_win_probability": 0.31,
+            "opponent": {
+              "id": 3,
+              "name": "Vitality",
+              "rank": 3
+            },
+            "performance_vs_expectation": -0.0372,
+            "reliability": null,
+            "result": "loss",
+            "series_score": "1-2",
+            "tournament": "ESL Pro League Season 24"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-10-18",
+            "evidence_id": "series:388",
+            "expected_win_probability": 0.4667,
+            "opponent": {
+              "id": 2,
+              "name": "Falcons",
+              "rank": 4
+            },
+            "performance_vs_expectation": 0.2533,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-1",
+            "tournament": "Thunderpick World Championship 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-10-17",
+            "evidence_id": "series:387",
+            "expected_win_probability": 0.5333,
+            "opponent": {
+              "id": 5,
+              "name": "FURIA",
+              "rank": 6
+            },
+            "performance_vs_expectation": -0.4099,
+            "reliability": null,
+            "result": "loss",
+            "series_score": "0-2",
+            "tournament": "Thunderpick World Championship 2026"
+          }
+        ],
+        "team_b": []
+      },
+      "schema_version": "match_analysis_context.v1",
+      "secondary_bets": {
+        "he_kill_by_map": [
+          {
+            "confidence": "low",
+            "map": "inferno",
+            "probability": 0.68389,
+            "team_a_sample": 6,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "cache",
+            "probability": 0.635818,
+            "team_a_sample": 4,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "dust2",
+            "probability": 0.623326,
+            "team_a_sample": 8,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "mirage",
+            "probability": 0.603713,
+            "team_a_sample": 9,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "anubis",
+            "probability": 0.594611,
+            "team_a_sample": 8,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "nuke",
+            "probability": 0.558539,
+            "team_a_sample": 4,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "ancient",
+            "probability": 0.454364,
+            "team_a_sample": 0,
+            "team_b_sample": 0
+          }
+        ]
+      },
+      "teams": {
+        "team_a": {
+          "form": {
+            "matches_vs_top_10": 9,
+            "matches_vs_top_30": 13,
+            "matches_vs_top_5": 4,
+            "performance_vs_expectation_score": 53.16,
+            "recent_60d_matches": 16,
+            "recent_60d_reliability": 1.0,
+            "recent_60d_score": 62.82,
+            "strength_of_schedule_score": 78.4,
+            "tournament_form_score": null,
+            "tournament_matches": 0,
+            "tournament_reliability": 0.0
+          },
+          "id": 8,
+          "leadership": {
+            "coach_score": 50.54,
+            "igl_score": 49.71,
+            "reliability": 0.7533,
+            "sample_size": 48
+          },
+          "name": "Aurora",
+          "rank": 4,
+          "roster": {
+            "coach": {
+              "id": 67,
+              "name": "ashhh"
+            },
+            "players": [
+              {
+                "id": 60,
+                "name": "XANTARES",
+                "role": "rifler"
+              },
+              {
+                "id": 65,
+                "name": "Jimpphat",
+                "role": "rifler"
+              },
+              {
+                "id": 66,
+                "name": "kyxsan",
+                "role": "igl"
+              },
+              {
+                "id": 62,
+                "name": "woxic",
+                "role": "awper"
+              },
+              {
+                "id": 64,
+                "name": "Wicadia",
+                "role": "rifler"
+              }
+            ],
+            "reliability": 1.0,
+            "roster_id": 22,
+            "sample_maps": 48,
+            "stability_score": 81.33
+          },
+          "team_strength": {
+            "key_factors": [
+              {
+                "factor_id": "team_strength:roster_stability",
+                "key": "roster_stability",
+                "reliability": 1.0,
+                "score": 81.33
+              },
+              {
+                "factor_id": "team_strength:team_performance",
+                "key": "team_performance",
+                "reliability": 1.0,
+                "score": 55.84
+              },
+              {
+                "factor_id": "team_strength:roster_quality",
+                "key": "roster_quality",
+                "reliability": 1.0,
+                "score": 52.49
+              },
+              {
+                "factor_id": "team_strength:recent_form",
+                "key": "recent_form",
+                "reliability": 1.0,
+                "score": 55.67
+              },
+              {
+                "factor_id": "team_strength:strong_opponents",
+                "key": "strong_opponents",
+                "reliability": 1.0,
+                "score": 49.44
+              }
+            ],
+            "reliability": 1.0,
+            "sample_size": 73,
+            "score": 55.91
+          }
+        },
+        "team_b": {
+          "form": {
+            "matches_vs_top_10": 0,
+            "matches_vs_top_30": 0,
+            "matches_vs_top_5": 0,
+            "performance_vs_expectation_score": null,
+            "recent_60d_matches": 0,
+            "recent_60d_reliability": 0.0,
+            "recent_60d_score": null,
+            "strength_of_schedule_score": null,
+            "tournament_form_score": null,
+            "tournament_matches": 0,
+            "tournament_reliability": 0.0
+          },
+          "id": 42,
+          "leadership": {
+            "coach_score": 52.98,
+            "igl_score": null,
+            "reliability": 0.1883,
+            "sample_size": 6
+          },
+          "name": "Liquid",
+          "rank": 21,
+          "roster": {
+            "coach": {
+              "id": 268,
+              "name": "flashie"
+            },
+            "players": [
+              {
+                "id": 261,
+                "name": "EliGE",
+                "role": null
+              },
+              {
+                "id": 262,
+                "name": "NAF",
+                "role": null
+              },
+              {
+                "id": 263,
+                "name": "JT",
+                "role": null
+              },
+              {
+                "id": 264,
+                "name": "malbsMd",
+                "role": null
+              },
+              {
+                "id": 265,
+                "name": "Jorko",
+                "role": null
+              }
+            ],
+            "reliability": 0.65,
+            "roster_id": 43,
+            "sample_maps": 6,
+            "stability_score": 56.7
+          },
+          "team_strength": {
+            "key_factors": [
+              {
+                "factor_id": "team_strength:roster_quality",
+                "key": "roster_quality",
+                "reliability": 1.0,
+                "score": 52.21
+              },
+              {
+                "factor_id": "team_strength:team_performance",
+                "key": "team_performance",
+                "reliability": 1.0,
+                "score": 46.3
+              },
+              {
+                "factor_id": "team_strength:roster_stability",
+                "key": "roster_stability",
+                "reliability": 0.65,
+                "score": 56.7
+              },
+              {
+                "factor_id": "team_strength:recent_form",
+                "key": "recent_form",
+                "reliability": 1.0,
+                "score": 47.17
+              },
+              {
+                "factor_id": "team_strength:strong_opponents",
+                "key": "strong_opponents",
+                "reliability": 1.0,
+                "score": 49.87
+              }
+            ],
+            "reliability": 0.93,
+            "sample_size": 27,
+            "score": 50.59
+          }
+        }
+      },
+      "veto": {
+        "basis": "calculated_veto",
+        "likely_maps": [
+          {
+            "confidence": 0.6665,
+            "likely_role": "team_b_pick",
+            "map": "anubis",
+            "series_probability": 0.7528944804226212
+          },
+          {
+            "confidence": 0.6665,
+            "likely_role": "decider",
+            "map": "mirage",
+            "series_probability": 0.553620553620608
+          },
+          {
+            "confidence": 0.6665,
+            "likely_role": "decider",
+            "map": "nuke",
+            "series_probability": 0.5455224214853205
+          }
+        ],
+        "model_version": "v2.1",
+        "source_type": "deterministic_analytics"
+      }
+    },
+    "created_at": "2026-10-24T08:09:05.474398+00:00",
+    "error_code": null,
+    "error_message": null,
+    "explanation_plan_schema_version": "match_explanation_plan.v2",
+    "explanation_plan_snapshot": {
+      "conclusion": {
+        "advantage": "clear",
+        "confidence": "medium",
+        "favored_team": "team_a",
+        "favored_team_name": "Aurora",
+        "internal_statistics_disclaimer": "Преимущество основано на внутренней статистике CS2Eye. Форма на текущем турнире рассматривается отдельно от общей статистики.",
+        "ml_probability_team_a": 0.7941177550883831,
+        "ml_probability_team_b": 0.20588224491161689,
+        "team_a_name": "Aurora",
+        "team_b_name": "Liquid"
+      },
+      "context_schema_version": "match_analysis_context.v1",
+      "expected_winner": {
+        "team_id": 8,
+        "team_name": "Aurora",
+        "win_probability": 0.7941177550883831
+      },
+      "form": {
+        "comparison": {
+          "favored_team": "none",
+          "favored_team_name": null,
+          "strength": "none"
+        },
+        "context_notes": [
+          "Турнир только начинается, поэтому команды ещё не сформировали турнирную форму."
+        ],
+        "state": "not_started",
+        "team_a": {
+          "evidence": [],
+          "fallback": "none",
+          "form_level": "unknown",
+          "matches": 0,
+          "performance_vs_expectation": 53.16,
+          "previous_tournament": null,
+          "reliability": null,
+          "score": null,
+          "team_name": "Aurora"
+        },
+        "team_b": {
+          "evidence": [],
+          "fallback": "none",
+          "form_level": "unknown",
+          "matches": 0,
+          "performance_vs_expectation": null,
+          "previous_tournament": null,
+          "reliability": null,
+          "score": null,
+          "team_name": "Liquid"
+        }
+      },
+      "manual_context": {
+        "empty_message": "Ручных комментариев по этому матчу нет.",
+        "team_a": [],
+        "team_b": []
+      },
+      "maps": {
+        "context_notes": [],
+        "key_map_edges": [
+          {
+            "favored_team": "team_a",
+            "favored_team_name": "Aurora",
+            "map": "anubis",
+            "reasons": [
+              {
+                "evidence_id": null,
+                "reliability": 0.96,
+                "side": "team_a",
+                "side_name": "Aurora",
+                "strength": "moderate",
+                "type": "team_strong_on_map"
+              },
+              {
+                "evidence_id": "map:anubis:pistol",
+                "reliability": 0.7725,
+                "side": "team_a",
+                "side_name": "Aurora",
+                "strength": "clear",
+                "type": "pistol"
+              },
+              {
+                "evidence_id": "map:anubis:opening",
+                "reliability": 0.7725,
+                "side": "team_a",
+                "side_name": "Aurora",
+                "strength": "moderate",
+                "type": "opening"
+              },
+              {
+                "evidence_id": "map:anubis:ct_side",
+                "reliability": 0.7725,
+                "side": "team_a",
+                "side_name": "Aurora",
+                "strength": "moderate",
+                "type": "ct_side"
+              },
+              {
+                "evidence_id": "map:anubis:clutch",
+                "reliability": 0.7725,
+                "side": "team_a",
+                "side_name": "Aurora",
+                "strength": "moderate",
+                "type": "clutch"
+              }
+            ],
+            "relevance": 0.7528944804226212,
+            "strength": "small"
+          },
+          {
+            "favored_team": "team_b",
+            "favored_team_name": "Liquid",
+            "map": "nuke",
+            "reasons": [
+              {
+                "evidence_id": null,
+                "reliability": 0.78625,
+                "side": "team_b",
+                "side_name": "Liquid",
+                "strength": "moderate",
+                "type": "team_strong_on_map"
+              },
+              {
+                "evidence_id": "map:nuke:pistol",
+                "reliability": 0.78625,
+                "side": "team_b",
+                "side_name": "Liquid",
+                "strength": "moderate",
+                "type": "pistol"
+              },
+              {
+                "evidence_id": "map:nuke:force_buy",
+                "reliability": 0.78625,
+                "side": "team_b",
+                "side_name": "Liquid",
+                "strength": "small",
+                "type": "force_buy"
+              },
+              {
+                "evidence_id": "map:nuke:anti_eco",
+                "reliability": 0.78625,
+                "side": "team_b",
+                "side_name": "Liquid",
+                "strength": "small",
+                "type": "anti_eco"
+              }
+            ],
+            "relevance": 0.5455224214853205,
+            "strength": "moderate"
+          }
+        ],
+        "status": "available",
+        "team_a": {
+          "strong_maps": [
+            {
+              "classification": "strong",
+              "map": "anubis",
+              "reliability": 0.96,
+              "sample_maps": 13,
+              "strength_score": 66.96377216
+            },
+            {
+              "classification": "strong",
+              "map": "mirage",
+              "reliability": 0.9375,
+              "sample_maps": 11,
+              "strength_score": 55.314224843750004
+            }
+          ],
+          "team_name": "Aurora",
+          "weak_maps": []
+        },
+        "team_b": {
+          "strong_maps": [
+            {
+              "classification": "strong",
+              "map": "nuke",
+              "reliability": 0.78625,
+              "sample_maps": 6,
+              "strength_score": 60.830844956875
+            }
+          ],
+          "team_name": "Liquid",
+          "weak_maps": []
+        }
+      },
+      "schema_version": "match_explanation_plan.v2",
+      "teamplay": {
+        "context_notes": [],
+        "signals": [
+          {
+            "category": "pistol",
+            "effect": "positive",
+            "evidence_id": "map:anubis:pistol",
+            "fact_type": "strong_pistol",
+            "map": "anubis",
+            "reliability": 0.7725,
+            "side": "team_a",
+            "side_name": "Aurora",
+            "signal_id": "teamplay:anubis:pistol:team_a",
+            "strength": "clear"
+          },
+          {
+            "category": "pistol",
+            "effect": "positive",
+            "evidence_id": "map:mirage:pistol",
+            "fact_type": "strong_pistol",
+            "map": "mirage",
+            "reliability": 0.7475,
+            "side": "team_b",
+            "side_name": "Liquid",
+            "signal_id": "teamplay:mirage:pistol:team_b",
+            "strength": "clear"
+          },
+          {
+            "category": "clutch",
+            "effect": "positive",
+            "evidence_id": "map:anubis:clutch",
+            "fact_type": "strong_clutch",
+            "map": "anubis",
+            "reliability": 0.7725,
+            "side": "team_a",
+            "side_name": "Aurora",
+            "signal_id": "teamplay:anubis:clutch:team_a",
+            "strength": "moderate"
+          },
+          {
+            "category": "ct_side",
+            "effect": "positive",
+            "evidence_id": "map:anubis:ct_side",
+            "fact_type": "strong_ct_side",
+            "map": "anubis",
+            "reliability": 0.7725,
+            "side": "team_a",
+            "side_name": "Aurora",
+            "signal_id": "teamplay:anubis:ct_side:team_a",
+            "strength": "moderate"
+          },
+          {
+            "category": "opening",
+            "effect": "positive",
+            "evidence_id": "map:anubis:opening",
+            "fact_type": "strong_opening",
+            "map": "anubis",
+            "reliability": 0.7725,
+            "side": "team_a",
+            "side_name": "Aurora",
+            "signal_id": "teamplay:anubis:opening:team_a",
+            "strength": "moderate"
+          }
+        ]
+      }
+    },
+    "grounding_error_codes": null,
+    "grounding_valid": true,
+    "input_tokens": 2153,
+    "language": "ru",
+    "llm_called": true,
+    "model": "qwen3:8b",
+    "output_tokens": 250,
+    "prompt_version": "match_analysis_prompt.v5",
+    "provider": "ollama",
+    "provider_response_id": null,
+    "repair_attempted": false,
+    "schema_valid": true,
+    "status": "completed",
+    "validation_error_codes": null
+  },
+  "schema": "cs2eye.ai_report.v1",
+  "source_parent_id": null,
+  "source_run_id": 93,
+  "team_a": {
+    "bo3_id": 3598,
+    "name": "Aurora"
+  },
+  "team_b": {
+    "bo3_id": 790,
+    "name": "Liquid"
+  },
+  "tournament": {
+    "name": "IEM Beijing 2026",
+    "year": 2026
+  }
+}
