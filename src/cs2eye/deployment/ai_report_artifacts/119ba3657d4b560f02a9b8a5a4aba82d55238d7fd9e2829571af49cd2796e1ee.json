@@ -1,0 +1,889 @@
+{
+  "match": {
+    "date": "2026-10-24",
+    "format": "bo3",
+    "round_number": 1
+  },
+  "origin": "fae704d4-559f-4b4a-b6a4-d57109b35009",
+  "run": {
+    "analysis_mode": "pre_match",
+    "analysis_schema_version": "match_llm_analysis.v3",
+    "analysis_snapshot": {
+      "conclusion_text": "Legacy имеет clear преимущество по внутренней статистике CS2Eye. Форма на текущем турнире рассматривается отдельно от общей статистики.",
+      "expected_winner_text": "По расчётам должна выиграть Legacy — 88.80%.",
+      "explanation_plan_version": "match_explanation_plan.v2",
+      "form_text": "Турнир только начинается, поэтому команды ещё не сформировали турнирную форму.",
+      "manual_text": "Ручные комментарии аналитика: Legacy: n1ssim на dust2 — лучшая карта. Может в одного закрыть всю игру.",
+      "maps_text": "Legacy имеет сильные карты: mirage (59.9%) и dust2 (55.9%). Nemiga не имеет сильных карт.",
+      "schema_version": "match_llm_analysis.v3",
+      "teamplay_text": "Надёжных выраженных различий по доступным teamplay/swing показателям не найдено."
+    },
+    "as_of": "2026-10-24T08:06:17.703358+00:00",
+    "attempts": 1,
+    "business_valid": true,
+    "completed_at": "2026-10-24T08:06:37.399737+00:00",
+    "context_schema_version": "match_analysis_context.v1",
+    "context_snapshot": {
+      "analysis_mode": "pre_match",
+      "as_of": "2026-10-24T08:06:17.703358Z",
+      "betting_restrictions": {
+        "message": "НЕ СТАВИТЬ НА ПОБЕДИТЕЛЯ МАТЧА.\n\nРассматривать только сторонние рынки:\nтоталы, HE kill, пистолетки и другие ставки, не зависящие напрямую от победителя матча.",
+        "restricted": true,
+        "restrictions": [
+          {
+            "message": "НЕ СТАВИТЬ НА ПОБЕДИТЕЛЯ МАТЧА.\n\nРассматривать только сторонние рынки:\nтоталы, HE kill, пистолетки и другие ставки, не зависящие напрямую от победителя матча.",
+            "rule": "group_stage_no_match_winner_bets"
+          }
+        ],
+        "rule": "group_stage_no_match_winner_bets"
+      },
+      "data_quality": {
+        "limitations": [
+          "map_veto playability weighting (which maps are relevant) still comes from the legacy Calculated Veto v1.1 pick/ban engine; only map quality is V3-sourced."
+        ],
+        "missing_sections": [],
+        "overall_status": "partial",
+        "warnings": [
+          "Tournament form unavailable for team_a.",
+          "Tournament form unavailable for team_b.",
+          "Recent series evidence unavailable for team_b.",
+          "Organization H2H is unavailable.",
+          "Current rosters have no applicable H2H.",
+          "Map sample is incomplete for mirage.",
+          "Map sample is incomplete for dust2.",
+          "Map sample is incomplete for inferno."
+        ]
+      },
+      "generated_at": "2026-10-24T08:06:33.459797Z",
+      "h2h": {
+        "current_rosters": {
+          "confidence": 0.0,
+          "maps_played": 0,
+          "series_played": 0,
+          "status": "no_meetings",
+          "team_a_maps_won": 0,
+          "team_a_rating": null,
+          "team_a_score": null,
+          "team_a_series_won": 0,
+          "team_b_maps_won": 0,
+          "team_b_rating": null,
+          "team_b_score": null,
+          "team_b_series_won": 0
+        },
+        "history_applicability": "none",
+        "organizations": {
+          "confidence": 0.0,
+          "maps_played": 0,
+          "series_played": 0,
+          "status": "no_meetings",
+          "team_a_maps_won": 0,
+          "team_a_rating": null,
+          "team_a_score": null,
+          "team_a_series_won": 0,
+          "team_b_maps_won": 0,
+          "team_b_rating": null,
+          "team_b_score": null,
+          "team_b_series_won": 0
+        },
+        "preferred_scope": "organizations"
+      },
+      "manual_context": {
+        "source_type": "manual_analyst_note",
+        "team_a": [
+          {
+            "category": "individual",
+            "coach": null,
+            "environment": null,
+            "map": "dust2",
+            "note_id": "analyst_factor:9",
+            "players": [
+              "n1ssim"
+            ],
+            "polarity": "positive",
+            "text": "Лучшая карта. Может в одного закрыть всю игру"
+          }
+        ],
+        "team_b": []
+      },
+      "map_matchups": [
+        {
+          "key_edges": [],
+          "map": "mirage",
+          "matchup_score_team_a": null,
+          "relevance": 0.6509038618054939,
+          "team_a": {
+            "map_strength": 59.89098978285715,
+            "reliability": 0.96,
+            "sample_maps": 13
+          },
+          "team_b": {
+            "map_strength": null,
+            "reliability": null,
+            "sample_maps": 0
+          }
+        },
+        {
+          "key_edges": [],
+          "map": "dust2",
+          "matchup_score_team_a": null,
+          "relevance": 0.6019854217006666,
+          "team_a": {
+            "map_strength": 55.88518596285715,
+            "reliability": 0.99,
+            "sample_maps": 18
+          },
+          "team_b": {
+            "map_strength": null,
+            "reliability": null,
+            "sample_maps": 0
+          }
+        },
+        {
+          "key_edges": [],
+          "map": "inferno",
+          "matchup_score_team_a": null,
+          "relevance": 0.46324859766404963,
+          "team_a": {
+            "map_strength": 49.60059486125,
+            "reliability": 0.9225,
+            "sample_maps": 10
+          },
+          "team_b": {
+            "map_strength": null,
+            "reliability": null,
+            "sample_maps": 0
+          }
+        }
+      ],
+      "match": {
+        "date": "2026-10-24",
+        "environment": "lan",
+        "format": "bo3",
+        "id": 425,
+        "is_elimination": false,
+        "is_playoff": false,
+        "round_label": "Swiss round 1 · 0-0 · 6",
+        "round_number": 1,
+        "section": "swiss",
+        "stage": "swiss",
+        "tournament": {
+          "id": 15,
+          "name": "PGL Masters Bucharest 2026",
+          "tier": "S"
+        }
+      },
+      "matchup": {
+        "confidence_level": "medium",
+        "factors": [
+          {
+            "factor_id": "matchup:map_veto",
+            "key": "map_veto",
+            "reliability": 0.0,
+            "sample_size": 0,
+            "team_a_score": null,
+            "team_b_score": null
+          },
+          {
+            "factor_id": "matchup:team_strength",
+            "key": "team_strength",
+            "reliability": 0.0,
+            "sample_size": null,
+            "team_a_score": null,
+            "team_b_score": null
+          },
+          {
+            "factor_id": "matchup:form_context",
+            "key": "form_context",
+            "reliability": 0.0,
+            "sample_size": 0,
+            "team_a_score": null,
+            "team_b_score": null
+          },
+          {
+            "factor_id": "matchup:tactical_matchup",
+            "key": "tactical_matchup",
+            "reliability": 0.0,
+            "sample_size": null,
+            "team_a_score": null,
+            "team_b_score": null
+          },
+          {
+            "factor_id": "matchup:h2h",
+            "key": "h2h",
+            "reliability": 0.0,
+            "sample_size": 0,
+            "team_a_score": null,
+            "team_b_score": null
+          },
+          {
+            "factor_id": "matchup:leadership_context",
+            "key": "leadership_context",
+            "reliability": 1.0,
+            "sample_size": null,
+            "team_a_score": 47.63,
+            "team_b_score": 52.37
+          }
+        ],
+        "model_version": "matchup_v3",
+        "reliability": 0.81,
+        "source_type": "deterministic_analytics",
+        "team_a_score": 49.9,
+        "team_b_score": 50.1
+      },
+      "opponent_context": {
+        "team_a": {
+          "adjusted_form_version": "opponent_adjusted_form_v1_candidate",
+          "dynamic_sos_score": 57.21,
+          "matches": [
+            {
+              "opponent": {
+                "id": 10,
+                "name": "BetBoom"
+              },
+              "opponent_dynamic_strength": 56.15,
+              "opponent_reliability": 0.9947,
+              "result": "loss",
+              "result_quality_label": "loss",
+              "result_quality_score": -0.4253,
+              "series_score": "1-2"
+            },
+            {
+              "opponent": {
+                "id": 5,
+                "name": "FURIA"
+              },
+              "opponent_dynamic_strength": 66.08,
+              "opponent_reliability": 0.9947,
+              "result": "loss",
+              "result_quality_label": "loss",
+              "result_quality_score": -0.3529,
+              "series_score": "1-2"
+            },
+            {
+              "opponent": {
+                "id": 19,
+                "name": "PARIVISION"
+              },
+              "opponent_dynamic_strength": 60.85,
+              "opponent_reliability": 0.9305,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.4976,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 24,
+                "name": "M80"
+              },
+              "opponent_dynamic_strength": 48.75,
+              "opponent_reliability": 0.9947,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.3286,
+              "series_score": "1-2"
+            },
+            {
+              "opponent": {
+                "id": 51,
+                "name": "1win"
+              },
+              "opponent_dynamic_strength": 54.74,
+              "opponent_reliability": 0.6281,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.2528,
+              "series_score": "0-2"
+            },
+            {
+              "opponent": {
+                "id": 52,
+                "name": "ShindeN"
+              },
+              "opponent_dynamic_strength": 50.41,
+              "opponent_reliability": 0.3864,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.2217,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 19,
+                "name": "PARIVISION"
+              },
+              "opponent_dynamic_strength": 49.92,
+              "opponent_reliability": 0.557,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.227,
+              "series_score": "1-2"
+            },
+            {
+              "opponent": {
+                "id": 3,
+                "name": "Vitality"
+              },
+              "opponent_dynamic_strength": 57.09,
+              "opponent_reliability": 0.9947,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.0783,
+              "series_score": "1-2"
+            },
+            {
+              "opponent": {
+                "id": 2,
+                "name": "Falcons"
+              },
+              "opponent_dynamic_strength": 60.42,
+              "opponent_reliability": 0.9031,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.0687,
+              "series_score": "1-2"
+            },
+            {
+              "opponent": {
+                "id": 11,
+                "name": "FUT"
+              },
+              "opponent_dynamic_strength": 67.68,
+              "opponent_reliability": 0.935,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.0965,
+              "series_score": "2-0"
+            }
+          ],
+          "opponent_adjusted_form_score": 39.96,
+          "raw_form_score": 30.0,
+          "reliability": 0.9159,
+          "tournament_opponent_adjusted_form_score": null,
+          "version": "opponent_context_v1"
+        },
+        "team_b": {
+          "adjusted_form_version": "opponent_adjusted_form_v1_candidate",
+          "dynamic_sos_score": null,
+          "matches": [],
+          "opponent_adjusted_form_score": 50.0,
+          "raw_form_score": 50.0,
+          "reliability": 0.0,
+          "tournament_opponent_adjusted_form_score": null,
+          "version": "opponent_context_v1"
+        }
+      },
+      "prediction": {
+        "confidence": 0.81,
+        "manual_adjustment": null,
+        "model_version": "v12",
+        "quality_gate_passed": true,
+        "source_type": "ml_prediction",
+        "status": "available",
+        "team_a_probability": 0.8880211741228075,
+        "team_b_probability": 0.11197882587719254,
+        "top_model_drivers": [
+          {
+            "driver_id": "ml:ranking_advantage",
+            "favored_team": "team_a",
+            "importance": 39.685,
+            "key": "ranking_advantage",
+            "reliability": 0.81
+          },
+          {
+            "driver_id": "ml:matchup_score_centered",
+            "favored_team": "team_b",
+            "importance": 0.347,
+            "key": "matchup_score_centered",
+            "reliability": 0.81
+          },
+          {
+            "driver_id": "ml:tactical_advantage",
+            "favored_team": null,
+            "importance": 0.0,
+            "key": "tactical_advantage",
+            "reliability": 0.81
+          },
+          {
+            "driver_id": "ml:team_strength_difference",
+            "favored_team": null,
+            "importance": 0.0,
+            "key": "team_strength_difference",
+            "reliability": 0.81
+          }
+        ]
+      },
+      "recent_series_evidence": {
+        "team_a": [
+          {
+            "current_tournament": false,
+            "date": "2026-08-29",
+            "evidence_id": "series:167",
+            "expected_win_probability": 0.4013,
+            "opponent": {
+              "id": 2,
+              "name": "Falcons",
+              "rank": 2
+            },
+            "performance_vs_expectation": -0.1395,
+            "reliability": null,
+            "result": "loss",
+            "series_score": "1-2",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-27",
+            "evidence_id": "series:262",
+            "expected_win_probability": 0.4337,
+            "opponent": {
+              "id": 11,
+              "name": "FUT",
+              "rank": 3
+            },
+            "performance_vs_expectation": 0.4359,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-10-15",
+            "evidence_id": "series:383",
+            "expected_win_probability": 0.4667,
+            "opponent": {
+              "id": 5,
+              "name": "FURIA",
+              "rank": 6
+            },
+            "performance_vs_expectation": -0.2033,
+            "reliability": null,
+            "result": "loss",
+            "series_score": "1-2",
+            "tournament": "Thunderpick World Championship 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-30",
+            "evidence_id": "series:271",
+            "expected_win_probability": 0.5663,
+            "opponent": {
+              "id": 3,
+              "name": "Vitality",
+              "rank": 7
+            },
+            "performance_vs_expectation": -0.29,
+            "reliability": null,
+            "result": "loss",
+            "series_score": "1-2",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-10-14",
+            "evidence_id": "series:378",
+            "expected_win_probability": 0.5987,
+            "opponent": {
+              "id": 19,
+              "name": "PARIVISION",
+              "rank": 10
+            },
+            "performance_vs_expectation": 0.2681,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "Thunderpick World Championship 2026"
+          }
+        ],
+        "team_b": []
+      },
+      "schema_version": "match_analysis_context.v1",
+      "secondary_bets": {
+        "he_kill_by_map": [
+          {
+            "confidence": "low",
+            "map": "mirage",
+            "probability": 0.731631,
+            "team_a_sample": 7,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "inferno",
+            "probability": 0.598772,
+            "team_a_sample": 2,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "anubis",
+            "probability": 0.588598,
+            "team_a_sample": 0,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "cache",
+            "probability": 0.544773,
+            "team_a_sample": 2,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "nuke",
+            "probability": 0.487825,
+            "team_a_sample": 4,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "ancient",
+            "probability": 0.451017,
+            "team_a_sample": 4,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "low",
+            "map": "dust2",
+            "probability": 0.434279,
+            "team_a_sample": 8,
+            "team_b_sample": 0
+          }
+        ]
+      },
+      "teams": {
+        "team_a": {
+          "form": {
+            "matches_vs_top_10": 5,
+            "matches_vs_top_30": 7,
+            "matches_vs_top_5": 2,
+            "performance_vs_expectation_score": 22.5,
+            "recent_60d_matches": 10,
+            "recent_60d_reliability": 0.971,
+            "recent_60d_score": 46.95,
+            "strength_of_schedule_score": 71.14,
+            "tournament_form_score": null,
+            "tournament_matches": 0,
+            "tournament_reliability": 0.0
+          },
+          "id": 7,
+          "leadership": {
+            "coach_score": 45.27,
+            "igl_score": null,
+            "reliability": 0.428,
+            "sample_size": 10
+          },
+          "name": "Legacy",
+          "rank": 7,
+          "roster": {
+            "coach": {
+              "id": 46,
+              "name": "adr"
+            },
+            "players": [
+              {
+                "id": 351,
+                "name": "bobz",
+                "role": null
+              },
+              {
+                "id": 40,
+                "name": "latto",
+                "role": "rifler"
+              },
+              {
+                "id": 41,
+                "name": "dumau",
+                "role": "rifler"
+              },
+              {
+                "id": 44,
+                "name": "try",
+                "role": "awper"
+              },
+              {
+                "id": 42,
+                "name": "n1ssim",
+                "role": "rifler"
+              }
+            ],
+            "reliability": 0.2,
+            "roster_id": 89,
+            "sample_maps": 10,
+            "stability_score": null
+          },
+          "team_strength": {
+            "key_factors": [
+              {
+                "factor_id": "team_strength:team_performance",
+                "key": "team_performance",
+                "reliability": 1.0,
+                "score": 52.08
+              },
+              {
+                "factor_id": "team_strength:roster_quality",
+                "key": "roster_quality",
+                "reliability": 1.0,
+                "score": 50.33
+              },
+              {
+                "factor_id": "team_strength:recent_form",
+                "key": "recent_form",
+                "reliability": 1.0,
+                "score": 48.66
+              },
+              {
+                "factor_id": "team_strength:strong_opponents",
+                "key": "strong_opponents",
+                "reliability": 1.0,
+                "score": 50.17
+              }
+            ],
+            "reliability": 1.0,
+            "sample_size": 65,
+            "score": 50.51
+          }
+        },
+        "team_b": {
+          "form": {
+            "matches_vs_top_10": 0,
+            "matches_vs_top_30": 0,
+            "matches_vs_top_5": 0,
+            "performance_vs_expectation_score": null,
+            "recent_60d_matches": 0,
+            "recent_60d_reliability": 0.0,
+            "recent_60d_score": null,
+            "strength_of_schedule_score": null,
+            "tournament_form_score": null,
+            "tournament_matches": 0,
+            "tournament_reliability": 0.0
+          },
+          "id": 53,
+          "leadership": {
+            "coach_score": 50.0,
+            "igl_score": null,
+            "reliability": 0.0,
+            "sample_size": 0
+          },
+          "name": "Nemiga",
+          "rank": 32,
+          "roster": {
+            "coach": {
+              "id": 358,
+              "name": "boX"
+            },
+            "players": [
+              {
+                "id": 353,
+                "name": "KaiR0N-",
+                "role": null
+              },
+              {
+                "id": 354,
+                "name": "Xant3r",
+                "role": null
+              },
+              {
+                "id": 355,
+                "name": "khaN",
+                "role": null
+              },
+              {
+                "id": 356,
+                "name": "robo",
+                "role": null
+              },
+              {
+                "id": 357,
+                "name": "SYPH0",
+                "role": null
+              }
+            ],
+            "reliability": 0.2,
+            "roster_id": 84,
+            "sample_maps": 0,
+            "stability_score": null
+          },
+          "team_strength": {
+            "key_factors": [
+              {
+                "factor_id": "team_strength:roster_quality",
+                "key": "roster_quality",
+                "reliability": 1.0,
+                "score": 53.49
+              }
+            ],
+            "reliability": 1.0,
+            "sample_size": 5,
+            "score": 53.49
+          }
+        }
+      },
+      "veto": {
+        "basis": "calculated_veto",
+        "likely_maps": [
+          {
+            "confidence": 0.2583,
+            "likely_role": "team_a_pick",
+            "map": "mirage",
+            "series_probability": 0.6509038618054939
+          },
+          {
+            "confidence": 0.2583,
+            "likely_role": "decider",
+            "map": "dust2",
+            "series_probability": 0.6019854217006666
+          },
+          {
+            "confidence": 0.2583,
+            "likely_role": "team_a_pick",
+            "map": "inferno",
+            "series_probability": 0.46324859766404963
+          }
+        ],
+        "model_version": "v2.1",
+        "source_type": "deterministic_analytics"
+      }
+    },
+    "created_at": "2026-10-24T08:06:17.741437+00:00",
+    "error_code": null,
+    "error_message": null,
+    "explanation_plan_schema_version": "match_explanation_plan.v2",
+    "explanation_plan_snapshot": {
+      "conclusion": {
+        "advantage": "clear",
+        "confidence": "medium",
+        "favored_team": "team_a",
+        "favored_team_name": "Legacy",
+        "internal_statistics_disclaimer": "Преимущество основано на внутренней статистике CS2Eye. Форма на текущем турнире рассматривается отдельно от общей статистики.",
+        "ml_probability_team_a": 0.8880211741228075,
+        "ml_probability_team_b": 0.11197882587719254,
+        "team_a_name": "Legacy",
+        "team_b_name": "Nemiga"
+      },
+      "context_schema_version": "match_analysis_context.v1",
+      "expected_winner": {
+        "team_id": 7,
+        "team_name": "Legacy",
+        "win_probability": 0.8880211741228075
+      },
+      "form": {
+        "comparison": {
+          "favored_team": "none",
+          "favored_team_name": null,
+          "strength": "none"
+        },
+        "context_notes": [
+          "Турнир только начинается, поэтому команды ещё не сформировали турнирную форму."
+        ],
+        "state": "not_started",
+        "team_a": {
+          "evidence": [],
+          "fallback": "none",
+          "form_level": "unknown",
+          "matches": 0,
+          "performance_vs_expectation": 22.5,
+          "previous_tournament": null,
+          "reliability": null,
+          "score": null,
+          "team_name": "Legacy"
+        },
+        "team_b": {
+          "evidence": [],
+          "fallback": "none",
+          "form_level": "unknown",
+          "matches": 0,
+          "performance_vs_expectation": null,
+          "previous_tournament": null,
+          "reliability": null,
+          "score": null,
+          "team_name": "Nemiga"
+        }
+      },
+      "manual_context": {
+        "empty_message": null,
+        "team_a": [
+          {
+            "coach": null,
+            "map": "dust2",
+            "note_id": "analyst_factor:9",
+            "players": [
+              "n1ssim"
+            ],
+            "polarity": "positive",
+            "team_name": "Legacy",
+            "text": "Лучшая карта. Может в одного закрыть всю игру"
+          }
+        ],
+        "team_b": []
+      },
+      "maps": {
+        "context_notes": [],
+        "key_map_edges": [],
+        "status": "available",
+        "team_a": {
+          "strong_maps": [
+            {
+              "classification": "strong",
+              "map": "mirage",
+              "reliability": 0.96,
+              "sample_maps": 13,
+              "strength_score": 59.89098978285715
+            },
+            {
+              "classification": "strong",
+              "map": "dust2",
+              "reliability": 0.99,
+              "sample_maps": 18,
+              "strength_score": 55.88518596285715
+            }
+          ],
+          "team_name": "Legacy",
+          "weak_maps": []
+        },
+        "team_b": {
+          "strong_maps": [],
+          "team_name": "Nemiga",
+          "weak_maps": []
+        }
+      },
+      "schema_version": "match_explanation_plan.v2",
+      "teamplay": {
+        "context_notes": [
+          "Надёжных выраженных различий по доступным teamplay/swing показателям не найдено."
+        ],
+        "signals": []
+      }
+    },
+    "grounding_error_codes": null,
+    "grounding_valid": true,
+    "input_tokens": 1296,
+    "language": "ru",
+    "llm_called": true,
+    "model": "qwen3:8b",
+    "output_tokens": 202,
+    "prompt_version": "match_analysis_prompt.v5",
+    "provider": "ollama",
+    "provider_response_id": null,
+    "repair_attempted": false,
+    "schema_valid": true,
+    "status": "completed",
+    "validation_error_codes": null
+  },
+  "schema": "cs2eye.ai_report.v1",
+  "source_parent_id": null,
+  "source_run_id": 86,
+  "team_a": {
+    "bo3_id": 8118,
+    "name": "Legacy"
+  },
+  "team_b": {
+    "bo3_id": 655,
+    "name": "Nemiga"
+  },
+  "tournament": {
+    "name": "PGL Masters Bucharest 2026",
+    "year": 2026
+  }
+}
