@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
 from cs2eye.models.demo import TeamMapAggregate
 from cs2eye.models.match import Match, Tournament
-from cs2eye.models.prediction import PredictionHistorySnapshot
+from cs2eye.models.prediction import MatchPrediction, PredictionHistorySnapshot
 from cs2eye.models.team import (
     Player,
     Team,
@@ -84,7 +84,7 @@ class MatchAnalysisContextBuilder:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def build_card(self, match_id: int) -> dict:
+    async def build_card(self, match_id: int, *, include_retrospective: bool = False) -> dict:
         """Read the archived pre-match forecast without triggering analytics."""
         match = await self.session.get(Match, match_id)
         if match is None:
@@ -123,6 +123,18 @@ class MatchAnalysisContextBuilder:
                 team_b_score=_number(snapshot.matchup_a if swapped else snapshot.matchup_b),
                 reliability=(snapshot.matchup_factors or {}).get("matchup_reliability"),
             )
+        elif include_retrospective:
+            replay = await self.session.scalar(select(MatchPrediction).where(
+                MatchPrediction.series_id == match_id, MatchPrediction.source == "historical_replay",
+                MatchPrediction.mode == "pre_veto", MatchPrediction.prediction_status == "available",
+                MatchPrediction.team_a_id == a, MatchPrediction.team_b_id == b,
+            ).order_by(MatchPrediction.created_at.desc(), MatchPrediction.id.desc()))
+            if replay is not None:
+                probability_a, probability_b = _number(replay.team_a_probability), _number(replay.team_b_probability)
+                if probability_a is not None and probability_b is not None and 0 <= probability_a <= 1 and 0 <= probability_b <= 1:
+                    prediction.update(status="available", model_version=replay.model_version,
+                        team_a_probability=probability_a, team_b_probability=probability_b,
+                        saved_at=replay.created_at, source="retrospective")
         return {
             "schema_version": "match_card_context.v1",
             "generated_at": now, "as_of": now,

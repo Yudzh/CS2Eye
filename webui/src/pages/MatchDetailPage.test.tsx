@@ -1,11 +1,26 @@
-import {cleanup, render, screen} from "@testing-library/react";
+import {cleanup, fireEvent, render, screen} from "@testing-library/react";
 import {afterEach, expect, it, vi} from "vitest";
-const api = vi.hoisted(() => ({capturePredictionHistory: vi.fn(), getMatch: vi.fn(), getPredictionHistory: vi.fn(), getPredictionResults: vi.fn(), getPredictionFeed: vi.fn().mockResolvedValue({items: []})}));
+const api = vi.hoisted(() => ({capturePredictionHistory: vi.fn(), createManualForecast: vi.fn(), getMatch: vi.fn(), getPredictionHistory: vi.fn(), getPredictionResults: vi.fn(), getPredictionFeed: vi.fn().mockResolvedValue({items: []})}));
 vi.mock("../api", () => api);
 vi.mock("./MatchesPage", () => ({MatchCard: () => <div>Карты матча</div>}));
 import {MatchDetailPage} from "./MatchDetailPage";
 afterEach(() => {cleanup(); vi.clearAllMocks();});
 const match = {id: 7, team_a: {id: 1, name: "Alpha"}, team_b: {id: 2, name: "Bravo"}, winner_team_id: 2, score: {team_a: 1, team_b: 2}, status: "completed", format: "bo3", match_date: "2026-10-01", tournament: {id: 3, name: "Cup"}};
+it("creates a retrospective forecast from the completed match admin page", async () => {
+  api.getMatch.mockResolvedValue(match);
+  api.getPredictionHistory.mockResolvedValue({items: []});
+  api.getPredictionResults.mockResolvedValueOnce({items: []}).mockResolvedValue({items: [{
+    id:"r7",match_id:7,source:"retrospective",model_version:"v12",predicted_winner:"Alpha",
+    probability:.7,team_a_probability:.7,team_a:match.team_a,team_b:match.team_b,
+    correct:false,captured_at:"2026-10-24T00:00:00Z"}]});
+  api.createManualForecast.mockResolvedValue({prediction:{status:"available",source:"retrospective"}});
+  render(<MatchDetailPage matchId={7}/>);
+  await screen.findByText("Сохранённого прогноза для этого матча нет.");
+  fireEvent.click(screen.getByRole("button",{name:"Создать прогноз"}));
+  expect(await screen.findByText("Наш прогноз: Alpha · 70.0%")).toBeTruthy();
+  expect(api.createManualForecast).toHaveBeenCalledWith(7);
+  expect(api.capturePredictionHistory).not.toHaveBeenCalled();
+});
 it("shows result and only this match's saved prediction", async () => {
   api.getMatch.mockResolvedValue(match);
   api.getPredictionHistory.mockResolvedValue({items: []});

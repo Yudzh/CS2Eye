@@ -1,7 +1,7 @@
 import {cleanup, fireEvent, render, screen, within} from "@testing-library/react";
 import {afterEach, expect, it, vi} from "vitest";
 import type {PredictionFeedItem} from "../types";
-const api = vi.hoisted(() => ({getPredictionFeed: vi.fn()}));
+const api = vi.hoisted(() => ({getPredictionFeed: vi.fn(), createManualForecast: vi.fn()}));
 vi.mock("../api", () => api);
 import {PredictionsPage} from "./PredictionsPage";
 afterEach(() => {cleanup(); vi.clearAllMocks(); window.history.replaceState(null, "", "/predictions");});
@@ -35,6 +35,16 @@ it("keeps known matches without saved picks visible", async () => {
   render(<PredictionsPage/>);
   await screen.findByText("Прогноз ещё не сохранён");
   expect(screen.getByText("Ожидает прогноза")).toBeTruthy();
+});
+it("creates a missing forecast from the web list and reloads its probabilities", async () => {
+  api.getPredictionFeed.mockResolvedValueOnce({items:[{...upcoming,team_a_probability:null,probability:null,predicted_winner:null,source:null}]})
+    .mockResolvedValue({items:[upcoming]});
+  api.createManualForecast.mockResolvedValue({prediction:{status:"available",source:"pre_match"}});
+  render(<PredictionsPage/>);
+  fireEvent.click(await screen.findByRole("button",{name:"Создать прогноз"}));
+  expect(await screen.findByText("Ожидает игры")).toBeTruthy();
+  expect(api.createManualForecast).toHaveBeenCalledWith(1);
+  expect(screen.queryByText("Прогноз ещё не сохранён")).toBeNull();
 });
 it("filters by team and resets an empty search", async () => {
   api.getPredictionFeed.mockResolvedValue({items:[upcoming]});

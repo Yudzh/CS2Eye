@@ -1,5 +1,9 @@
 # Production delivery
 
+The web UI currently serves as the owner's admin panel. Put administrative
+actions such as manually generating forecasts in the web UI. Do not add these
+controls to the Telegram bot unless the user explicitly requests it.
+
 The deployed app uses the database on the VPS. Local database changes are not
 delivered by Git and must never be the only implementation of a product change.
 

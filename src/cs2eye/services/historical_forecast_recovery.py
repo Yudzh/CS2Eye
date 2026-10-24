@@ -26,14 +26,38 @@ def missing_historical_forecasts_query(today):
     ).order_by(Match.id)
 
 
-async def recover_historical_forecast(session, match_id):
+async def recover_historical_forecast(session, match_id, *, manual=False):
     # Serialize the check and insert with other recovery callers.
     match = await session.scalar(select(Match).where(Match.id == match_id).with_for_update())
-    if match is None or match.match_date >= datetime.now(UTC).date():
+    if match is None:
         return None
-    eligible = await session.scalar(missing_historical_forecasts_query(datetime.now(UTC).date()).where(Match.id == match_id))
-    if eligible is None:
-        return None
+    if manual:
+        now = datetime.now(UTC)
+        start = match.starts_at
+        if start is not None and start.tzinfo is None:
+            start = start.replace(tzinfo=UTC)
+        started = (match.status in ('completed', 'in_progress') or match.winner_team_id is not None
+                   or match.match_date < now.date() or (start is not None and start <= now))
+        if not started or match.team_a_id is None or match.team_b_id is None:
+            return None
+        original = await session.scalar(select(PredictionHistorySnapshot.id).where(
+            PredictionHistorySnapshot.match_id == match_id,
+            PredictionHistorySnapshot.source == 'pre_match'))
+        if original is not None:
+            return None
+        existing = await session.scalar(select(MatchPrediction).where(
+            MatchPrediction.series_id == match_id, MatchPrediction.source == 'historical_replay',
+            MatchPrediction.mode == 'pre_veto', MatchPrediction.prediction_status == 'available',
+            MatchPrediction.team_a_id == match.team_a_id, MatchPrediction.team_b_id == match.team_b_id,
+        ).order_by(MatchPrediction.created_at.desc(), MatchPrediction.id.desc()))
+        if existing is not None:
+            return existing
+    else:
+        if match.match_date >= datetime.now(UTC).date():
+            return None
+        eligible = await session.scalar(missing_historical_forecasts_query(datetime.now(UTC).date()).where(Match.id == match_id))
+        if eligible is None:
+            return None
     model = await active_model(session)
     if model is None or model.trained_at.date() >= match.match_date:
         return None
@@ -44,6 +68,7 @@ async def recover_historical_forecast(session, match_id):
     result = await predict_win_probability(
         session, match.team_a_id, match.team_b_id, match.format,
         "pre_veto", match.match_date, match.id, tournament_id=match.tournament_id,
+        **({"historical_only": True} if manual else {}),
     )
     if result.get("prediction_status") != "available":
         return None

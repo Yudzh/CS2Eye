@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.db.session import get_db_session
 from cs2eye.services.prediction_history_service import PredictionHistoryService
+from cs2eye.services.manual_forecast_service import generate_manual_forecast
+from cs2eye.services.match_analysis_context_builder import MatchAnalysisContextBuilder
 
 
 router = APIRouter(prefix="/prediction-history", tags=["prediction-history"])
@@ -16,6 +18,20 @@ class CaptureRequest(BaseModel):
     match_id: int
     as_of: datetime | None = None
     retrospective: bool = False
+
+
+@router.post("/matches/{match_id}/generate")
+async def generate_match_forecast(match_id: int, session: AsyncSession = Depends(get_db_session)) -> dict:
+    try:
+        await generate_manual_forecast(session, match_id)
+        await session.commit()
+        return await MatchAnalysisContextBuilder(session).build_card(match_id, include_retrospective=True)
+    except LookupError as error:
+        await session.rollback()
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        await session.rollback()
+        raise HTTPException(422, str(error)) from error
 
 
 @router.post("/snapshots")

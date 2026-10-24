@@ -139,10 +139,10 @@ async def activate_win_probability(session:AsyncSession,artifact_id:int,force:bo
     await session.flush()
     return {"artifact_id":row.id,"model_version":row.model_version,"trained":row.trained,"quality_gate_passed":passed,"active":True,"forced_active":row.forced_active,"model_status":"experimental" if row.forced_active else "active"}
 
-async def predict_win_probability(session:AsyncSession,a:int,b:int,format:str="bo3",mode:str="pre_veto",as_of:date|None=None,series_id:int|None=None,*,tournament_id:int|None=None,precomputed_matchup:dict|None=None)->dict:
+async def predict_win_probability(session:AsyncSession,a:int,b:int,format:str="bo3",mode:str="pre_veto",as_of:date|None=None,series_id:int|None=None,*,tournament_id:int|None=None,precomputed_matchup:dict|None=None,historical_only:bool=False)->dict:
     artifact=await active_model(session)
     if not artifact:return {"prediction_status":"model_not_trained","model_version":None,"model_status":"unavailable","quality_gate_passed":False,"team_a":{"id":a,"probability":None},"team_b":{"id":b,"probability":None},"confidence":0,"limitations":[]}
-    cutoff=as_of or date.today();historical=cutoff<date.today()
+    cutoff=as_of or date.today();historical=historical_only or cutoff<date.today()
     # Without a precomputed result, go through MatchupService.calculate: it resolves ACTIVE_MATCHUP_CONFIG
     # for both the historical and live branches internally. Calling AnalyticsAsOfService
     # directly here (as before) skipped that resolution and always used matchup_v1 for
@@ -150,6 +150,9 @@ async def predict_win_probability(session:AsyncSession,a:int,b:int,format:str="b
     # Internal callers may reuse a result calculated for the same teams, format,
     # mode, cutoff and series rather than running the expensive pipeline twice.
     matchup=precomputed_matchup
+    if historical_only and matchup is None:
+        from cs2eye.services.analytics_as_of_service import AnalyticsAsOfService
+        matchup=await AnalyticsAsOfService(session).calculate(a,b,cutoff,format,mode,series_id,tournament_id=tournament_id)
     if matchup is None:
         matchup=await MatchupService(session).calculate(a,b,format,mode,cutoff,series_id,**({"tournament_id":tournament_id} if tournament_id is not None else {}))
     missing_rank_team_ids=[]

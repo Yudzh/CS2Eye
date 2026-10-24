@@ -11,7 +11,7 @@ from cs2eye.db.base import Base
 from cs2eye.deployment.bucharest_2026 import PARTICIPANTS, apply
 from cs2eye.deployment.prepare import prepare_forecasts
 from cs2eye.models.match import Match, Tournament, TournamentTeam
-from cs2eye.models.prediction import PredictionHistorySnapshot
+from cs2eye.models.prediction import MatchPrediction, PredictionHistorySnapshot
 from cs2eye.models.team import Team
 
 
@@ -132,3 +132,22 @@ async def test_preparation_stores_new_server_forecast_and_rechecks_on_retry(depl
         assert report["available"] == [200]
         assert report["errors"] == []
     assert calls == [200]
+
+
+async def test_deployment_accepts_explicit_manual_replay_for_a_started_match(deployment_db):
+    now = datetime.now(UTC)
+    async with deployment_db() as session:
+        session.add(Match(id=300, match_date=now.date(), starts_at=now-timedelta(hours=1),
+                          status="scheduled", team_a_id=1, team_b_id=2, format="bo3"))
+        session.add(MatchPrediction(series_id=300, as_of=now.date(), mode="pre_veto",
+            source="historical_replay", model_version="safe-model", feature_schema_version="v3",
+            team_a_id=1, team_b_id=2, team_a_probability=Decimal(".6"),
+            team_b_probability=Decimal(".4"), confidence=Decimal(".8"),
+            prediction_status="available", feature_snapshot={"strictly_before_match_date": True}))
+        await session.commit()
+    report = await prepare_forecasts(deployment_db, now=now)
+    assert report["errors"] == []
+    assert report["available"] == []
+    assert report["retrospective"] == [300]
+    async with deployment_db() as session:
+        assert await session.scalar(select(func.count(PredictionHistorySnapshot.id))) == 0

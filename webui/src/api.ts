@@ -413,3 +413,17 @@ export function getForecast(a:number,b:number,format:"bo1"|"bo3"|"bo5",mode:"pre
 export function getPredictionFeed(): Promise<{items: import("./types").PredictionFeedItem[]}> {
   return request("/api/v1/prediction-history/feed");
 }
+
+export interface ManualForecastResult {
+  prediction: {
+    status: string;
+    source?: "pre_match" | "retrospective";
+    model_version: string | null;
+    team_a_probability: number | null;
+    team_b_probability: number | null;
+  };
+}
+
+export function createManualForecast(matchId: number): Promise<ManualForecastResult> {
+  return request(`/api/v1/prediction-history/matches/${matchId}/generate`, {method: "POST"});
+}

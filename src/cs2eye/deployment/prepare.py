@@ -8,6 +8,7 @@ from sqlalchemy import or_, select
 from cs2eye.db.session import AsyncSessionLocal, engine
 from cs2eye.models.match import Match
 from cs2eye.services.prediction_history_service import PredictionHistoryService
+from cs2eye.services.match_analysis_context_builder import MatchAnalysisContextBuilder
 
 
 async def prepare_forecasts(factory=AsyncSessionLocal, *, now=None):
@@ -21,10 +22,18 @@ async def prepare_forecasts(factory=AsyncSessionLocal, *, now=None):
             or_(Match.starts_at >= now, Match.match_date >= now.date()),
         ).order_by(Match.starts_at.asc().nulls_last(), Match.id)
         ids = list((await session.scalars(query)).all())
-    report = {"checked": len(ids), "available": [], "errors": []}
+    report = {"checked": len(ids), "available": [], "retrospective": [], "errors": []}
     for match_id in ids:
         try:
             async with factory() as session:
+                match = await session.get(Match, match_id)
+                try:
+                    PredictionHistoryService.ensure_before_start(match)
+                except ValueError:
+                    card = await MatchAnalysisContextBuilder(session).build_card(match_id, include_retrospective=True)
+                    if card["prediction"].get("source") == "retrospective" and card["prediction"]["status"] == "available":
+                        report["retrospective"].append(match_id)
+                        continue
                 snapshot = await PredictionHistoryService(session).capture(match_id)
                 if (snapshot.source != "pre_match" or snapshot.ml_model_version is None
                         or snapshot.ml_a_probability is None or snapshot.ml_b_probability is None
