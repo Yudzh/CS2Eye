@@ -38,7 +38,18 @@ test -s "$backup"
 "${compose[@]}" exec -T db pg_restore --list < "$backup" > /dev/null
 # Stop background writers while applying migrations.
 "${compose[@]}" stop api bot
+resume_on_failure() {
+  result=$?
+  trap - ERR
+  echo 'Deployment failed; trying to restart existing API and bot containers'
+  "${compose[@]}" start api bot || true
+  exit "$result"
+}
+trap resume_on_failure ERR
 "${compose[@]}" run --rm --no-deps migrate
+# Schema/data migrations and forecasts are part of the same release workflow.
+# A release is not ready merely because its containers can start.
+"${compose[@]}" run --rm --no-deps migrate python -m cs2eye.deployment.prepare
 # The database is already running. Do not recreate it as part of an app release.
 "${compose[@]}" up -d --no-build --no-deps --wait --wait-timeout 180 api bot webui
 if [[ -f "$shared/use-https" ]]; then

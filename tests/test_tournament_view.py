@@ -2,7 +2,7 @@ from datetime import date
 
 import httpx
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from cs2eye.db.base import Base
@@ -60,9 +60,35 @@ async def test_tournament_list_and_view_are_filtered(match_db, tournament_api) -
     assert response.status_code == 200
     assert any(item["id"] == tournament_id for item in response.json()["items"])
     view = (await tournament_api.get(f"/api/v1/tournaments/{tournament_id}/view")).json()
+    listed = next(item for item in response.json()["items"] if item["id"] == tournament_id)
+    assert listed["summary"] == view["summary"]
     assert {item["id"] for item in view["matches"]} == {qf1, qf1 + 1, sf, sf + 1}
     assert view["summary"]["series_count"] == 4
     assert {tuple((link["from_match_id"], link["to_match_id"])) for link in view["bracket_links"]} >= {(qf1, sf)}
+
+
+async def test_tournament_list_does_not_query_each_match(match_db, tournament_api):
+    tournament_id, *_ = await seed_bracket(match_db)
+    async with match_db() as session:
+        session.add_all([Match(tournament_id=tournament_id, match_date=date(2026, 8, 1),
+                              team_a_id=1, team_b_id=2, format="bo3", stage="swiss",
+                              status="scheduled", resolution_status="resolved") for _ in range(40)])
+        await session.commit()
+    queries = []
+    engine = match_db.kw["bind"].sync_engine
+
+    def record(connection, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            queries.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        response = await tournament_api.get("/api/v1/tournaments")
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert response.status_code == 200
+    assert response.json()["items"][0]["summary"]["series_count"] == 44
+    assert len(queries) <= 12
 
 
 async def test_team_display_name_is_scoped_to_tournament(match_db, tournament_api) -> None:

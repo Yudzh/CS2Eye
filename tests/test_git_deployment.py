@@ -38,6 +38,8 @@ if mode == 'build' and 'build' in args:
     sys.exit(1)
 if mode == 'migration' and 'run' in args:
     sys.exit(1)
+if mode == 'forecasts' and 'cs2eye.deployment.prepare' in args:
+    sys.exit(1)
 if any('pg_dump' in arg for arg in args) and mode != 'empty-backup':
     sys.stdout.write('database-backup')
 if 'pg_restore' in args:
@@ -74,12 +76,25 @@ def test_failed_migration_does_not_mark_release_successful(release_env):
     assert list((root / "backups").glob("*.dump"))
 
 
+def test_missing_forecasts_prevent_successful_release(release_env):
+    root, release, env = release_env
+    env["FAIL_MODE"] = "forecasts"
+    result = subprocess.run(["bash", str(release / "deploy/release.sh")], env=env, capture_output=True)
+    assert result.returncode != 0
+    assert (root / "current").resolve() == root / "old"
+    calls = [json.loads(line) for line in Path(env["DOCKER_LOG"]).read_text().splitlines()]
+    assert not any("up" in call for call in calls)
+    assert any("start" in call and "api" in call and "bot" in call for call in calls)
+
+
 def test_success_preserves_database_container_and_previous_release(release_env):
     root, release, env = release_env
     subprocess.run(["bash", str(release / "deploy/release.sh")], env=env, check=True, capture_output=True)
     assert (root / "current").resolve() == release
     assert (root / "previous").resolve() == root / "old"
     calls = [json.loads(line) for line in Path(env["DOCKER_LOG"]).read_text().splitlines()]
+    prepare = next(i for i, call in enumerate(calls) if "cs2eye.deployment.prepare" in call)
+    assert prepare < next(i for i, call in enumerate(calls) if "up" in call)
     up = next(call for call in calls if "up" in call)
     assert "db" not in up
     assert "--no-deps" in up

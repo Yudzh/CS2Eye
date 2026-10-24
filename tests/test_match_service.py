@@ -61,6 +61,20 @@ async def manual(factory, ids: list[int], fmt: str):
         await session.commit(); return view
 
 
+async def test_bulk_match_loading_preserves_map_order_and_reversed_scores(match_db):
+    await add_map(match_db, 1, 13, 8)
+    await add_map(match_db, 2, 13, 9, reverse=True)
+    created = await manual(match_db, [1, 2], "bo3")
+    async with match_db() as session:
+        service = MatchService(session)
+        single = await service.get(created.match.id)
+        bulk, = await service.get_many([created.match.id])
+        assert bulk.maps == single.maps
+        assert bulk.team_a.id == single.team_a.id
+        assert bulk.team_b.id == single.team_b.id
+        assert await service.get_many([]) == []
+
+
 @pytest.mark.parametrize("scores,fmt,expected", [([(13, 8)], "bo1", (1, 0, 1)), ([(13, 8), (13, 9)], "bo3", (2, 0, 1)), ([(13, 8), (9, 13), (13, 10)], "bo3", (2, 1, 1)), ([(13, 8), (9, 13), (13, 10), (8, 13), (13, 11)], "bo5", (3, 2, 1))])
 async def test_series_results(match_db, scores, fmt, expected) -> None:
     for index, score in enumerate(scores, 1): await add_map(match_db, index, *score, reverse=index % 2 == 0)

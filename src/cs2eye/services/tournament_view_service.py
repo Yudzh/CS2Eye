@@ -95,7 +95,7 @@ class TournamentViewService:
             Match.tournament_id == tournament_id,
         ).order_by(Match.match_date, Match.round_number, Match.bracket_position, Match.id))).scalars())
         service = MatchService(self.session)
-        views = [await service.get(match.id) for match in rows]
+        views = await service.get_many([match.id for match in rows])
         links: list[tuple[int, int, str]] = []
         problems: list[TournamentProblemItem] = []
         by_id = {match.id: match for match in rows}

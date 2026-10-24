@@ -79,6 +79,33 @@ class MatchService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def get_many(self, match_ids: list[int]) -> list[MatchView]:
+        """Load a tournament's series with a bounded number of queries."""
+        if not match_ids:
+            return []
+        from cs2eye.models.demo import DemoParseRun
+
+        matches = list((await self.session.scalars(select(Match).where(Match.id.in_(match_ids)))).all())
+        tournament_ids = {m.tournament_id for m in matches if m.tournament_id is not None}
+        team_ids = {team_id for m in matches for team_id in (m.team_a_id, m.team_b_id) if team_id is not None}
+        tournaments = {t.id: t for t in (await self.session.scalars(
+            select(Tournament).where(Tournament.id.in_(tournament_ids)))).all()}
+        teams = {t.id: t for t in (await self.session.scalars(
+            select(Team).where(Team.id.in_(team_ids)))).all()}
+        rows = (await self.session.execute(
+            select(DemoFile, DemoMapResult, DemoParseRun)
+            .join(DemoMapResult, DemoMapResult.demo_file_id == DemoFile.id)
+            .outerjoin(DemoParseRun, DemoParseRun.demo_file_id == DemoFile.id)
+            .where(DemoFile.match_id.in_(match_ids)).order_by(DemoFile.map_number, DemoFile.id)
+        )).all()
+        by_id = {m.id: m for m in matches}
+        maps: dict[int, list[MatchMap]] = {m.id: [] for m in matches}
+        for demo, result, run in rows:
+            maps[demo.match_id].append(self._map(by_id[demo.match_id], demo, result, run))
+        return [MatchView(by_id[mid], tournaments.get(by_id[mid].tournament_id),
+                          teams.get(by_id[mid].team_a_id), teams.get(by_id[mid].team_b_id), maps[mid])
+                for mid in match_ids if mid in by_id]
+
     async def list(self, *, team_id: int | None = None, resolution_status: str | None = None,
                    veto_filter: str | None = None) -> list[MatchView]:
         # Empty bracket slots belong to the tournament view, not to the global

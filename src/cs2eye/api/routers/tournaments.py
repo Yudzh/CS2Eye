@@ -104,8 +104,18 @@ async def list_tournaments(session: AsyncSession = Depends(get_db_session)) -> T
     service = TournamentViewService(session)
     items = []
     for tournament in await service.list_tournaments():
-        view = await build_view(service, tournament.id, session)
-        items.append(TournamentListItem(**view.tournament.model_dump(), summary=view.summary))
+        # The list only needs counters, not full match cards and their veto queries.
+        view = await service.view(tournament.id)
+        maps = [map_item for match in view.matches for map_item in match.maps]
+        summary = TournamentSummary(
+            series_count=len(view.matches), map_count=len(maps),
+            parsed_maps=sum(item.parse_status == "success" for item in maps),
+            review_series=len({problem.match_id for problem in view.problems}),
+            missing_veto_series=sum(item.match.veto_data_status == "not_available" for item in view.matches),
+            participant_count=len(await service.participants(tournament.id)),
+            scheduled_series=sum(item.match.status == "scheduled" for item in view.matches),
+        )
+        items.append(TournamentListItem(**tournament_response(tournament).model_dump(), summary=summary))
     return TournamentListResponse(total=len(items), items=items)
 
 
