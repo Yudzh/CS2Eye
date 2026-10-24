@@ -1,0 +1,1341 @@
+{
+  "match": {
+    "date": "2026-09-06",
+    "format": "bo5",
+    "round_number": 3
+  },
+  "origin": "fae704d4-559f-4b4a-b6a4-d57109b35009",
+  "run": {
+    "analysis_mode": "pre_match",
+    "analysis_schema_version": "match_llm_analysis.v3",
+    "analysis_snapshot": {
+      "conclusion_text": "MOUZ имеет умеренное преимущество по внутренней статистике CS2Eye. Форма на текущем турнире рассматривается отдельно от общей статистики.",
+      "expected_winner_text": "По расчётам должна выиграть MOUZ — 60.82%.",
+      "explanation_plan_version": "match_explanation_plan.v2",
+      "form_text": "Турнир только начинается, команды ещё не сформировали турнирную форму. Spirit и MOUZ демонстрируют сильную форму с высокой надёжностью.",
+      "manual_text": "Ручные комментарии аналитика: MOUZ: Немцы очень дисциплинированны. Редко допускают ошибки из-за нервов.",
+      "maps_text": "Недостаточно надёжных данных для уверенного сравнения карт.",
+      "schema_version": "match_llm_analysis.v3",
+      "teamplay_text": "Надёжных выраженных различий по доступным teamplay/swing показателям не найдено."
+    },
+    "as_of": "2026-09-13T06:15:23.618000+00:00",
+    "attempts": 1,
+    "business_valid": true,
+    "completed_at": "2026-09-13T06:16:01.659889+00:00",
+    "context_schema_version": "match_analysis_context.v1",
+    "context_snapshot": {
+      "analysis_mode": "pre_match",
+      "as_of": "2026-09-13T06:15:23.618000Z",
+      "betting_restrictions": {
+        "message": null,
+        "restricted": false,
+        "restrictions": [],
+        "rule": null
+      },
+      "data_quality": {
+        "limitations": [],
+        "missing_sections": [
+          "veto",
+          "map_matchups"
+        ],
+        "overall_status": "partial",
+        "warnings": []
+      },
+      "generated_at": "2026-09-13T06:15:51.713315Z",
+      "h2h": {
+        "current_rosters": {
+          "confidence": 1.0,
+          "maps_played": 8,
+          "series_played": 2,
+          "status": "available",
+          "team_a_maps_won": 4,
+          "team_a_rating": 50.75153374233129,
+          "team_a_score": 50.75153374233129,
+          "team_a_series_won": 1,
+          "team_b_maps_won": 4,
+          "team_b_rating": 49.24846625766871,
+          "team_b_score": 49.24846625766871,
+          "team_b_series_won": 1
+        },
+        "history_applicability": "high",
+        "organizations": {
+          "confidence": 1.0,
+          "maps_played": 10,
+          "series_played": 3,
+          "status": "available",
+          "team_a_maps_won": 6,
+          "team_a_rating": 57.634451544195954,
+          "team_a_score": 57.634451544195954,
+          "team_a_series_won": 2,
+          "team_b_maps_won": 4,
+          "team_b_rating": 42.365548455804046,
+          "team_b_score": 42.365548455804046,
+          "team_b_series_won": 1
+        },
+        "preferred_scope": "current_rosters"
+      },
+      "manual_context": {
+        "source_type": "manual_analyst_note",
+        "team_a": [],
+        "team_b": [
+          {
+            "category": "teamplay",
+            "coach": null,
+            "environment": null,
+            "map": null,
+            "note_id": "analyst_factor:6",
+            "players": [],
+            "polarity": "positive",
+            "text": "Немцы очень дисциплинированны. Редко допускают ошибки из-за нервов. "
+          }
+        ]
+      },
+      "map_matchups": [],
+      "match": {
+        "date": "2026-09-06",
+        "environment": "lan",
+        "format": "bo5",
+        "id": 288,
+        "is_elimination": true,
+        "is_playoff": true,
+        "round_label": "Grand Final",
+        "round_number": 3,
+        "section": "main",
+        "stage": "final",
+        "tournament": {
+          "id": 7,
+          "name": "BLAST Open Porto 2026",
+          "tier": "S"
+        }
+      },
+      "matchup": {
+        "confidence_level": "high",
+        "factors": [
+          {
+            "factor_id": "matchup:map_veto",
+            "key": "map_veto",
+            "reliability": 0.4479,
+            "sample_size": 7,
+            "team_a_score": 50.43,
+            "team_b_score": 49.57
+          },
+          {
+            "factor_id": "matchup:team_strength",
+            "key": "team_strength",
+            "reliability": 1.0,
+            "sample_size": null,
+            "team_a_score": 52.1,
+            "team_b_score": 47.9
+          },
+          {
+            "factor_id": "matchup:form_context",
+            "key": "form_context",
+            "reliability": 0.9731,
+            "sample_size": 12,
+            "team_a_score": 49.82,
+            "team_b_score": 50.18
+          },
+          {
+            "factor_id": "matchup:current_roster_form",
+            "key": "current_roster_form",
+            "reliability": 1.0,
+            "sample_size": null,
+            "team_a_score": 50.16,
+            "team_b_score": 49.84
+          },
+          {
+            "factor_id": "matchup:tactical_matchup",
+            "key": "tactical_matchup",
+            "reliability": 0.4479,
+            "sample_size": null,
+            "team_a_score": 47.9,
+            "team_b_score": 52.1
+          },
+          {
+            "factor_id": "matchup:h2h",
+            "key": "h2h",
+            "reliability": 1.0,
+            "sample_size": 8,
+            "team_a_score": 50.75,
+            "team_b_score": 49.25
+          },
+          {
+            "factor_id": "matchup:leadership_context",
+            "key": "leadership_context",
+            "reliability": 1.0,
+            "sample_size": null,
+            "team_a_score": 49.13,
+            "team_b_score": 50.87
+          }
+        ],
+        "model_version": "matchup_v1",
+        "reliability": 0.7862,
+        "source_type": "deterministic_analytics",
+        "team_a_score": 50.36,
+        "team_b_score": 49.64
+      },
+      "opponent_context": {
+        "team_a": {
+          "adjusted_form_version": "opponent_adjusted_form_v1_candidate",
+          "dynamic_sos_score": 58.92,
+          "matches": [
+            {
+              "opponent": {
+                "id": 6,
+                "name": "MOUZ"
+              },
+              "opponent_dynamic_strength": 68.71,
+              "opponent_reliability": 0.9711,
+              "result": "win",
+              "result_quality_label": "strong_win",
+              "result_quality_score": 0.7433,
+              "series_score": "3-1"
+            },
+            {
+              "opponent": {
+                "id": 2,
+                "name": "Falcons"
+              },
+              "opponent_dynamic_strength": 65.88,
+              "opponent_reliability": 0.9947,
+              "result": "win",
+              "result_quality_label": "strong_win",
+              "result_quality_score": 0.728,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 5,
+                "name": "FURIA"
+              },
+              "opponent_dynamic_strength": 64.06,
+              "opponent_reliability": 0.9897,
+              "result": "win",
+              "result_quality_label": "strong_win",
+              "result_quality_score": 0.596,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 9,
+                "name": "G2"
+              },
+              "opponent_dynamic_strength": 64.92,
+              "opponent_reliability": 0.9897,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.5403,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 35,
+                "name": "DENDELE"
+              },
+              "opponent_dynamic_strength": 53.48,
+              "opponent_reliability": 0.4862,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.3311,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 7,
+                "name": "Legacy"
+              },
+              "opponent_dynamic_strength": 63.31,
+              "opponent_reliability": 0.8063,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.3227,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 11,
+                "name": "FUT"
+              },
+              "opponent_dynamic_strength": 64.64,
+              "opponent_reliability": 0.898,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.3327,
+              "series_score": "3-1"
+            },
+            {
+              "opponent": {
+                "id": 3,
+                "name": "Vitality"
+              },
+              "opponent_dynamic_strength": 54.22,
+              "opponent_reliability": 0.7877,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.265,
+              "series_score": "2-1"
+            },
+            {
+              "opponent": {
+                "id": 26,
+                "name": "BIG"
+              },
+              "opponent_dynamic_strength": 56.37,
+              "opponent_reliability": 0.6181,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.1987,
+              "series_score": "2-1"
+            },
+            {
+              "opponent": {
+                "id": 31,
+                "name": "Luminosity"
+              },
+              "opponent_dynamic_strength": 47.5,
+              "opponent_reliability": 0.4314,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.149,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 45,
+                "name": "JiJieHao"
+              },
+              "opponent_dynamic_strength": 47.84,
+              "opponent_reliability": 0.15,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.1224,
+              "series_score": "0-1"
+            },
+            {
+              "opponent": {
+                "id": 6,
+                "name": "MOUZ"
+              },
+              "opponent_dynamic_strength": 55.82,
+              "opponent_reliability": 0.898,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.1225,
+              "series_score": "1-3"
+            },
+            {
+              "opponent": {
+                "id": 23,
+                "name": "FaZe"
+              },
+              "opponent_dynamic_strength": 59.3,
+              "opponent_reliability": 0.7197,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.1279,
+              "series_score": "2-1"
+            },
+            {
+              "opponent": {
+                "id": 42,
+                "name": "Liquid"
+              },
+              "opponent_dynamic_strength": 63.97,
+              "opponent_reliability": 0.8855,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.144,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 39,
+                "name": "100 Thieves"
+              },
+              "opponent_dynamic_strength": 53.74,
+              "opponent_reliability": 0.3717,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.0799,
+              "series_score": "2-1"
+            }
+          ],
+          "opponent_adjusted_form_score": 83.25,
+          "raw_form_score": 86.67,
+          "reliability": 0.8666,
+          "tournament_opponent_adjusted_form_score": 79.39,
+          "version": "opponent_context_v1"
+        },
+        "team_b": {
+          "adjusted_form_version": "opponent_adjusted_form_v1_candidate",
+          "dynamic_sos_score": 58.62,
+          "matches": [
+            {
+              "opponent": {
+                "id": 3,
+                "name": "Vitality"
+              },
+              "opponent_dynamic_strength": 65.88,
+              "opponent_reliability": 0.9897,
+              "result": "win",
+              "result_quality_label": "strong_win",
+              "result_quality_score": 0.7526,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 1,
+                "name": "Spirit"
+              },
+              "opponent_dynamic_strength": 74.8,
+              "opponent_reliability": 0.9947,
+              "result": "loss",
+              "result_quality_label": "loss",
+              "result_quality_score": -0.4142,
+              "series_score": "1-3"
+            },
+            {
+              "opponent": {
+                "id": 2,
+                "name": "Falcons"
+              },
+              "opponent_dynamic_strength": 65.31,
+              "opponent_reliability": 0.9897,
+              "result": "win",
+              "result_quality_label": "strong_win",
+              "result_quality_score": 0.5778,
+              "series_score": "2-1"
+            },
+            {
+              "opponent": {
+                "id": 25,
+                "name": "Inner Circle"
+              },
+              "opponent_dynamic_strength": 54.87,
+              "opponent_reliability": 0.4263,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.3594,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 12,
+                "name": "9z"
+              },
+              "opponent_dynamic_strength": 53.08,
+              "opponent_reliability": 0.635,
+              "result": "win",
+              "result_quality_label": "expected_win",
+              "result_quality_score": 0.3757,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 11,
+                "name": "FUT"
+              },
+              "opponent_dynamic_strength": 59.85,
+              "opponent_reliability": 0.8114,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.2275,
+              "series_score": "0-2"
+            },
+            {
+              "opponent": {
+                "id": 16,
+                "name": "GamerLegion"
+              },
+              "opponent_dynamic_strength": 53.6,
+              "opponent_reliability": 0.6918,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.2317,
+              "series_score": "2-1"
+            },
+            {
+              "opponent": {
+                "id": 19,
+                "name": "PARIVISION"
+              },
+              "opponent_dynamic_strength": 50.02,
+              "opponent_reliability": 0.6281,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.1947,
+              "series_score": "2-0"
+            },
+            {
+              "opponent": {
+                "id": 11,
+                "name": "FUT"
+              },
+              "opponent_dynamic_strength": 55.9,
+              "opponent_reliability": 0.7147,
+              "result": "loss",
+              "result_quality_label": "acceptable_loss",
+              "result_quality_score": -0.1672,
+              "series_score": "1-2"
+            },
+            {
+              "opponent": {
+                "id": 29,
+                "name": "Lynn Vision"
+              },
+              "opponent_dynamic_strength": 49.53,
+              "opponent_reliability": 0.1628,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.1242,
+              "series_score": "1-0"
+            },
+            {
+              "opponent": {
+                "id": 1,
+                "name": "Spirit"
+              },
+              "opponent_dynamic_strength": 68.23,
+              "opponent_reliability": 0.9947,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.1715,
+              "series_score": "3-1"
+            },
+            {
+              "opponent": {
+                "id": 15,
+                "name": "Astralis"
+              },
+              "opponent_dynamic_strength": 54.07,
+              "opponent_reliability": 0.9947,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.1445,
+              "series_score": "2-1"
+            },
+            {
+              "opponent": {
+                "id": 36,
+                "name": "3DMAX"
+              },
+              "opponent_dynamic_strength": 56.95,
+              "opponent_reliability": 0.5638,
+              "result": "win",
+              "result_quality_label": "low_value_win",
+              "result_quality_score": 0.1092,
+              "series_score": "2-1"
+            }
+          ],
+          "opponent_adjusted_form_score": 69.0,
+          "raw_form_score": 76.92,
+          "reliability": 0.8691,
+          "tournament_opponent_adjusted_form_score": 66.51,
+          "version": "opponent_context_v1"
+        }
+      },
+      "prediction": {
+        "confidence": 0.7862,
+        "model_version": "v6",
+        "quality_gate_passed": true,
+        "source_type": "ml_prediction",
+        "status": "available",
+        "team_a_probability": 0.39182460697630705,
+        "team_b_probability": 0.608175393023693,
+        "top_model_drivers": [
+          {
+            "driver_id": "ml:format_bo5_strength",
+            "favored_team": "team_b",
+            "importance": 13.795,
+            "key": "format_bo5_strength",
+            "reliability": 0.7862
+          },
+          {
+            "driver_id": "ml:team_strength_difference",
+            "favored_team": "team_a",
+            "importance": 5.56,
+            "key": "team_strength_difference",
+            "reliability": 0.7862
+          },
+          {
+            "driver_id": "ml:tactical_advantage",
+            "favored_team": "team_b",
+            "importance": 4.667,
+            "key": "tactical_advantage",
+            "reliability": 0.7862
+          },
+          {
+            "driver_id": "ml:ranking_advantage",
+            "favored_team": "team_a",
+            "importance": 1.745,
+            "key": "ranking_advantage",
+            "reliability": 0.7862
+          },
+          {
+            "driver_id": "ml:matchup_reliability_advantage",
+            "favored_team": "team_b",
+            "importance": 1.076,
+            "key": "matchup_reliability_advantage",
+            "reliability": 0.7862
+          }
+        ]
+      },
+      "recent_series_evidence": {
+        "team_a": [
+          {
+            "current_tournament": true,
+            "date": "2026-09-05",
+            "evidence_id": "series:289",
+            "expected_win_probability": 0.5333,
+            "opponent": {
+              "id": 2,
+              "name": "Falcons",
+              "rank": 2
+            },
+            "performance_vs_expectation": 0.3412,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": true,
+            "date": "2026-08-31",
+            "evidence_id": "series:162",
+            "expected_win_probability": 0.6608,
+            "opponent": {
+              "id": 5,
+              "name": "FURIA",
+              "rank": 6
+            },
+            "performance_vs_expectation": 0.2251,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": true,
+            "date": "2026-08-28",
+            "evidence_id": "series:267",
+            "expected_win_probability": 0.7685,
+            "opponent": {
+              "id": 9,
+              "name": "G2",
+              "rank": 10
+            },
+            "performance_vs_expectation": 0.1162,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": true,
+            "date": "2026-08-26",
+            "evidence_id": "series:260",
+            "expected_win_probability": 0.9842,
+            "opponent": {
+              "id": 35,
+              "name": "DENDELE",
+              "rank": 32
+            },
+            "performance_vs_expectation": -0.1,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-22",
+            "evidence_id": "series:174",
+            "expected_win_probability": 0.6303,
+            "opponent": {
+              "id": 3,
+              "name": "Vitality",
+              "rank": 5
+            },
+            "performance_vs_expectation": 0.109,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-1",
+            "tournament": "Esports World Cup 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-23",
+            "evidence_id": "series:178",
+            "expected_win_probability": 0.69,
+            "opponent": {
+              "id": 7,
+              "name": "Legacy",
+              "rank": 7
+            },
+            "performance_vs_expectation": 0.1917,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "Esports World Cup 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-02",
+            "evidence_id": "series:106",
+            "expected_win_probability": 0.7178,
+            "opponent": {
+              "id": 6,
+              "name": "MOUZ",
+              "rank": 8
+            },
+            "performance_vs_expectation": -0.4889,
+            "reliability": null,
+            "result": "loss",
+            "series_score": "1-3",
+            "tournament": "BLAST Bounty 2026 Season 2 Finals"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-01",
+            "evidence_id": "series:103",
+            "expected_win_probability": 0.8808,
+            "opponent": {
+              "id": 23,
+              "name": "FaZe",
+              "rank": 16
+            },
+            "performance_vs_expectation": -0.1527,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-1",
+            "tournament": "BLAST Bounty 2026 Season 2 Finals"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-16",
+            "evidence_id": "series:132",
+            "expected_win_probability": 0.8941,
+            "opponent": {
+              "id": 26,
+              "name": "BIG",
+              "rank": 17
+            },
+            "performance_vs_expectation": -0.1666,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-1",
+            "tournament": "Esports World Cup 2026"
+          }
+        ],
+        "team_b": [
+          {
+            "current_tournament": true,
+            "date": "2026-09-06",
+            "evidence_id": "series:290",
+            "expected_win_probability": 0.5987,
+            "opponent": {
+              "id": 3,
+              "name": "Vitality",
+              "rank": 7
+            },
+            "performance_vs_expectation": 0.2786,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": true,
+            "date": "2026-08-31",
+            "evidence_id": "series:273",
+            "expected_win_probability": 0.4337,
+            "opponent": {
+              "id": 2,
+              "name": "Falcons",
+              "rank": 2
+            },
+            "performance_vs_expectation": 0.305,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-1",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": true,
+            "date": "2026-08-29",
+            "evidence_id": "series:165",
+            "expected_win_probability": 0.935,
+            "opponent": {
+              "id": 25,
+              "name": "Inner Circle",
+              "rank": 24
+            },
+            "performance_vs_expectation": -0.0312,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": true,
+            "date": "2026-08-27",
+            "evidence_id": "series:263",
+            "expected_win_probability": 0.6303,
+            "opponent": {
+              "id": 12,
+              "name": "9z",
+              "rank": 8
+            },
+            "performance_vs_expectation": 0.2671,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "BLAST Open Porto 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-02",
+            "evidence_id": "series:106",
+            "expected_win_probability": 0.2822,
+            "opponent": {
+              "id": 1,
+              "name": "Spirit",
+              "rank": 1
+            },
+            "performance_vs_expectation": 0.4889,
+            "reliability": null,
+            "result": "win",
+            "series_score": "3-1",
+            "tournament": "BLAST Bounty 2026 Season 2 Finals"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-16",
+            "evidence_id": "series:136",
+            "expected_win_probability": 0.69,
+            "opponent": {
+              "id": 19,
+              "name": "PARIVISION",
+              "rank": 10
+            },
+            "performance_vs_expectation": 0.1997,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-0",
+            "tournament": "Esports World Cup 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-14",
+            "evidence_id": "series:125",
+            "expected_win_probability": 0.8126,
+            "opponent": {
+              "id": 11,
+              "name": "FUT",
+              "rank": 15
+            },
+            "performance_vs_expectation": -0.5418,
+            "reliability": null,
+            "result": "loss",
+            "series_score": "1-2",
+            "tournament": "Esports World Cup 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-21",
+            "evidence_id": "series:171",
+            "expected_win_probability": 0.8498,
+            "opponent": {
+              "id": 11,
+              "name": "FUT",
+              "rank": 17
+            },
+            "performance_vs_expectation": -0.7345,
+            "reliability": null,
+            "result": "loss",
+            "series_score": "0-2",
+            "tournament": "Esports World Cup 2026"
+          },
+          {
+            "current_tournament": false,
+            "date": "2026-08-02",
+            "evidence_id": "series:105",
+            "expected_win_probability": 0.8661,
+            "opponent": {
+              "id": 15,
+              "name": "Astralis",
+              "rank": 22
+            },
+            "performance_vs_expectation": -0.1459,
+            "reliability": null,
+            "result": "win",
+            "series_score": "2-1",
+            "tournament": "BLAST Bounty 2026 Season 2 Finals"
+          }
+        ]
+      },
+      "schema_version": "match_analysis_context.v1",
+      "secondary_bets": {
+        "he_kill_by_map": [
+          {
+            "confidence": "low",
+            "map": "inferno",
+            "probability": 0.854201,
+            "team_a_sample": 0,
+            "team_b_sample": 3
+          },
+          {
+            "confidence": "high",
+            "map": "dust2",
+            "probability": 0.766881,
+            "team_a_sample": 9,
+            "team_b_sample": 8
+          },
+          {
+            "confidence": "medium",
+            "map": "cache",
+            "probability": 0.69927,
+            "team_a_sample": 7,
+            "team_b_sample": 1
+          },
+          {
+            "confidence": "low",
+            "map": "anubis",
+            "probability": 0.697867,
+            "team_a_sample": 5,
+            "team_b_sample": 0
+          },
+          {
+            "confidence": "high",
+            "map": "mirage",
+            "probability": 0.581733,
+            "team_a_sample": 5,
+            "team_b_sample": 7
+          },
+          {
+            "confidence": "high",
+            "map": "ancient",
+            "probability": 0.554284,
+            "team_a_sample": 9,
+            "team_b_sample": 8
+          },
+          {
+            "confidence": "high",
+            "map": "nuke",
+            "probability": 0.312425,
+            "team_a_sample": 4,
+            "team_b_sample": 7
+          }
+        ]
+      },
+      "teams": {
+        "team_a": {
+          "form": {
+            "matches_vs_top_10": 6,
+            "matches_vs_top_30": 9,
+            "matches_vs_top_5": 2,
+            "performance_vs_expectation_score": 47.53,
+            "recent_60d_matches": 14,
+            "recent_60d_reliability": 0.9731,
+            "recent_60d_score": 70.51,
+            "strength_of_schedule_score": 73.34,
+            "tournament_form_score": 81.65,
+            "tournament_matches": 4,
+            "tournament_reliability": 0.6667
+          },
+          "id": 1,
+          "leadership": {
+            "coach_score": 62.78,
+            "igl_score": 56.92,
+            "reliability": 0.8103,
+            "sample_size": 74
+          },
+          "name": "Spirit",
+          "rank": 1,
+          "roster": {
+            "coach": {
+              "id": 13,
+              "name": "hally"
+            },
+            "players": [
+              {
+                "id": 8,
+                "name": "magixx",
+                "role": "igl"
+              },
+              {
+                "id": 10,
+                "name": "tN1R",
+                "role": "rifler"
+              },
+              {
+                "id": 9,
+                "name": "zont1x",
+                "role": "rifler"
+              },
+              {
+                "id": 7,
+                "name": "sh1ro",
+                "role": "awper"
+              },
+              {
+                "id": 11,
+                "name": "donk",
+                "role": "rifler"
+              }
+            ],
+            "reliability": 1.0,
+            "roster_id": 24,
+            "sample_maps": 74,
+            "stability_score": 100.0
+          },
+          "team_strength": {
+            "key_factors": [
+              {
+                "factor_id": "team_strength:roster_stability",
+                "key": "roster_stability",
+                "reliability": 1.0,
+                "score": 100.0
+              },
+              {
+                "factor_id": "team_strength:team_performance",
+                "key": "team_performance",
+                "reliability": 1.0,
+                "score": 67.86
+              },
+              {
+                "factor_id": "team_strength:strong_opponents",
+                "key": "strong_opponents",
+                "reliability": 1.0,
+                "score": 65.58
+              },
+              {
+                "factor_id": "team_strength:roster_quality",
+                "key": "roster_quality",
+                "reliability": 1.0,
+                "score": 54.16
+              },
+              {
+                "factor_id": "team_strength:recent_form",
+                "key": "recent_form",
+                "reliability": 1.0,
+                "score": 63.72
+              }
+            ],
+            "reliability": 1.0,
+            "sample_size": 74,
+            "score": 64.15
+          }
+        },
+        "team_b": {
+          "form": {
+            "matches_vs_top_10": 5,
+            "matches_vs_top_30": 10,
+            "matches_vs_top_5": 2,
+            "performance_vs_expectation_score": 49.61,
+            "recent_60d_matches": 12,
+            "recent_60d_reliability": 1.0,
+            "recent_60d_score": 68.8,
+            "strength_of_schedule_score": 74.4,
+            "tournament_form_score": 81.65,
+            "tournament_matches": 4,
+            "tournament_reliability": 0.6667
+          },
+          "id": 6,
+          "leadership": {
+            "coach_score": 62.55,
+            "igl_score": 59.96,
+            "reliability": 0.7157,
+            "sample_size": 38
+          },
+          "name": "MOUZ",
+          "rank": 2,
+          "roster": {
+            "coach": {
+              "id": 53,
+              "name": "sycrone"
+            },
+            "players": [
+              {
+                "id": 51,
+                "name": "xelex",
+                "role": "rifler"
+              },
+              {
+                "id": 52,
+                "name": "PR",
+                "role": "rifler"
+              },
+              {
+                "id": 49,
+                "name": "torzsi",
+                "role": "awper"
+              },
+              {
+                "id": 50,
+                "name": "xertioN",
+                "role": "igl"
+              },
+              {
+                "id": 48,
+                "name": "Spinx",
+                "role": "rifler"
+              }
+            ],
+            "reliability": 1.0,
+            "roster_id": 10,
+            "sample_maps": 38,
+            "stability_score": 90.7
+          },
+          "team_strength": {
+            "key_factors": [
+              {
+                "factor_id": "team_strength:roster_stability",
+                "key": "roster_stability",
+                "reliability": 1.0,
+                "score": 90.7
+              },
+              {
+                "factor_id": "team_strength:team_performance",
+                "key": "team_performance",
+                "reliability": 1.0,
+                "score": 59.73
+              },
+              {
+                "factor_id": "team_strength:roster_quality",
+                "key": "roster_quality",
+                "reliability": 1.0,
+                "score": 54.29
+              },
+              {
+                "factor_id": "team_strength:strong_opponents",
+                "key": "strong_opponents",
+                "reliability": 1.0,
+                "score": 56.88
+              },
+              {
+                "factor_id": "team_strength:recent_form",
+                "key": "recent_form",
+                "reliability": 1.0,
+                "score": 59.74
+              }
+            ],
+            "reliability": 1.0,
+            "sample_size": 82,
+            "score": 59.95
+          }
+        }
+      },
+      "veto": {
+        "basis": "calculated_veto",
+        "likely_maps": [],
+        "model_version": null,
+        "source_type": "deterministic_analytics"
+      }
+    },
+    "created_at": "2026-09-13T06:15:24.000572+00:00",
+    "error_code": null,
+    "error_message": null,
+    "explanation_plan_schema_version": "match_explanation_plan.v2",
+    "explanation_plan_snapshot": {
+      "conclusion": {
+        "advantage": "moderate",
+        "confidence": "medium",
+        "favored_team": "team_b",
+        "favored_team_name": "MOUZ",
+        "internal_statistics_disclaimer": "Преимущество основано на внутренней статистике CS2Eye. Форма на текущем турнире рассматривается отдельно от общей статистики.",
+        "ml_probability_team_a": 0.39182460697630705,
+        "ml_probability_team_b": 0.608175393023693,
+        "team_a_name": "Spirit",
+        "team_b_name": "MOUZ"
+      },
+      "context_schema_version": "match_analysis_context.v1",
+      "expected_winner": {
+        "team_id": 6,
+        "team_name": "MOUZ",
+        "win_probability": 0.608175393023693
+      },
+      "form": {
+        "comparison": {
+          "favored_team": "none",
+          "favored_team_name": null,
+          "strength": "none"
+        },
+        "context_notes": [],
+        "state": "current_tournament",
+        "team_a": {
+          "evidence": [
+            {
+              "date": "2026-09-05",
+              "evidence_id": "series:289",
+              "opponent": "Falcons",
+              "opponent_rank": 2,
+              "performance_vs_expectation": 0.3412,
+              "result": "win",
+              "series_score": "2-0",
+              "tournament": "BLAST Open Porto 2026"
+            },
+            {
+              "date": "2026-08-31",
+              "evidence_id": "series:162",
+              "opponent": "FURIA",
+              "opponent_rank": 6,
+              "performance_vs_expectation": 0.2251,
+              "result": "win",
+              "series_score": "2-0",
+              "tournament": "BLAST Open Porto 2026"
+            },
+            {
+              "date": "2026-08-28",
+              "evidence_id": "series:267",
+              "opponent": "G2",
+              "opponent_rank": 10,
+              "performance_vs_expectation": 0.1162,
+              "result": "win",
+              "series_score": "2-0",
+              "tournament": "BLAST Open Porto 2026"
+            },
+            {
+              "date": "2026-08-26",
+              "evidence_id": "series:260",
+              "opponent": "DENDELE",
+              "opponent_rank": 32,
+              "performance_vs_expectation": -0.1,
+              "result": "win",
+              "series_score": "2-0",
+              "tournament": "BLAST Open Porto 2026"
+            }
+          ],
+          "fallback": "none",
+          "form_level": "strong",
+          "matches": 4,
+          "performance_vs_expectation": 47.53,
+          "previous_tournament": null,
+          "reliability": 0.6667,
+          "score": 81.65,
+          "team_name": "Spirit"
+        },
+        "team_b": {
+          "evidence": [
+            {
+              "date": "2026-09-06",
+              "evidence_id": "series:290",
+              "opponent": "Vitality",
+              "opponent_rank": 7,
+              "performance_vs_expectation": 0.2786,
+              "result": "win",
+              "series_score": "2-0",
+              "tournament": "BLAST Open Porto 2026"
+            },
+            {
+              "date": "2026-08-31",
+              "evidence_id": "series:273",
+              "opponent": "Falcons",
+              "opponent_rank": 2,
+              "performance_vs_expectation": 0.305,
+              "result": "win",
+              "series_score": "2-1",
+              "tournament": "BLAST Open Porto 2026"
+            },
+            {
+              "date": "2026-08-29",
+              "evidence_id": "series:165",
+              "opponent": "Inner Circle",
+              "opponent_rank": 24,
+              "performance_vs_expectation": -0.0312,
+              "result": "win",
+              "series_score": "2-0",
+              "tournament": "BLAST Open Porto 2026"
+            },
+            {
+              "date": "2026-08-27",
+              "evidence_id": "series:263",
+              "opponent": "9z",
+              "opponent_rank": 8,
+              "performance_vs_expectation": 0.2671,
+              "result": "win",
+              "series_score": "2-0",
+              "tournament": "BLAST Open Porto 2026"
+            }
+          ],
+          "fallback": "none",
+          "form_level": "strong",
+          "matches": 4,
+          "performance_vs_expectation": 49.61,
+          "previous_tournament": null,
+          "reliability": 0.6667,
+          "score": 81.65,
+          "team_name": "MOUZ"
+        }
+      },
+      "manual_context": {
+        "empty_message": null,
+        "team_a": [],
+        "team_b": [
+          {
+            "coach": null,
+            "map": null,
+            "note_id": "analyst_factor:6",
+            "players": [],
+            "polarity": "positive",
+            "team_name": "MOUZ",
+            "text": "Немцы очень дисциплинированны. Редко допускают ошибки из-за нервов. "
+          }
+        ]
+      },
+      "maps": {
+        "context_notes": [
+          "Недостаточно надёжных данных для уверенного сравнения карт."
+        ],
+        "key_map_edges": [],
+        "status": "insufficient",
+        "team_a": {
+          "strong_maps": [],
+          "team_name": "Spirit",
+          "weak_maps": []
+        },
+        "team_b": {
+          "strong_maps": [],
+          "team_name": "MOUZ",
+          "weak_maps": []
+        }
+      },
+      "schema_version": "match_explanation_plan.v2",
+      "teamplay": {
+        "context_notes": [
+          "Надёжных выраженных различий по доступным teamplay/swing показателям не найдено."
+        ],
+        "signals": []
+      }
+    },
+    "grounding_error_codes": null,
+    "grounding_valid": true,
+    "input_tokens": 1798,
+    "language": "ru",
+    "llm_called": true,
+    "model": "qwen3:8b",
+    "output_tokens": 225,
+    "prompt_version": "match_analysis_prompt.v5",
+    "provider": "ollama",
+    "provider_response_id": null,
+    "repair_attempted": false,
+    "schema_valid": true,
+    "status": "completed",
+    "validation_error_codes": null
+  },
+  "schema": "cs2eye.ai_report.v1",
+  "source_parent_id": null,
+  "source_run_id": 65,
+  "team_a": {
+    "bo3_id": 654,
+    "name": "Spirit"
+  },
+  "team_b": {
+    "bo3_id": 765,
+    "name": "MOUZ"
+  },
+  "tournament": {
+    "name": "BLAST Open Porto 2026",
+    "year": 2026
+  }
+}

@@ -25,3 +25,9 @@ delivered by Git and must never be the only implementation of a product change.
 - Production updates are manual, from `telegtam-prod`, using `cs2eye-deploy`.
   Preserve unrelated local changes and do not start a second Telegram polling
   instance with the production token.
+- Locally completed AI reports are release data too. Keep automatic export on
+  completion, Git hook staging, packaged artifacts and the release import step
+  working together. When publishing via a connector that bypasses Git hooks,
+  explicitly include all pending `src/cs2eye/deployment/ai_report_artifacts/*.json`
+  files. Preserve report timestamps and context; match server entities by stable
+  identities rather than assuming local and server numeric IDs coincide.

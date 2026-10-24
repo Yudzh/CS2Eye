@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import (
     BaseSettings,
@@ -36,6 +38,8 @@ class Settings(BaseSettings):
     match_llm_enabled: bool = False
     match_llm_timeout_seconds: float = Field(default=60.0, gt=0)
     match_llm_think: bool = False
+    ai_report_export_enabled: bool = True
+    ai_report_export_dir: str = str(Path(__file__).resolve().parents[1] / "deployment/ai_report_artifacts")
     telegram_bot_token: str = ""
     telegram_proxy_url: str = ""
     cs2eye_api_base_url: str = "http://127.0.0.1:8000"

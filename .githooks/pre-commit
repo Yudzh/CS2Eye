@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+# Completed local reports are part of the release, including commits made in an IDE.
+git add --all -- src/cs2eye/deployment/ai_report_artifacts

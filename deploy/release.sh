@@ -47,6 +47,8 @@ resume_on_failure() {
 }
 trap resume_on_failure ERR
 "${compose[@]}" run --rm --no-deps migrate
+# Ready-made local AI reports are immutable release data; no LLM runs on the VPS.
+"${compose[@]}" run --rm --no-deps migrate python -m cs2eye.deployment.ai_reports import
 # Schema/data migrations and forecasts are part of the same release workflow.
 # A release is not ready merely because its containers can start.
 "${compose[@]}" run --rm --no-deps migrate python -m cs2eye.deployment.prepare

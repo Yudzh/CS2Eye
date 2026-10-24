@@ -89,6 +89,11 @@ class SQLAlchemyMatchLLMAnalysisRepository:
         run.completed_at = datetime.now(UTC)
         await self.session.commit()
         await self.session.refresh(run)
+        from cs2eye.core.config import settings
+        if (settings.app_env == "local" and settings.ai_report_export_enabled
+                and self.session.get_bind().dialect.name == "postgresql"):
+            from cs2eye.deployment.ai_reports import export_run
+            await export_run(self.session, run)
         return run
 
     async def fail_run(self, run, error):

@@ -16,3 +16,5 @@ uploads/
 .env.prod
 deploy/secrets/
 backups/
+src/cs2eye/deployment/ai_report_artifacts/.origin
+src/cs2eye/deployment/ai_report_artifacts/.*.tmp

@@ -38,6 +38,7 @@ from cs2eye.models.team import (
 )
 from cs2eye.models.prediction import MLFeatureDiagnosticRun,MatchPrediction,PredictionHistorySnapshot,TournamentMatchPrediction,TournamentPredictionRun,WinProbabilityModelArtifact
 from cs2eye.models.match_llm_analysis_run import MatchLLMAnalysisRun
+from cs2eye.models.ai_report_import import AIReportImport
 from cs2eye.models.llm_quality import LLMQualityReview, LLMQualityRun
 
 
