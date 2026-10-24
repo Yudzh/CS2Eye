@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cs2eye.api.schemas.match_analysis_context import MatchAnalysisContext
 from cs2eye.models.demo import TeamMapAggregate
 from cs2eye.models.match import Match, Tournament
+from cs2eye.models.prediction import PredictionHistorySnapshot
 from cs2eye.models.team import (
     Player,
     Team,
@@ -84,7 +85,7 @@ class MatchAnalysisContextBuilder:
         self.session = session
 
     async def build_card(self, match_id: int) -> dict:
-        """Current forecast for the card; detailed context is loaded separately."""
+        """Read the archived pre-match forecast without triggering analytics."""
         match = await self.session.get(Match, match_id)
         if match is None:
             raise LookupError("Матч не найден.")
@@ -96,24 +97,40 @@ class MatchAnalysisContextBuilder:
         by_id = {team.id: team for team in teams}
         now = datetime.now(UTC)
         match_format = match.format if match.format in {"bo1", "bo3", "bo5"} else None
-        prediction = await self._prediction(a, b, match_format, "pre_veto", now.date(), match_id,
-            **({"tournament_id": match.tournament_id} if match.tournament_id is not None else {}))
-        matchup = prediction.get("matchup")
-        if matchup is None and match_format:
-            try:
-                matchup = await MatchupService(self.session).calculate(
-                    a, b, match_format, "pre_veto", now.date(), match_id,
-                    **({"tournament_id": match.tournament_id} if match.tournament_id is not None else {}))
-            except ValueError:
-                pass
+        snapshot = await self.session.scalar(select(PredictionHistorySnapshot).where(
+            PredictionHistorySnapshot.match_id == match_id,
+            PredictionHistorySnapshot.source == "pre_match",
+        ))
+        prediction = self._prediction_context({})
+        matchup = self._matchup_context(None)
+        if snapshot is not None and {snapshot.team_a_id, snapshot.team_b_id} == {a, b}:
+            swapped = snapshot.team_a_id != a
+            probability_a = _number(snapshot.ml_b_probability if swapped else snapshot.ml_a_probability)
+            probability_b = _number(snapshot.ml_a_probability if swapped else snapshot.ml_b_probability)
+            available = (probability_a is not None and probability_b is not None
+                         and 0 <= probability_a <= 1 and 0 <= probability_b <= 1)
+            prediction.update(
+                status="available" if available else "not_available",
+                model_version=snapshot.ml_model_version,
+                team_a_probability=probability_a if available else None,
+                team_b_probability=probability_b if available else None,
+                saved_at=snapshot.as_of,
+                source="pre_match",
+            )
+            matchup.update(
+                model_version=snapshot.matchup_model_version,
+                team_a_score=_number(snapshot.matchup_b if swapped else snapshot.matchup_a),
+                team_b_score=_number(snapshot.matchup_a if swapped else snapshot.matchup_b),
+                reliability=(snapshot.matchup_factors or {}).get("matchup_reliability"),
+            )
         return {
             "schema_version": "match_card_context.v1",
             "generated_at": now, "as_of": now,
             "match": self._match_context(match, tournament, match_format),
             "teams": {side: {"id": team_id, "name": by_id[team_id].name}
                       for side, team_id in (("team_a", a), ("team_b", b))},
-            "prediction": self._prediction_context(prediction),
-            "matchup": self._matchup_context(matchup),
+            "prediction": prediction,
+            "matchup": matchup,
             "betting_restrictions": betting_restrictions_for_teams(teams, is_playoff=match.is_playoff),
         }
 

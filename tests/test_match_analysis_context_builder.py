@@ -426,31 +426,48 @@ async def test_endpoint_returns_match_analysis_context_v1(builder_db, monkeypatc
     assert response.json()["schema_version"] == "match_analysis_context.v1"
 
 
-async def test_light_card_keeps_forecast_and_rules_without_detailed_context(builder_db, monkeypatch):
+@pytest.mark.parametrize("pair,source,expected", [
+    ((1, 2), "pre_match", .62),
+    ((2, 1), "pre_match", .38),
+    ((1, 3), "pre_match", None),
+    ((1, 2), "retrospective", None),
+    (None, "pre_match", None),
+])
+async def test_light_card_only_reads_saved_forecast(builder_db, monkeypatch, pair, source, expected):
     from unittest.mock import AsyncMock
+    from cs2eye.models.prediction import PredictionHistorySnapshot
     await seed_context(builder_db)
-    install_full_service_fakes(monkeypatch)
+    calculate = AsyncMock(side_effect=AssertionError("Card must never calculate analytics"))
+    monkeypatch.setattr("cs2eye.services.match_analysis_context_builder.predict_win_probability", calculate)
+    monkeypatch.setattr("cs2eye.services.match_analysis_context_builder.MatchupService.calculate", calculate)
     async with builder_db() as session:
+        if pair is not None:
+            session.add(PredictionHistorySnapshot(
+                match_id=20, tournament_id=1, as_of=AS_OF, source=source,
+                team_a_id=pair[0], team_b_id=pair[1],
+                team_strength_a=70, team_strength_b=60,
+                matchup_a=65, matchup_b=35,
+                ml_a_probability=.62, ml_b_probability=.38,
+                ml_model_version="archived-model", matchup_model_version="archived-matchup",
+                matchup_factors={"matchup_reliability": .8},
+            ))
+            await session.commit()
         builder = MatchAnalysisContextBuilder(session)
-        full = await builder.build(1, 2, as_of=AS_OF, match_id=20, tournament_id=1)
-        prediction = full.prediction.model_dump()
-        prediction['manual_adjustment'] = {'base_team_a_probability': .57, 'impact_team_a_pp': 5}
-        # The light endpoint must preserve the adjustment returned by ML.
-        payload = {'prediction_status': 'available', 'model_version': 'wp-v1',
-            'quality_gate_passed': True, 'team_a': {'probability': .62},
-            'team_b': {'probability': .38}, 'confidence': .8,
-            'manual_adjustment': prediction['manual_adjustment'], 'matchup': matchup_payload()}
-        builder._prediction = AsyncMock(return_value=payload)
-        builder.build = AsyncMock(side_effect=AssertionError('Full context must remain lazy'))
-        card = await builder.build_card(20)
-        assert card['schema_version'] == 'match_card_context.v1'
-        assert card['match'] == full.match.model_dump()
-        assert card['matchup'] == full.matchup.model_dump()
-        assert card['prediction']['team_a_probability'] == .62
-        assert card['prediction']['manual_adjustment'] == prediction['manual_adjustment']
-        assert card['betting_restrictions'] == full.betting_restrictions.model_dump()
-        assert not {'h2h', 'map_matchups', 'recent_series_evidence', 'secondary_bets', 'data_quality'} & card.keys()
-        builder.build.assert_not_awaited()
+        builder._prediction = calculate
+        builder.build = calculate
+        for _ in range(2):
+            card = await builder.build_card(20)
+            assert card["prediction"]["team_a_probability"] == expected
+            if expected is not None:
+                assert card["prediction"]["model_version"] == "archived-model"
+                assert card["prediction"]["source"] == "pre_match"
+                assert card["prediction"]["saved_at"].replace(tzinfo=UTC) == AS_OF
+                assert card["matchup"]["team_a_score"] == (35 if pair == (2, 1) else 65)
+            else:
+                assert card["prediction"]["status"] == "not_available"
+            assert "betting_restrictions" in card
+            assert not {"h2h", "map_matchups", "secondary_bets"} & card.keys()
+        calculate.assert_not_awaited()
 
 
 async def test_light_card_endpoint_handles_missing_or_unpaired_match(builder_db):

@@ -217,3 +217,23 @@ async def test_ranking_request_retries_low_level_ssl_error(
 
     assert len(ranking.data) == 40
     assert attempts == 4
+
+
+@pytest.mark.parametrize("proxy", ["", "http://proxy.example:3128", "socks5://proxy.example:1080"])
+async def test_bo3_proxy_only_configures_owned_client(monkeypatch, proxy):
+    from unittest.mock import AsyncMock, Mock
+    from cs2eye.core.config import settings
+
+    monkeypatch.setattr(settings, "bo3_proxy_url", proxy)
+    owned = Mock(aclose=AsyncMock())
+    factory = Mock(return_value=owned)
+    monkeypatch.setattr("cs2eye.integrations.bo3.client.httpx.AsyncClient", factory)
+    async with Bo3Client():
+        assert factory.call_args.kwargs["proxy"] == (proxy or None)
+    owned.aclose.assert_awaited_once()
+
+    injected = Mock(aclose=AsyncMock())
+    factory.reset_mock()
+    async with Bo3Client(injected):
+        factory.assert_not_called()
+    injected.aclose.assert_not_awaited()

@@ -19,7 +19,7 @@ VALUE_LABELS = {
 }
 
 
-def _betting_restriction_lines(payload: dict[str, Any]) -> list[str]:
+def _betting_restriction_lines(payload: dict[str, Any], *, compact: bool = False) -> list[str]:
     restriction = payload.get("betting_restrictions") or {}
     if not restriction.get("restricted"):
         return []
@@ -29,7 +29,15 @@ def _betting_restriction_lines(payload: dict[str, Any]) -> list[str]:
         "navi_no_match_winner_bets": "NAVI RULE",
         "group_stage_no_match_winner_bets": "GROUP STAGE RULE",
     }
+    compact_messages = {
+        "navi_no_match_winner_bets": "Никогда не ставить на матчи NAVI",
+        "group_stage_no_match_winner_bets": "Групповая стадия, не рекомендую ставить",
+    }
     for item in items:
+        if compact:
+            message = compact_messages.get(item.get("rule"), str(item.get("message") or ""))
+            lines.append(f"⚠️ {escape(' '.join(message.split()))}")
+            continue
         if lines:
             lines.append("")
         title = titles.get(item.get("rule"), "BETTING RULE")
@@ -78,7 +86,7 @@ def format_match_card(match: dict[str, Any], context: dict[str, Any]) -> str:
     name_b = escape(str(team_b.get("name") or "Team B"))
     tournament = match_context.get("tournament") or match.get("tournament") or {}
 
-    lines = [*_betting_restriction_lines(context)]
+    lines = [*_betting_restriction_lines(context, compact=True)]
     if lines:
         lines.append("")
     lines.append(f"<b>{name_a} vs {name_b}</b>")
@@ -105,20 +113,15 @@ def format_match_card(match: dict[str, Any], context: dict[str, Any]) -> str:
         lines.append("Текущий расчёт, не архив предматчевого прогноза.")
     prediction = context.get("prediction") or {}
     if prediction.get("status") == "loading":
-        lines.extend(["", "Рассчитываю прогноз… Разделы матча уже доступны."])
+        lines.extend(["", "Загружаю сохранённый прогноз… Разделы матча уже доступны."])
         return "\n".join(lines)
-    if prediction.get("model_version"):
-        lines.append(f"Модель: {escape(str(prediction['model_version']))}")
-    generated = context.get("generated_at") or context.get("as_of")
-    if generated:
-        lines.append(f"Данные на {_datetime_label(generated)} UTC")
-    lines.extend(["", "<b>ML prediction</b>"])
+    lines.extend(["", "<b>ML прогноз</b>"])
     probability_a = prediction.get("team_a_probability")
     probability_b = prediction.get("team_b_probability")
     if prediction.get("status") == "available" and probability_a is not None and probability_b is not None:
         lines.extend([f"{name_a} — {probability_a:.0%}", f"{name_b} — {probability_b:.0%}"])
     else:
-        lines[-1] = "<b>ML prediction:</b> unavailable"
+        lines[-1] = "Сохранённого прогноза для этого матча пока нет."
 
     adjustment = prediction.get("manual_adjustment")
     if adjustment:
@@ -128,18 +131,13 @@ def format_match_card(match: dict[str, Any], context: dict[str, Any]) -> str:
             lines.append(f"Ручной анализ: {name_a} {float(impact):+.1f} п.п. · модель без поправки {float(base):.1%}")
     matchup = context.get("matchup") or {}
     score_a, score_b = matchup.get("team_a_score"), matchup.get("team_b_score")
-    lines.extend(["", "<b>Matchup Score</b>"])
+    lines.extend(["", "<b>Сила команд</b>"])
     if score_a is not None and score_b is not None:
         lines.extend([f"{name_a} — {float(score_a):.1f}", f"{name_b} — {float(score_b):.1f}"])
     else:
-        lines[-1] = "<b>Matchup Score:</b> unavailable"
+        lines[-1] = "<b>Сила команд:</b> нет данных"
 
-    confidence = matchup.get("confidence_level")
     quality = (context.get("data_quality") or {}).get("overall_status")
-    lines.extend([
-        "",
-        f"Confidence: {VALUE_LABELS.get(confidence, 'Unavailable')}",
-    ])
     if "data_quality" in context:
         lines.append(f"Data quality: {VALUE_LABELS.get(quality, 'Unavailable')}")
     return "\n".join(lines)

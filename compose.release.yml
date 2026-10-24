@@ -1,0 +1,10 @@
+# Apply after compose.prod.yml (and the optional proxy override).
+services:
+  api:
+    image: ${CS2EYE_IMAGE_PREFIX:?Set CS2EYE_IMAGE_PREFIX}-api:${CS2EYE_RELEASE:?Set CS2EYE_RELEASE}
+  bot:
+    image: ${CS2EYE_IMAGE_PREFIX:?Set CS2EYE_IMAGE_PREFIX}-api:${CS2EYE_RELEASE:?Set CS2EYE_RELEASE}
+  migrate:
+    image: ${CS2EYE_IMAGE_PREFIX:?Set CS2EYE_IMAGE_PREFIX}-api:${CS2EYE_RELEASE:?Set CS2EYE_RELEASE}
+  webui:
+    image: ${CS2EYE_IMAGE_PREFIX:?Set CS2EYE_IMAGE_PREFIX}-webui:${CS2EYE_RELEASE:?Set CS2EYE_RELEASE}

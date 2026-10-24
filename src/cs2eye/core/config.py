@@ -17,6 +17,7 @@ class Settings(BaseSettings):
         "https://api.bo3.gg/api/v2"
     )
     bo3_site_base_url: str = "https://bo3.gg"
+    bo3_proxy_url: str = ""
     bo3_request_timeout_seconds: float = 20.0
     bo3_user_agent: str = (
         "CS2Eye/0.1 (+local analytics project)"
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
     match_llm_timeout_seconds: float = Field(default=60.0, gt=0)
     match_llm_think: bool = False
     telegram_bot_token: str = ""
+    telegram_proxy_url: str = ""
     cs2eye_api_base_url: str = "http://127.0.0.1:8000"
     cs2eye_api_timeout_seconds: float = Field(default=15.0, gt=0)
     cs2eye_api_generation_timeout_seconds: float = Field(default=330.0, gt=0)

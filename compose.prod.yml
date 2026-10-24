@@ -8,6 +8,7 @@ x-api-environment: &api-environment
   DEMO_DELETE_AFTER_SUCCESSFUL_PARSE: "false"
   DEMO_PARSE_CONCURRENCY: "1"
   MATCH_LLM_ENABLED: "false"
+  BO3_PROXY_URL: ${BO3_PROXY_URL:-}
 
 x-logging: &logging
   driver: json-file
@@ -66,7 +67,7 @@ services:
     build: ./webui
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:18080:80"
     volumes:
       - ./deploy/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
     secrets:

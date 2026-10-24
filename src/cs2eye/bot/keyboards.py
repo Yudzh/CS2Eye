@@ -81,17 +81,6 @@ def match_keyboard(match_id: int, tournament_id: int) -> InlineKeyboardMarkup:
             ).pack(),
         ),
     ]]
-    for label, section in (
-        ("HE Kill", "he_kill"),
-        ("Карты / veto", "maps"), ("Форма", "form"),
-        ("H2H", "h2h"), ("Составы", "rosters"),
-    ):
-        rows.append([InlineKeyboardButton(
-            text=label,
-            callback_data=MatchDetailCallback(
-                section=section, match_id=match_id, tournament_id=tournament_id,
-            ).pack(),
-        )])
     rows.append([InlineKeyboardButton(text="Обновить данные", callback_data=MatchDetailCallback(
         section="refresh", match_id=match_id, tournament_id=tournament_id).pack())])
     rows.append([

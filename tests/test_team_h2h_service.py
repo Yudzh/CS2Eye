@@ -190,7 +190,13 @@ async def test_current_rosters_never_met(h2h_db) -> None:
 
 
 @pytest.fixture
-async def h2h_api(h2h_db):
+async def h2h_api(h2h_db, monkeypatch):
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return TODAY
+
+    monkeypatch.setattr("cs2eye.services.team_h2h_service.date", FixedDate)
     app = create_app()
     async def override():
         async with h2h_db() as session: yield session

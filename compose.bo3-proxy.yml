@@ -1,0 +1,10 @@
+# Apply together with compose.prod.yml after configuring AdGuard SOCKS on
+# the Docker bridge address. Keep the proxy bound to that private address.
+services:
+  api:
+    environment:
+      ALL_PROXY: socks5://${BO3_PROXY_USER:?Set BO3_PROXY_USER}:${BO3_PROXY_PASSWORD:?Set BO3_PROXY_PASSWORD}@${BO3_PROXY_HOST:?Set BO3_PROXY_HOST}:1080
+      NO_PROXY: localhost,127.0.0.1,db,api,webui
+  bot:
+    environment:
+      TELEGRAM_PROXY_URL: socks5://${BO3_PROXY_USER:?Set BO3_PROXY_USER}:${BO3_PROXY_PASSWORD:?Set BO3_PROXY_PASSWORD}@${BO3_PROXY_HOST:?Set BO3_PROXY_HOST}:1080

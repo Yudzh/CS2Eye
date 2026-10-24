@@ -3,6 +3,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, MenuButtonCommands
 
@@ -17,6 +18,7 @@ async def run() -> None:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required to start the bot")
     bot = Bot(
         token=settings.telegram_bot_token,
+        session=AiohttpSession(proxy=settings.telegram_proxy_url or None),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dispatcher = Dispatcher()

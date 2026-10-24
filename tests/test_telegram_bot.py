@@ -164,26 +164,29 @@ def callback(*, user_id: int | None = None) -> SimpleNamespace:
     )
 
 
-def test_formats_match_card_using_backend_confidence_level() -> None:
+def test_formats_match_card_with_russian_labels_without_confidence() -> None:
     text = format_match_card(match_payload(), context_payload())
     assert "FURIA — 54%" in text
     assert "Legacy — 46%" in text
     assert "FURIA — 51.2" in text
-    assert "Confidence: Medium" in text
+    assert "Confidence:" not in text
+    assert "<b>ML прогноз</b>" in text
+    assert "<b>Сила команд</b>" in text
     assert "Data quality: Partial" in text
 
 
 def test_formats_unavailable_ml_without_substituting_matchup() -> None:
     text = format_match_card(match_payload(), context_payload(prediction_available=False))
-    assert "ML prediction:</b> unavailable" in text
+    assert "Сохранённого прогноза для этого матча пока нет." in text
     assert "FURIA — 51.2" in text
     assert "FURIA — 54%" not in text
 
 
 def test_navi_warning_is_at_top_of_telegram_match_card() -> None:
     text = format_match_card(match_payload(), context_payload(navi=True))
-    assert text.startswith("⚠️ <b>NAVI RULE</b>")
-    assert "НЕ СТАВИТЬ НА NAVI И НЕ СТАВИТЬ ПРОТИВ NAVI." in text
+    assert text.splitlines()[0] == "⚠️ Никогда не ставить на матчи NAVI"
+    assert "NAVI RULE" not in text
+    assert "Ручное пользовательское правило" not in text
     assert "FURIA — 54%" in text
 
 
@@ -198,14 +201,17 @@ def test_group_warning_is_shown_in_telegram_match_and_ai_presentations() -> None
     context = context_payload(group=True)
     card = format_match_card(match_payload(), context)
     analysis = format_llm_analysis({**analysis_payload(), "context": context})
-    assert card.startswith("⚠️ <b>GROUP STAGE RULE</b>")
+    assert card.splitlines()[0] == "⚠️ Групповая стадия, не рекомендую ставить"
     assert analysis.startswith("⚠️ <b>GROUP STAGE RULE</b>")
-    assert "НЕ СТАВИТЬ НА ПОБЕДИТЕЛЯ МАТЧА." in card
+    assert "GROUP STAGE RULE" not in card
 
 
 def test_navi_and_group_warnings_are_both_shown_in_telegram_order() -> None:
     text = format_match_card(match_payload(), context_payload(navi=True, group=True))
-    assert text.index("NAVI RULE") < text.index("GROUP STAGE RULE") < text.index("FURIA vs Legacy")
+    assert text.splitlines()[:2] == [
+        "⚠️ Никогда не ставить на матчи NAVI",
+        "⚠️ Групповая стадия, не рекомендую ставить",
+    ]
 
 
 def test_formats_he_kill_in_backend_order_with_confidence() -> None:
@@ -275,10 +281,12 @@ async def test_match_callback_loads_context_from_backend() -> None:
     )
     await match_card(event, MatchCallback(match_id=42, tournament_id=7), client)
     client.get_match_summary.assert_awaited_once_with(42)
-    assert "Confidence: Medium" in event.message.edit_text.await_args.args[0]
+    assert "Confidence:" not in event.message.edit_text.await_args.args[0]
     keyboard = event.message.edit_text.await_args.kwargs["reply_markup"]
     assert keyboard.inline_keyboard[0][0].callback_data == "ai:latest:42:7:0"
-    assert any(button.text == "HE Kill" for row in keyboard.inline_keyboard for button in row)
+    assert [button.text for row in keyboard.inline_keyboard for button in row] == [
+        "AI-анализ", "Обновить данные", "← Назад к матчам",
+    ]
 
 
 async def test_he_kill_navigation_reuses_cached_match_context() -> None:
@@ -675,12 +683,16 @@ def test_detail_formatters_handle_empty_data() -> None:
     assert "Вероятные карты пока недоступны" in format_maps_veto({}, {})
 
 
-async def test_match_detail_and_back_use_cached_card_without_backend_request() -> None:
+async def test_back_from_detail_loads_saved_summary_instead_of_current_analytics() -> None:
     state = NavigationState()
     detail_event = callback(user_id=601)
     state.for_callback(detail_event).store_card(42, match_payload(), detail_context_payload())
+    saved = context_payload()
+    saved["prediction"].update(team_a_probability=.61, team_b_probability=.39)
     client = SimpleNamespace(
-        get_match=AsyncMock(), get_match_analysis_context=AsyncMock(),
+        get_match=AsyncMock(return_value=match_payload()),
+        get_match_summary=AsyncMock(return_value=saved),
+        get_match_analysis_context=AsyncMock(),
     )
     await match_detail(
         detail_event, MatchDetailCallback(section="form", match_id=42, tournament_id=7),
@@ -688,9 +700,9 @@ async def test_match_detail_and_back_use_cached_card_without_backend_request() -
     )
     back_event = callback(user_id=601)
     await match_card(back_event, MatchCallback(match_id=42, tournament_id=7), client, state)
-    client.get_match.assert_not_awaited()
+    client.get_match_summary.assert_awaited_once_with(42)
     client.get_match_analysis_context.assert_not_awaited()
-    assert "ML prediction" in back_event.message.edit_text.await_args.args[0]
+    assert "FURIA — 61%" in back_event.message.edit_text.await_args.args[0]
 
 
 async def test_backend_error_for_one_detail_keeps_back_button() -> None:
@@ -721,9 +733,9 @@ async def test_expired_card_reloads_active_model_and_manual_input():
         get_match_summary=AsyncMock(return_value=fresh))
     await match_card(event,MatchCallback(match_id=42,tournament_id=7),client,state)
     text=event.message.edit_text.await_args.args[0]
-    assert 'Модель: v13' in text and 'FURIA — 69%' in text
+    assert 'Модель:' not in text and 'FURIA — 69%' in text
     assert 'Ручной анализ: FURIA +15.0 п.п.' in text
-    assert '13.10.2026 11:00 UTC' in text
+    assert '13.10.2026 11:00 UTC' not in text
     client.get_match_summary.assert_awaited_once()
 
 
@@ -874,14 +886,14 @@ async def test_card_shows_navigation_before_forecast_and_loads_details_lazily():
     await asyncio.wait_for(entered.wait(), 1)
     try:
         text = event.message.edit_text.await_args.args[0]
-        assert 'Рассчитываю прогноз' in text
+        assert 'Загружаю сохранённый прогноз' in text
         assert event.message.edit_text.await_args.kwargs['reply_markup']
         client.get_match_analysis_context.assert_not_awaited()
         assert state.for_callback(event).fresh_card(42) is None
     finally:
         release.set()
         await task
-    assert 'Confidence: Medium' in event.message.edit_text.await_args.args[0]
+    assert 'Confidence:' not in event.message.edit_text.await_args.args[0]
     assert state.for_callback(event).fresh_summary(42) is not None
     assert state.for_callback(event).fresh_card(42) is None
     await match_detail(event, MatchDetailCallback(section='he_kill', match_id=42, tournament_id=7), client, state)
@@ -927,3 +939,14 @@ async def test_summary_api_uses_light_endpoint():
         await client.get_match_summary(42)
     assert seen[0].url.path == '/api/v1/analysis/match-card-context'
     assert seen[0].url.params['match_id'] == '42'
+
+
+def test_card_omits_model_and_saved_and_request_times():
+    context = context_payload()
+    context["generated_at"] = "2026-10-23T12:00:00Z"
+    context["prediction"].update(saved_at="2026-10-20T10:00:00Z", source="pre_match")
+    text = format_match_card(match_payload(), context)
+    assert "Прогноз сохранён" not in text
+    assert "Модель:" not in text
+    assert "20.10.2026 10:00" not in text
+    assert "23.10.2026 12:00" not in text

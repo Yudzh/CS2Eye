@@ -137,6 +137,7 @@ class Bo3Client:
     ) -> None:
         self._owns_client = http_client is None
         self._http_client = http_client or httpx.AsyncClient(
+            proxy=settings.bo3_proxy_url or None,
             timeout=settings.bo3_request_timeout_seconds,
             headers={
                 "Accept": "application/json",

@@ -194,7 +194,7 @@ async def match_card(
     session.view_revision += 1
     revision = session.view_revision
     try:
-        cached = session.fresh_summary(callback_data.match_id) or session.fresh_card(callback_data.match_id)
+        cached = session.fresh_summary(callback_data.match_id)
         if cached is not None and cached[0].get("status") != "completed":
             match, context = cached
             await _edit(
