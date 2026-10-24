@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  capturePredictionHistory,
   getForecast,
   compareTeamMaps,
   compareTeams,
@@ -1296,14 +1295,6 @@ export function TeamComparePage() {
           window.history.replaceState(null, "", `/compare?${query.toString()}`);
         } else {
           setSeriesTournament(selectedMatch.tournament);
-          try {
-            await capturePredictionHistory(series);
-          } catch (value) {
-            if (current()) {setError(value instanceof Error ? value.message : "Не удалось сохранить прогноз."); setLoadingComparison(false);}
-            return;
-          }
-          if (current()) window.location.href = `/matches/${series}`;
-          return;
         }
       } else {
         setSeriesTournament(null);

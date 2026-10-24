@@ -3,9 +3,21 @@ import {afterEach, expect, it, vi} from "vitest";
 const api = vi.hoisted(() => ({capturePredictionHistory: vi.fn(), createManualForecast: vi.fn(), getMatch: vi.fn(), getPredictionHistory: vi.fn(), getPredictionResults: vi.fn(), getPredictionFeed: vi.fn().mockResolvedValue({items: []})}));
 vi.mock("../api", () => api);
 vi.mock("./MatchesPage", () => ({MatchCard: () => <div>Карты матча</div>}));
+vi.mock("../components/MatchLLMAnalysisPanel", () => ({MatchLLMAnalysisPanel: (props: {
+  matchId: number; teamAId: number; teamBId: number; tournamentId: number;
+}) => <section aria-label="AI-анализ" data-match-id={props.matchId} data-team-a={props.teamAId}
+  data-team-b={props.teamBId} data-tournament-id={props.tournamentId}>AI-анализ матча</section>}));
 import {MatchDetailPage} from "./MatchDetailPage";
 afterEach(() => {cleanup(); vi.clearAllMocks();});
 const match = {id: 7, team_a: {id: 1, name: "Alpha"}, team_b: {id: 2, name: "Bravo"}, winner_team_id: 2, score: {team_a: 1, team_b: 2}, status: "completed", format: "bo3", match_date: "2026-10-01", tournament: {id: 3, name: "Cup"}};
+it("opens AI analysis directly on match 420 with its exact teams and tournament", async () => {
+  api.getMatch.mockResolvedValue({...match,id:420,team_a:{id:8,name:"Aurora"},team_b:{id:13,name:"The MongolZ"},tournament:{id:15,name:"PGL Masters Bucharest 2026"}});
+  api.getPredictionHistory.mockResolvedValue({items:[]});
+  api.getPredictionResults.mockResolvedValue({items:[]});
+  render(<MatchDetailPage matchId={420}/>);
+  const panel = await screen.findByRole("region",{name:"AI-анализ"});
+  expect(panel.dataset).toMatchObject({matchId:"420",teamA:"8",teamB:"13",tournamentId:"15"});
+});
 it("creates a retrospective forecast from the completed match admin page", async () => {
   api.getMatch.mockResolvedValue(match);
   api.getPredictionHistory.mockResolvedValue({items: []});

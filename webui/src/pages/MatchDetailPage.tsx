@@ -3,6 +3,7 @@ import {capturePredictionHistory, getMatch, getPredictionHistory, getPredictionR
 import type {MatchSeries, PredictionHistoryItem, PredictionResult, PredictionFeedItem} from "../types";
 import {MatchCard} from "./MatchesPage";
 import {ManualForecastButton} from "../components/ManualForecastButton";
+import {MatchLLMAnalysisPanel} from "../components/MatchLLMAnalysisPanel";
 const percent = (value: number | null) => value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 const outcome = (value: boolean | null) => value == null ? "Без оценки" : value ? "✓ Угадали" : "✕ Не угадали";
 export function MatchDetailPage({matchId}: {matchId: number}) {
@@ -57,6 +58,11 @@ export function MatchDetailPage({matchId}: {matchId: number}) {
     {error && <div className="empty-state empty-state--error" role="alert">{error}</div>}
     {match && <><section className="summary-grid"><article className="summary-card"><span>Результат серии</span><strong>{match.status === "scheduled" ? "Матч ещё не сыгран" : `${match.score.team_a} : ${match.score.team_b}`}</strong><small>{match.format.toUpperCase()}</small></article><article className="summary-card"><span>Победитель</span><strong>{winner ?? "Пока неизвестен"}</strong></article><article className="summary-card"><span>Турнир</span><strong>{match.tournament?.name ?? "Не указан"}</strong><small>{new Date(`${match.match_date}T00:00:00`).toLocaleDateString("ru-RU")}</small></article></section>
     {actionError && <p role="alert">{actionError}</p>}
+    {match.team_a.id != null && match.team_b.id != null && <MatchLLMAnalysisPanel
+      key={match.id} teamAId={match.team_a.id} teamBId={match.team_b.id}
+      matchId={match.id} tournamentId={match.tournament?.id}
+      matchFormat={match.format === "unknown" ? undefined : match.format}
+    />}
     <section><h2>Сохранённые прогнозы</h2>
     <ManualForecastButton matchId={matchId} disabled={loading || match.team_a.id == null || match.team_b.id == null || match.format === "unknown"} onCreated={() => setRefresh(value => value + 1)}/>
     <p>После начала матча расчёт будет помечен как ретроспективный. Сохранённый предматчевый прогноз не перезаписывается.</p>

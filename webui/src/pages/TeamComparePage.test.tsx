@@ -1,6 +1,7 @@
-import {render, screen} from "@testing-library/react";
-import {describe, expect, it, vi} from "vitest";
-import type {Team} from "../types";
+import {cleanup, render, screen, waitFor} from "@testing-library/react";
+import {afterEach, describe, expect, it, vi} from "vitest";
+import type {MatchSeries, Team} from "../types";
+import * as requests from "../api";
 
 const api = vi.hoisted(() => ({}));
 vi.mock("../api", () => ({
@@ -10,9 +11,24 @@ vi.mock("../api", () => ({
   getHEKillBacktest: vi.fn(), getHEKillByMap: vi.fn(), getTeamH2H: vi.fn(), getTeams: vi.fn(), getWinProbability: vi.fn(),
 }));
 
-import {HEKillByMapBlock, HEKillQualityBlock, missingRequestedTeamIds} from "./TeamComparePage";
+import {TeamComparePage, HEKillByMapBlock, HEKillQualityBlock, missingRequestedTeamIds} from "./TeamComparePage";
+afterEach(() => {cleanup(); vi.clearAllMocks(); window.history.replaceState(null, "", "/");});
 
 describe("compare URL teams", () => {
+  it("loads a linked match comparison instead of redirecting back to its match card", async () => {
+    window.history.replaceState(null,"","/compare?team_a=8&team_b=13&format=bo3&series_id=420");
+    vi.mocked(requests.getTeams).mockResolvedValue([
+      {id:8,name:"Aurora",is_analytics_active:true,current_rank:5},
+      {id:13,name:"The MongolZ",is_analytics_active:true,current_rank:6},
+    ] as Team[]);
+    vi.mocked(requests.getMatch).mockResolvedValue({id:420,team_a:{id:8,name:"Aurora"},
+      team_b:{id:13,name:"The MongolZ"},tournament:{id:15,name:"PGL Masters Bucharest 2026"}} as MatchSeries);
+    vi.mocked(requests.compareTeams).mockReturnValue(new Promise(() => {}));
+    render(<TeamComparePage/>);
+    await waitFor(() => expect(requests.compareTeams).toHaveBeenCalledWith(8,13));
+    expect(requests.capturePredictionHistory).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe("/compare");
+  });
   it("reports a tournament team missing from the Top-40 list", () => {
     const aurora = {id: 8, name: "Aurora"} as Team;
     expect(missingRequestedTeamIds([aurora], [8, 24])).toEqual([24]);
