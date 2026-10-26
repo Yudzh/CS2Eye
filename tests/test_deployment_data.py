@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+import importlib
 import importlib.util
 from pathlib import Path
 
@@ -153,17 +154,19 @@ async def test_deployment_accepts_explicit_manual_replay_for_a_started_match(dep
         assert await session.scalar(select(func.count(PredictionHistorySnapshot.id))) == 0
 
 
-async def test_round2_fills_existing_slots_and_preserves_recorded_data(deployment_db):
-    from cs2eye.deployment.bucharest_round2_2026 import PAIRINGS, apply as fill_round2
+@pytest.mark.parametrize("round_number", [2, 3])
+async def test_swiss_round_fills_existing_slots_and_preserves_recorded_data(deployment_db, round_number):
+    module = importlib.import_module(f"cs2eye.deployment.bucharest_round{round_number}_2026")
+    PAIRINGS, fill_round = module.PAIRINGS, module.apply
 
     async with deployment_db() as session:
         await session.run_sync(apply)
         await session.commit()
         original_ids = set((await session.scalars(select(Match.id))).all())
-        await session.run_sync(fill_round2)
+        await session.run_sync(fill_round)
         await session.commit()
         teams = {t.id: t.name for t in (await session.scalars(select(Team))).all()}
-        rows = (await session.scalars(select(Match).where(Match.round_number == 2))).all()
+        rows = (await session.scalars(select(Match).where(Match.round_number == round_number))).all()
         actual = {(teams[r.team_a_id], teams[r.team_b_id], r.starts_at.hour) for r in rows}
         assert actual == {(a, b, hour) for _, _, a, b, hour in PAIRINGS}
         row = rows[0]
@@ -171,7 +174,7 @@ async def test_round2_fills_existing_slots_and_preserves_recorded_data(deploymen
         row.winner_team_id = row.team_a_id
         row.team_a_maps_won, row.team_b_maps_won = 2, 1
         snapshot = PredictionHistorySnapshot(
-            match_id=row.id, as_of=datetime(2026, 10, 25, 6, tzinfo=UTC),
+            match_id=row.id, as_of=datetime(2026, 10, 23 + round_number, 6, tzinfo=UTC),
             source='pre_match', team_a_id=row.team_a_id, team_b_id=row.team_b_id,
             team_strength_a=60, team_strength_b=40, matchup_a=60, matchup_b=40,
             ml_model_version='original', ml_a_probability=Decimal('0.6'),
@@ -179,38 +182,41 @@ async def test_round2_fills_existing_slots_and_preserves_recorded_data(deploymen
         session.add(snapshot)
         await session.commit()
         snapshot_id, match_id = snapshot.id, row.id
-        await session.run_sync(fill_round2)
+        await session.run_sync(fill_round)
         await session.commit()
         assert set((await session.scalars(select(Match.id))).all()) == original_ids
         await session.refresh(row)
         assert (row.status, row.team_a_maps_won, row.team_b_maps_won) == ('completed', 2, 1)
         saved = await session.get(PredictionHistorySnapshot, snapshot_id)
         assert saved.match_id == match_id and saved.ml_model_version == 'original'
-        assert saved.as_of.replace(tzinfo=UTC) == datetime(2026, 10, 25, 6, tzinfo=UTC)
+        assert saved.as_of.replace(tzinfo=UTC) == datetime(2026, 10, 23 + round_number, 6, tzinfo=UTC)
 
 
-async def test_round2_conflict_does_not_partially_fill_slots(deployment_db):
-    from cs2eye.deployment.bucharest_round2_2026 import apply as fill_round2
+@pytest.mark.parametrize("round_number", [2, 3])
+async def test_swiss_round_conflict_does_not_partially_fill_slots(deployment_db, round_number):
+    fill_round = importlib.import_module(f"cs2eye.deployment.bucharest_round{round_number}_2026").apply
 
     async with deployment_db() as session:
         await session.run_sync(apply)
-        rows = (await session.scalars(select(Match).where(Match.round_number == 2))).all()
+        rows = (await session.scalars(select(Match).where(Match.round_number == round_number))).all()
         rows[-1].team_a_id = 1
         await session.commit()
         with pytest.raises(ValueError, match='participant conflict'):
-            await session.run_sync(fill_round2)
+            await session.run_sync(fill_round)
         assert all(r.team_a_id is None and r.starts_at is None for r in rows[:-1])
 
 
-async def test_round2_migration_runs_in_alembic_transaction(deployment_db):
+@pytest.mark.parametrize("round_number", [2, 3])
+async def test_swiss_round_migration_runs_in_alembic_transaction(deployment_db, round_number):
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
 
     async with deployment_db() as session:
         await session.run_sync(apply)
         await session.commit()
-    path = Path(__file__).parents[1] / 'alembic/versions/0059_bucharest_round2.py'
-    spec = importlib.util.spec_from_file_location('round2_migration', path)
+    filename = "0059_bucharest_round2.py" if round_number == 2 else "0061_bucharest_round3.py"
+    path = Path(__file__).parents[1] / "alembic/versions" / filename
+    spec = importlib.util.spec_from_file_location(f"round{round_number}_migration", path)
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
 
@@ -221,14 +227,15 @@ async def test_round2_migration_runs_in_alembic_transaction(deployment_db):
     async with deployment_db.kw['bind'].begin() as connection:
         await connection.run_sync(upgrade)
     async with deployment_db() as session:
-        rows = (await session.scalars(select(Match).where(Match.round_number == 2))).all()
+        rows = (await session.scalars(select(Match).where(Match.round_number == round_number))).all()
         assert len(rows) == 8
         assert all(r.team_a_id and r.team_b_id and r.starts_at for r in rows)
 
 
-async def test_round2_requires_seeded_tournament(deployment_db):
-    from cs2eye.deployment.bucharest_round2_2026 import apply as fill_round2
+@pytest.mark.parametrize("round_number", [2, 3])
+async def test_swiss_round_requires_seeded_tournament(deployment_db, round_number):
+    fill_round = importlib.import_module(f"cs2eye.deployment.bucharest_round{round_number}_2026").apply
 
     async with deployment_db() as session:
         with pytest.raises(ValueError, match='seeded tournament'):
-            await session.run_sync(fill_round2)
+            await session.run_sync(fill_round)
