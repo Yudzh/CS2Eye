@@ -65,6 +65,11 @@ class PandaScoreRosterService:
             player = next((p for p in all_players if p.pandascore_id == item.id), None)
             if player is None:
                 matches = [p for p in all_players if nickname_key(p.nickname) == nickname_key(item.name)]
+                if not matches:
+                    from cs2eye.deployment.pandascore_player_identities import profile_key
+                    key=profile_key(item.first_name,item.last_name,item.nationality)
+                    if key:
+                        matches=[p for p in all_players if profile_key(p.first_name,p.last_name,p.country_code)==key]
                 if matches:
                     if (len(matches) != 1 or matches[0].pandascore_id is not None or
                         (matches[0].country_code and item.nationality and matches[0].country_code != item.nationality)):

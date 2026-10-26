@@ -380,3 +380,49 @@ async def test_owner_rejection_is_not_recreated_by_automatic_check(roster_db,mon
         assert await s.scalar(select(func.count()).select_from(TournamentRosterOverride))==1
         assert row.status=='REJECTED' and not row.is_active
         assert not (await s.scalar(select(AnalystFactor))).is_active
+
+
+async def test_renamed_player_links_by_unique_full_name_and_country(roster_db,monkeypatch):
+    async with roster_db() as s:
+        await setup(s,monkeypatch)
+        s.add(Player(id=91,bo3_id=29449,bo3_slug='techno4k',nickname='Techno4K',steam_id='known-steam',
+            first_name='Sodbayar',last_name='Munkhbold',country_code='MN'))
+        await s.commit()
+        techno=dict(id=30001,name='Techno',slug='techno',first_name='Munkhbold',last_name='Sodbayar',nationality='MN')
+        await service(s,main=rows()[:4]+[techno]).refresh_main(1);await s.commit()
+        player=await s.get(Player,91)
+        assert player.pandascore_id==30001 and player.bo3_id==29449 and player.steam_id=='known-steam'
+        assert await s.scalar(select(func.count()).select_from(Player))==8
+
+
+@pytest.mark.parametrize('main_uses_duplicate',[False,True])
+async def test_verified_identity_repair_removes_false_replacement_and_preserves_history(roster_db,monkeypatch,main_uses_duplicate):
+    from cs2eye.deployment.pandascore_player_identities import apply
+    from cs2eye.deployment.pandascore_replacements import apply as compare
+    from cs2eye.models.team import AnalystFactor
+    async with roster_db() as s:
+        await setup(s,monkeypatch)
+        s.add_all([Player(id=91,bo3_id=29449,bo3_slug='techno4k',nickname='Techno4K',steam_id='known-steam',
+            first_name='Sodbayar',last_name='Munkhbold',country_code='MN'),
+            Player(id=92,pandascore_id=30001,pandascore_slug='techno',nickname='Techno',
+                first_name='Munkhbold',last_name='Sodbayar',country_code='MN')])
+        members=list((await s.scalars(select(TeamRosterMember).where(TeamRosterMember.roster_id==1))).all())
+        next(m for m in members if m.player_id==5).player_id=92 if main_uses_duplicate else 91
+        stamp=datetime.now(UTC)
+        s.add(TournamentRosterCheck(tournament_id=1,team_id=1,baseline_ids=[1,2,3,4,91],roster_ids=[1,2,3,4,92],
+            source='https://api.pandascore.co/tournaments/22222/rosters',checked_at=stamp))
+        await s.commit()
+        await s.run_sync(compare);await s.commit()
+        first=await s.run_sync(apply);await s.commit()
+        assert first=={'repaired':1}
+        assert await s.run_sync(apply)=={'repaired':0}
+        assert (await s.get(Player,91)).pandascore_id==30001
+        assert (await s.get(Player,92)).pandascore_id is None
+        capture=await s.scalar(select(TournamentRosterCheck))
+        assert capture.roster_ids==[1,2,3,4,91] and capture.checked_at.replace(tzinfo=UTC)==stamp
+        value=await EffectiveRosterService(s).get_effective_roster(1,1)
+        assert value['roster_classification']=='permanent' and not value['has_temporary_replacement']
+        assert not any(f.is_active for f in (await s.scalars(select(AnalystFactor))).all())
+        if main_uses_duplicate:
+            assert (await s.get(Team,1)).current_roster_id!=1
+            assert 92 in (await s.scalars(select(TeamRosterMember.player_id).where(TeamRosterMember.roster_id==1))).all()
