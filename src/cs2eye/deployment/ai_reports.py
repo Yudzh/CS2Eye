@@ -59,6 +59,25 @@ def validate(document):
             raise ValueError(f"Report timestamp {key} has no timezone")
 
 
+def team_identity(team):
+    identity = {"bo3_id": team.bo3_id, "name": team.name}
+    if team.bo3_id is None:
+        if team.pandascore_id is None:
+            raise ValueError("Cannot publish report without a stable team identity")
+        identity["pandascore_id"] = team.pandascore_id
+    return identity
+
+
+async def resolve_team(session, identity):
+    if identity.get("bo3_id") is not None:
+        query = select(Team).where(Team.bo3_id == identity["bo3_id"])
+    elif identity.get("pandascore_id") is not None:
+        query = select(Team).where(Team.pandascore_id == identity["pandascore_id"])
+    else:
+        raise ValueError("AI report has no stable team identity")
+    return (await session.scalars(query)).one_or_none()
+
+
 async def export_run(session, run, directory=None):
     if run.status != "completed" or run.analysis_schema_version != "match_llm_analysis.v3":
         return None
@@ -80,8 +99,8 @@ async def export_run(session, run, directory=None):
         "schema": SCHEMA, "origin": origin_file.read_text().strip(),
         "source_run_id": run.id, "source_parent_id": run.source_run_id,
         "tournament": {"name": tournament.name, "year": tournament.year} if tournament else None,
-        "team_a": {"bo3_id": a.bo3_id, "name": a.name},
-        "team_b": {"bo3_id": b.bo3_id, "name": b.name},
+        "team_a": team_identity(a),
+        "team_b": team_identity(b),
         "match": {"date": match.match_date, "format": match.format, "round_number": match.round_number} if match else None,
         "run": {key: getattr(run, key) for key in FIELDS},
     }))
@@ -123,8 +142,8 @@ async def import_reports(session, directory=None):
         event = document["tournament"]
         tournament = ((await session.scalars(select(Tournament).where(
             Tournament.name == event["name"], Tournament.year == event["year"]))).one_or_none() if event else None)
-        a = (await session.scalars(select(Team).where(Team.bo3_id == document["team_a"]["bo3_id"]))).one_or_none()
-        b = (await session.scalars(select(Team).where(Team.bo3_id == document["team_b"]["bo3_id"]))).one_or_none()
+        a = await resolve_team(session, document["team_a"])
+        b = await resolve_team(session, document["team_b"])
         if (event and tournament is None) or a is None or b is None:
             raise ValueError(f"Missing server tournament or teams for report {key}")
         identity = document["match"]

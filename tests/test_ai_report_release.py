@@ -193,3 +193,17 @@ def test_report_publish_command_commits_only_reports_pushes_and_deploys(tmp_path
     assert "report.json" in git("ls-tree", "-r", "--name-only", "HEAD")
     assert log.read_text() == "cs2eye\ncs2eye-deploy\n"
     assert git("rev-parse", "HEAD") == git("rev-parse", "origin/telegtam-prod")
+
+
+async def test_pandascore_only_team_identity_is_stable_across_release(release_databases):
+    from cs2eye.deployment.ai_reports import team_identity, resolve_team
+    local, server, directory, path = release_databases
+    # Identity lookup must never select arbitrary rows with bo3_id IS NULL.
+    async with local() as session:
+        team = await session.get(Team, 1)
+        team.bo3_id = None
+        team.bo3_slug = None
+        team.pandascore_id = 131505
+        identity = team_identity(team)
+        assert identity['pandascore_id'] == 131505
+        assert await resolve_team(session, identity) is team

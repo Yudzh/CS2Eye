@@ -108,3 +108,21 @@ async def ensure_match_rosters(match_id: int, session: AsyncSession = Depends(ge
             message = str(exc) if not isinstance(exc, IntegrityError) else 'Конфликт привязки игрока; повторите получение состава.'
             results.append({'team_id':team_id,'status':'error','error':message,'players':[]})
     return {'match_id':match_id,'tournament_id':tournament_id,'teams':results}
+
+
+class EventImport(BaseModel):
+    external_id: int = Field(gt=0)
+
+
+@router.get('/pandascore/events/search')
+async def search_events(query: str, session: AsyncSession = Depends(get_db_session)):
+    if not 2 <= len(query.strip()) <= 160:
+        raise HTTPException(422, 'Введите от 2 до 160 символов.')
+    from cs2eye.services.pandascore_tournament_service import PandaScoreTournamentService
+    return await mutate(session, lambda: PandaScoreTournamentService(session).search(query))
+
+
+@router.post('/pandascore/events/import')
+async def import_event(payload: EventImport, session: AsyncSession = Depends(get_db_session)):
+    from cs2eye.services.pandascore_tournament_service import PandaScoreTournamentService
+    return await mutate(session, lambda: PandaScoreTournamentService(session).import_event(payload.external_id))

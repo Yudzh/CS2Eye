@@ -1,7 +1,7 @@
 export interface Team {
   id: number;
-  bo3_id: number;
-  bo3_slug: string;
+  bo3_id: number | null;
+  bo3_slug: string | null;
   pandascore_id?: number | null;
   pandascore_slug?: string | null;
   pandascore_synced_at?: string | null;
@@ -422,8 +422,8 @@ export interface TeamComparisonPlayer {
 
 export interface TeamComparisonSide {
   id: number;
-  bo3_id: number;
-  bo3_slug: string;
+  bo3_id: number | null;
+  bo3_slug: string | null;
   name: string;
   logo_url: string | null;
   country_code: string | null;
@@ -518,8 +518,8 @@ export interface TeamParticipant {
 
 export interface PlayerTeam {
   id: number;
-  bo3_id: number;
-  bo3_slug: string;
+  bo3_id: number | null;
+  bo3_slug: string | null;
   name: string;
   logo_url: string | null;
   is_active: boolean;
@@ -624,8 +624,8 @@ export interface RankingRun {
 
 export interface PlayerProfileFailure {
   id: number;
-  bo3_id: number;
-  bo3_slug: string;
+  bo3_id: number | null;
+  bo3_slug: string | null;
   nickname: string;
   error: string;
 }
@@ -634,8 +634,8 @@ export interface PlayerProfileFailure {
 export interface ProbeTeam {
   rank: number;
   name: string;
-  bo3_id: number;
-  bo3_slug: string;
+  bo3_id: number | null;
+  bo3_slug: string | null;
   points: string | number;
   rank_change: number | null;
   region: string | null;

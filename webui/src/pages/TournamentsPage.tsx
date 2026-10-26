@@ -1,3 +1,4 @@
+import {PandaScoreEventImportPanel} from "../components/PandaScoreEventImportPanel";
 import {PandaScoreTournamentPanel} from "../components/PandaScoreTournamentPanel";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
@@ -1211,6 +1212,7 @@ export function TournamentsPage({ tournamentId }: { tournamentId?: number }) {
             Добавить турнир
           </a>
         </header>
+        <PandaScoreEventImportPanel onImported={load} />
         <div className="tournament-tabs">
           <button
             className={period === "future" ? "active" : ""}

@@ -101,8 +101,8 @@ class TeamListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    bo3_id: int
-    bo3_slug: str
+    bo3_id: int | None
+    bo3_slug: str | None
     name: str
     logo_url: str | None
     country_code: str | None
@@ -150,8 +150,8 @@ class TeamComparisonPlayerResponse(BaseModel):
 
 class TeamComparisonSideResponse(BaseModel):
     id: int
-    bo3_id: int
-    bo3_slug: str
+    bo3_id: int | None
+    bo3_slug: str | None
     name: str
     logo_url: str | None
     country_code: str | None
@@ -228,8 +228,8 @@ class RankingRunResponse(BaseModel):
 class ProbeTeamResponse(BaseModel):
     rank: int
     name: str
-    bo3_id: int
-    bo3_slug: str
+    bo3_id: int | None
+    bo3_slug: str | None
     points: Decimal
     rank_change: int | None
     region: str | None

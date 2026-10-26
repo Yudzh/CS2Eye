@@ -30,15 +30,15 @@ class Team(Base):
         Integer,
         primary_key=True,
     )
-    bo3_id: Mapped[int] = mapped_column(
+    bo3_id: Mapped[int | None] = mapped_column(
         Integer,
         unique=True,
-        nullable=False,
+        nullable=True,
     )
-    bo3_slug: Mapped[str] = mapped_column(
+    bo3_slug: Mapped[str | None] = mapped_column(
         String(160),
         unique=True,
-        nullable=False,
+        nullable=True,
     )
     name: Mapped[str] = mapped_column(
         String(160),
