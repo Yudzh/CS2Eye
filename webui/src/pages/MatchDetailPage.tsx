@@ -1,3 +1,5 @@
+import {MatchTiming} from "../components/MatchTiming";
+import {MatchResultPanel} from "../components/MatchResultPanel";
 import {useEffect, useState} from "react";
 import {capturePredictionHistory, getMatch, getPredictionHistory, getPredictionResults, getPredictionFeed} from "../api";
 import type {MatchSeries, PredictionHistoryItem, PredictionResult, PredictionFeedItem} from "../types";
@@ -56,7 +58,8 @@ export function MatchDetailPage({matchId}: {matchId: number}) {
   const winner = match?.winner_team_id == null ? null : match.winner_team_id === match.team_a.id ? match.team_a.name : match.winner_team_id === match.team_b.id ? match.team_b.name : null;
   return <main className="page matches-page"><nav className="page-links"><a className="back-link" href="/matches">← Все матчи</a><a href="/predictions">Все прогнозы</a></nav><header className="compare-heading"><p className="eyebrow">CS2Eye · карточка матча</p><h1>{match ? `${match.team_a.name ?? "Team A"} — ${match.team_b.name ?? "Team B"}` : "Карточка матча"}</h1></header>
     {error && <div className="empty-state empty-state--error" role="alert">{error}</div>}
-    {match && <><section className="summary-grid"><article className="summary-card"><span>Результат серии</span><strong>{match.status === "scheduled" ? "Матч ещё не сыгран" : `${match.score.team_a} : ${match.score.team_b}`}</strong><small>{match.format.toUpperCase()}</small></article><article className="summary-card"><span>Победитель</span><strong>{winner ?? "Пока неизвестен"}</strong></article><article className="summary-card"><span>Турнир</span><strong>{match.tournament?.name ?? "Не указан"}</strong><small>{new Date(`${match.match_date}T00:00:00`).toLocaleDateString("ru-RU")}</small></article></section>
+    {match && <><MatchTiming startsAt={match.starts_at} status={match.status} result={match.result_sync}/><section className="summary-grid"><article className="summary-card"><span>Результат серии</span><strong>{match.status === "scheduled" ? "Матч ещё не сыгран" : `${match.score.team_a} : ${match.score.team_b}`}</strong><small>{match.format.toUpperCase()}</small></article><article className="summary-card"><span>Победитель</span><strong>{winner ?? "Пока неизвестен"}</strong></article><article className="summary-card"><span>Турнир</span><strong>{match.tournament?.name ?? "Не указан"}</strong><small>{new Date(`${match.match_date}T00:00:00`).toLocaleDateString("ru-RU")}</small></article></section>
+    {match && <MatchResultPanel matchId={match.id} teamA={match.team_a} teamB={match.team_b} value={match.result_sync} changed={() => setRefresh(value => value + 1)}/>}
     {actionError && <p role="alert">{actionError}</p>}
     {match.team_a.id != null && match.team_b.id != null && <MatchLLMAnalysisPanel
       key={match.id} teamAId={match.team_a.id} teamBId={match.team_b.id}

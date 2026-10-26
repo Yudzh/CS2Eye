@@ -58,6 +58,7 @@ if [[ -f "$shared/use-https" ]]; then
   "${compose[@]}" up -d --no-build --no-deps https
 fi
 "${compose[@]}" exec -T api python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=10)"
+"${compose[@]}" exec -T api python -m cs2eye.deployment.verify_results
 status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 http://127.0.0.1:18080/)
 [[ "$status" == 401 ]] || { echo "Expected authentication challenge, got HTTP $status"; exit 1; }
 if [[ -L "$CS2EYE_DEPLOY_ROOT/current" ]]; then

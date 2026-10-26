@@ -42,6 +42,8 @@ if mode == 'forecasts' and 'cs2eye.deployment.prepare' in args:
     sys.exit(1)
 if mode == 'reports' and 'cs2eye.deployment.ai_reports' in args:
     sys.exit(1)
+if mode == 'api-data' and 'cs2eye.deployment.verify_results' in args:
+    sys.exit(1)
 if any('pg_dump' in arg for arg in args) and mode != 'empty-backup':
     sys.stdout.write('database-backup')
 if 'pg_restore' in args:
@@ -144,3 +146,14 @@ def test_update_deploys_only_committed_production_history(tmp_path):
     result = subprocess.run(["bash", str(DEPLOY / "update.sh"), other], env=env, capture_output=True)
     assert result.returncode != 0
     assert (root / "deployed").read_text() == sha
+
+
+def test_api_data_verification_prevents_false_release_success(release_env):
+    root, release, env = release_env
+    env["FAIL_MODE"] = "api-data"
+    result = subprocess.run(["bash", str(release / "deploy/release.sh")], env=env, capture_output=True)
+    assert result.returncode != 0
+    assert (root / "current").resolve() == root / "old"
+    calls = [json.loads(line) for line in Path(env["DOCKER_LOG"]).read_text().splitlines()]
+    verify = next(i for i, call in enumerate(calls) if "cs2eye.deployment.verify_results" in call)
+    assert verify > next(i for i, call in enumerate(calls) if "up" in call)

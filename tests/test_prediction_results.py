@@ -41,7 +41,7 @@ async def test_grades_saved_probabilities_separately_from_pre_match(results_db):
     async with results_db() as s:
         s.add(replay(team_a_id=2, team_b_id=1, team_a_probability=Decimal('.8')))
         s.add(PredictionHistorySnapshot(match_id=1, tournament_id=1, source="pre_match",
-            as_of=datetime(2026,10,2,tzinfo=UTC), team_a_id=1, team_b_id=2,
+            created_at=datetime(2026,10,2,tzinfo=UTC), as_of=datetime(2026,10,2,tzinfo=UTC), team_a_id=1, team_b_id=2,
             team_strength_a=60, team_strength_b=40, matchup_a=60, matchup_b=40,
             ml_a_probability=Decimal('.7'), ml_b_probability=Decimal('.3'), ml_model_version="v12"))
         await s.commit()
@@ -110,7 +110,7 @@ async def test_feed_unifies_upcoming_and_results_without_duplicate_picks(results
         s.add_all([
             replay(), replay(model_version='v13', team_a_probability=Decimal('.9')),
             PredictionHistorySnapshot(match_id=1, tournament_id=1, source='pre_match',
-                as_of=datetime(2026,10,2,tzinfo=UTC), team_a_id=1, team_b_id=2,
+                created_at=datetime(2026,10,2,tzinfo=UTC), as_of=datetime(2026,10,2,tzinfo=UTC), team_a_id=1, team_b_id=2,
                 team_strength_a=60, team_strength_b=40, matchup_a=60, matchup_b=40,
                 ml_a_probability=Decimal('.3'), ml_b_probability=Decimal('.7'), ml_model_version='v12'),
             Match(id=2, tournament_id=1, match_date=date(2026,10,15), team_a_id=1,

@@ -17,6 +17,8 @@ from cs2eye.services.veto_service import VetoError, VetoService
 from cs2eye.services.betting_restriction_service import betting_restrictions_for_teams
 
 
+from cs2eye.services.match_result_sync_service import result_metadata
+
 router = APIRouter(tags=["matches"])
 
 
@@ -31,6 +33,7 @@ async def response(view: MatchView, session: AsyncSession) -> MatchResponse:
     ))).all()) if item.tournament_id is not None else {}
     veto = await VetoService(session).actions(item.id)
     return MatchResponse(
+        result_sync=result_metadata(item),
         id=item.id, starts_at=item.starts_at,
         tournament=TournamentResponse.model_validate(view.tournament, from_attributes=True) if view.tournament else None,
         match_date=item.match_date, format=item.format, stage=item.stage, environment=item.environment,

@@ -54,6 +54,7 @@ class PredictionHistoryCoverage(BaseModel):
 
 
 class MatchResponse(BaseModel):
+    result_sync: dict | None = None
     prediction_history_coverage: PredictionHistoryCoverage | None = None
     starts_at: datetime | None = None
     id: int; tournament: TournamentResponse | None; match_date: date

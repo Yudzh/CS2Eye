@@ -37,8 +37,12 @@ services:
       DEMO_DELETE_AFTER_SUCCESSFUL_PARSE: ${DEMO_DELETE_AFTER_SUCCESSFUL_PARSE:-false}
       DEMO_PARSE_CONCURRENCY: ${DEMO_PARSE_CONCURRENCY:-4}
       MAX_RANKING_SNAPSHOT_AGE_DAYS: ${MAX_RANKING_SNAPSHOT_AGE_DAYS:-14}
+      PANDASCORE_API_TOKEN: ${PANDASCORE_API_TOKEN:-}
+      RESULT_SYNC_INTERVAL_SECONDS: ${RESULT_SYNC_INTERVAL_SECONDS:-900}
+      RESULT_SYNC_MAX_REQUESTS: ${RESULT_SYNC_MAX_REQUESTS:-20}
       BO3_API_BASE_URL: ${BO3_API_BASE_URL:-https://api.bo3.gg/api/v2}
       BO3_SITE_BASE_URL: ${BO3_SITE_BASE_URL:-https://bo3.gg}
+      BO3_PROXY_URL: ${BO3_PROXY_URL:-}
       BO3_REQUEST_TIMEOUT_SECONDS: ${BO3_REQUEST_TIMEOUT_SECONDS:-20}
       BO3_USER_AGENT: ${BO3_USER_AGENT:-CS2Eye/0.1 (+local analytics project)}
       MATCH_LLM_ENABLED: ${MATCH_LLM_ENABLED:-false}
@@ -79,7 +83,7 @@ services:
       - ./src:/app/src
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini:ro
-      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD37/demos}:/app/storage
+      - ${DEMO_STORAGE_HOST_PATH:-/media/eugene/HDD39/demos}:/app/storage
     depends_on:
       db:
         condition: service_healthy

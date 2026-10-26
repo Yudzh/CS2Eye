@@ -1,4 +1,6 @@
 """Saved ML picks graded against current match results, without recalculation."""
+from cs2eye.services.prediction_result_eligibility import eligibility
+from cs2eye.services.match_result_sync_service import result_metadata
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +32,7 @@ class PredictionResultsService:
             if row.team_a_id != match.team_a_id:
                 score = score[::-1]
             items.append({
+                "result_sync": result_metadata(match),
                 "id": f"{source}:{row.id}", "match_id": match.id,
                 "tournament_id": match.tournament_id,
                 "tournament": tournaments.get(match.tournament_id),
@@ -50,7 +53,8 @@ class PredictionResultsService:
             Match, Match.id == PredictionHistorySnapshot.match_id,
         ).where(*completed, PredictionHistorySnapshot.source == "pre_match"))).all()
         for row, match in snapshots:
-            append(row, match, row.ml_a_probability, row.ml_model_version, "pre_match", row.created_at)
+            if eligibility(row, match)[0]:
+                append(row, match, row.ml_a_probability, row.ml_model_version, "pre_match", row.created_at)
         replays = (await self.session.execute(select(MatchPrediction, Match).join(
             Match, Match.id == MatchPrediction.series_id,
         ).where(*completed, MatchPrediction.source == "historical_replay",

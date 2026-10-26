@@ -60,7 +60,7 @@ class PredictionHistoryErrorAnalysisService:
         }
 
     def aggregate(self, items: list[dict]) -> dict:
-        official = [x for x in items if x["source"] == "pre_match" and x["completed"]
+        official = [x for x in items if x["source"] == "pre_match" and x["completed"] and x.get("evaluation", {}).get("eligible", True)
                     and x["actual_winner_id"] is not None]
         return {
             "matchup_factor_quality": self._factor_quality(official),

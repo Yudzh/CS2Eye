@@ -96,6 +96,15 @@ class Match(Base):
     team_a_maps_won: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     team_b_maps_won: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     winner_team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"))
+    result_source: Mapped[str | None] = mapped_column(String(32))
+    result_external_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
+    result_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    result_check_status: Mapped[str | None] = mapped_column(String(32))
+    result_error: Mapped[str | None] = mapped_column(Text)
+    result_link: Mapped[dict | None] = mapped_column(JSON)
+    result_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    result_proposal: Mapped[dict | None] = mapped_column(JSON)
     veto_data_status: Mapped[str] = mapped_column(String(24), nullable=False, default="not_available", server_default="not_available")
     veto_source: Mapped[str | None] = mapped_column(String(32))
     veto_source_external_id: Mapped[str | None] = mapped_column(String(255))
@@ -160,3 +169,22 @@ class TournamentRosterCheck(Base):
     source: Mapped[str] = mapped_column(Text, nullable=False)
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class MatchResultAudit(Base):
+    """Result and mapping changes, including rejected upstream corrections."""
+    __tablename__ = "match_result_audits"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    actor: Mapped[str] = mapped_column(String(160))
+    reason: Mapped[str] = mapped_column(Text)
+    before: Mapped[dict] = mapped_column(JSON)
+    after: Mapped[dict] = mapped_column(JSON)
+
+
+class ResultSyncQuota(Base):
+    __tablename__ = "result_sync_quota"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    requests: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -47,3 +47,6 @@ api_router.include_router(llm_quality_router)
 api_router.include_router(prediction_history_router)
 # Disabled: unused sandbox UI.
 # api_router.include_router(model_sandbox_router)
+
+from cs2eye.api.routers.match_results import router as match_results_router
+api_router.include_router(match_results_router)

@@ -427,3 +427,8 @@ export interface ManualForecastResult {
 export function createManualForecast(matchId: number): Promise<ManualForecastResult> {
   return request(`/api/v1/prediction-history/matches/${matchId}/generate`, {method: "POST"});
 }
+
+export const checkMatchResult = (id: number) => request(`/api/v1/matches/${id}/result/check`, {method: "POST"});
+export const bindMatchResult = (id: number, payload: object) => request(`/api/v1/matches/${id}/result/link`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+export const correctMatchResult = (id: number, payload: object) => request(`/api/v1/matches/${id}/result`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+export const getMatchResultAudit = (id: number) => request<{items: Array<{id: number; at: string; actor: string; reason: string; before: object; after: object}>}>(`/api/v1/matches/${id}/result/audit`);

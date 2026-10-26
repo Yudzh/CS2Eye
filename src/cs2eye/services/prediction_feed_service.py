@@ -1,5 +1,7 @@
 """One archived pick per match for the upcoming/results interface."""
 from sqlalchemy import select
+from cs2eye.services.prediction_result_eligibility import eligibility
+from cs2eye.services.match_result_sync_service import result_metadata
 from cs2eye.services.analyst_probability_service import analyst_probability_adjustment
 from cs2eye.models.match import Match, Tournament
 from cs2eye.models.team import Team
@@ -34,8 +36,11 @@ class PredictionFeedService:
         for match in matches:
             saved = picks.get(match.id)
             probability = version = source = captured_at = None
+            eligible = True
             if saved:
                 row, source, p, version, captured_at = saved
+                if source == "pre_match":
+                    eligible, _ = eligibility(row, match)
                 if {row.team_a_id, row.team_b_id} != {match.team_a_id, match.team_b_id}:
                     saved = None
                 elif p is not None and 0 <= float(p) <= 1:
@@ -51,6 +56,7 @@ class PredictionFeedService:
                     series_id=match.id, team_ids=vitality_ids)
             winner_id = (match.team_a_id if probability > .5 else match.team_b_id if probability < .5 else None) if probability is not None else None
             items.append({
+                'result_sync': result_metadata(match),
                 'match_id': match.id, 'match_date': match.match_date.isoformat(),
                 'starts_at': match.starts_at.isoformat() if match.starts_at else None,
                 'status': match.status, 'tournament_id': match.tournament_id,
@@ -61,7 +67,7 @@ class PredictionFeedService:
                 'predicted_winner': teams.get(winner_id),
                 'probability': max(probability, 1-probability) if probability is not None else None,
                 'actual_winner': teams.get(match.winner_team_id) if completed else None,
-                'correct': winner_id == match.winner_team_id if completed and winner_id and match.winner_team_id else None,
+                'correct': winner_id == match.winner_team_id if eligible and completed and winner_id and match.winner_team_id else None,
                 'score': {'team_a': match.team_a_maps_won, 'team_b': match.team_b_maps_won} if completed else None,
                 'source': source if probability is not None else None,
                 'model_version': version if probability is not None else None,

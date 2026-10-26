@@ -9,6 +9,7 @@ from cs2eye.api.routers.router import api_router
 from cs2eye.core.config import settings
 from cs2eye.db.session import dispose_engine, AsyncSessionLocal
 from cs2eye.services.tournament_lineup_monitor import TournamentLineupMonitor
+from cs2eye.services.match_result_sync_service import result_sync_loop
 from cs2eye.services.prediction_capture_monitor import prediction_capture_loop
 
 
@@ -30,9 +31,13 @@ async def lifespan(
     del app
     task = asyncio.create_task(roster_check_loop())
     prediction_task = asyncio.create_task(prediction_capture_loop())
+    result_task = asyncio.create_task(result_sync_loop())
     try:
         yield
     finally:
+        result_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await result_task
         prediction_task.cancel()
         with suppress(asyncio.CancelledError):
             await prediction_task

@@ -1316,3 +1316,15 @@ h2 {
   .forecasts-summary strong { font-size:24px; }
   .forecasts-summary p { grid-column:1/-1; }
 }
+
+.match-timing { display:flex; flex-wrap:wrap; gap:20px; margin:16px 0; padding:18px 20px; border:1px solid var(--border); border-radius:12px; background:var(--surface); }
+.match-timing > div { display:grid; gap:6px; flex:1; min-width:220px; }
+.match-timing strong { font-size:22px; font-variant-numeric:tabular-nums; }
+.match-timing small, .match-timing time { color:var(--muted); font-size:12px; }
+.pandascore-binding { display:grid; gap:10px; padding:18px; margin:12px 0; border:1px solid var(--border); border-left:3px solid var(--yellow); border-radius:10px; }
+.pandascore-binding--verified { border-left-color:var(--green); }
+.pandascore-binding__head { display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+.pandascore-binding h4 { margin:0; font-size:20px; }
+.pandascore-binding p { margin:0; }
+.pandascore-binding small { color:var(--muted); }
+.pandascore-binding__facts { display:flex; flex-wrap:wrap; gap:10px 24px; font-size:13px; }

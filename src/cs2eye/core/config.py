@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
@@ -15,6 +15,9 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://"
         "admin:admin@localhost:5433/cs2eye"
     )
+    pandascore_api_token: SecretStr = SecretStr("")
+    result_sync_interval_seconds: int = Field(default=900, ge=60)
+    result_sync_max_requests: int = Field(default=20, ge=1, le=100)
     bo3_api_base_url: str = (
         "https://api.bo3.gg/api/v2"
     )

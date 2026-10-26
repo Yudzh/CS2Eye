@@ -207,6 +207,10 @@ class MatchService:
 
     async def recalculate(self, match_id: int) -> MatchView:
         view = await self.get(match_id); match = view.match
+        if match.result_manual or match.result_source == "pandascore":
+            # Imported/admin-confirmed series scores are authoritative. Demo
+            # parsing or metadata edits must not silently replace them.
+            return view
         previous_result = (match.status, match.winner_team_id, match.team_a_maps_won, match.team_b_maps_won)
         if match.resolution_status != "resolved":
             match.team_a_maps_won = match.team_b_maps_won = 0; match.winner_team_id = None; match.status = "unknown"

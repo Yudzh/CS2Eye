@@ -38,7 +38,7 @@ class PredictionHistoryEvaluationService:
 
     def evaluate(self, items: list[dict], *, count_items: list[dict] | None = None) -> dict:
         count_items = items if count_items is None else count_items
-        official = [item for item in items if item["source"] == "pre_match" and item["completed"]
+        official = [item for item in items if item["source"] == "pre_match" and item["completed"] and item.get("evaluation", {}).get("eligible", True)
                     and item["actual_winner_id"] is not None]
 
         def metric(key: str) -> dict:

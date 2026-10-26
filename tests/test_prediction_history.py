@@ -74,25 +74,25 @@ async def test_capture_saves_all_three_snapshots_and_never_recalculates(history_
 
 async def test_history_result_consensus_accuracy_missing_ml_pending_and_filters(history_db) -> None:
     async with history_db() as session:
-        pending = PredictionHistorySnapshot(match_id=10, tournament_id=1, as_of=datetime(2026, 8, 31, tzinfo=UTC), team_a_id=1, team_b_id=2,
+        pending = PredictionHistorySnapshot(match_id=10, tournament_id=1, created_at=datetime(2026, 8, 31, tzinfo=UTC), as_of=datetime(2026, 8, 31, tzinfo=UTC), team_a_id=1, team_b_id=2,
             team_strength_a=60, team_strength_b=40, team_strength_winner_id=1,
             matchup_a=55, matchup_b=45, matchup_winner_id=1,
             ml_a_probability=.49, ml_b_probability=.51, ml_winner_id=2)
         completed_match = Match(id=11, tournament_id=1, match_date=date(2026, 8, 30), team_a_id=1, team_b_id=2,
             format="bo3", stage="group", environment="lan", status="completed", resolution_status="resolved", winner_team_id=2, team_a_maps_won=1, team_b_maps_won=2)
-        missing_ml = PredictionHistorySnapshot(match_id=11, tournament_id=1, as_of=datetime(2026, 8, 29, tzinfo=UTC), team_a_id=1, team_b_id=2,
+        missing_ml = PredictionHistorySnapshot(match_id=11, tournament_id=1, created_at=datetime(2026, 8, 29, tzinfo=UTC), as_of=datetime(2026, 8, 29, tzinfo=UTC), team_a_id=1, team_b_id=2,
             team_strength_a=60, team_strength_b=40, team_strength_winner_id=1,
             matchup_a=40, matchup_b=60, matchup_winner_id=2,
             ml_a_probability=None, ml_b_probability=None, ml_winner_id=None)
         unanimous_match = Match(id=12, tournament_id=1, match_date=date(2026, 8, 29), team_a_id=1, team_b_id=2,
             format="bo3", stage="group", environment="lan", status="completed", resolution_status="resolved", winner_team_id=1, team_a_maps_won=2, team_b_maps_won=0)
-        unanimous = PredictionHistorySnapshot(match_id=12, tournament_id=1, as_of=datetime(2026, 8, 28, tzinfo=UTC), team_a_id=1, team_b_id=2,
+        unanimous = PredictionHistorySnapshot(match_id=12, tournament_id=1, created_at=datetime(2026, 8, 28, tzinfo=UTC), as_of=datetime(2026, 8, 28, tzinfo=UTC), team_a_id=1, team_b_id=2,
             team_strength_a=60, team_strength_b=40, team_strength_winner_id=1,
             matchup_a=60, matchup_b=40, matchup_winner_id=1,
             ml_a_probability=.57, ml_b_probability=.43, ml_winner_id=1)
         retrospective_match = Match(id=13, tournament_id=1, match_date=date(2026, 8, 28), team_a_id=1, team_b_id=2,
             format="bo3", stage="group", environment="lan", status="completed", resolution_status="resolved", winner_team_id=1, team_a_maps_won=2, team_b_maps_won=0)
-        retrospective = PredictionHistorySnapshot(match_id=13, tournament_id=1, as_of=datetime(2026, 8, 27, tzinfo=UTC), source="retrospective", team_a_id=1, team_b_id=2,
+        retrospective = PredictionHistorySnapshot(match_id=13, tournament_id=1, created_at=datetime(2026, 8, 27, tzinfo=UTC), as_of=datetime(2026, 8, 27, tzinfo=UTC), source="retrospective", team_a_id=1, team_b_id=2,
             team_strength_a=1, team_strength_b=99, team_strength_winner_id=2,
             matchup_a=1, matchup_b=99, matchup_winner_id=2,
             ml_a_probability=.01, ml_b_probability=.99, ml_winner_id=2)
@@ -133,7 +133,7 @@ async def test_capture_tournament_processes_only_new_scheduled_matches_with_team
                   format="bo3", stage="group", environment="lan", status="scheduled", resolution_status="resolved"),
             Match(id=14, tournament_id=1, match_date=date(2026, 9, 2), team_a_id=None, team_b_id=None,
                   format="bo3", stage="group", environment="lan", status="scheduled", resolution_status="resolved"),
-            PredictionHistorySnapshot(match_id=10, tournament_id=1, as_of=datetime(2026, 8, 31, tzinfo=UTC), team_a_id=1, team_b_id=2,
+            PredictionHistorySnapshot(match_id=10, tournament_id=1, created_at=datetime(2026, 8, 31, tzinfo=UTC), as_of=datetime(2026, 8, 31, tzinfo=UTC), team_a_id=1, team_b_id=2,
                 team_strength_a=60, team_strength_b=40, team_strength_winner_id=1,
                 matchup_a=60, matchup_b=40, matchup_winner_id=1,
                 ml_a_probability=.6, ml_b_probability=.4, ml_winner_id=1),
@@ -193,7 +193,7 @@ async def test_conflict_types_statistics_and_filters(history_db) -> None:
                 status=status, resolution_status="resolved", winner_team_id=actual,
                 team_a_maps_won=2 if actual == 1 else 0, team_b_maps_won=2 if actual == 2 else 0))
             session.add(PredictionHistorySnapshot(match_id=match_id, tournament_id=1,
-                as_of=datetime(2026, 8, match_id - 1, tzinfo=UTC), team_a_id=1, team_b_id=2,
+                created_at=datetime(2026, 8, match_id - 1, tzinfo=UTC), as_of=datetime(2026, 8, match_id - 1, tzinfo=UTC), team_a_id=1, team_b_id=2,
                 team_strength_a=values[0], team_strength_b=values[1], team_strength_winner_id=ts,
                 matchup_a=values[2], matchup_b=values[3], matchup_winner_id=matchup,
                 ml_a_probability=values[4], ml_b_probability=values[5], ml_winner_id=ml,
@@ -234,7 +234,7 @@ async def test_official_accuracy_uses_only_two_pre_match_among_ten_retrospective
                 status="completed", resolution_status="resolved", winner_team_id=actual,
                 team_a_maps_won=2, team_b_maps_won=0))
             session.add(PredictionHistorySnapshot(match_id=match_id, tournament_id=1,
-                as_of=datetime(2026, 6, index + 1, tzinfo=UTC), source=source,
+                created_at=datetime(2026, 6, index + 1, tzinfo=UTC), as_of=datetime(2026, 6, index + 1, tzinfo=UTC), source=source,
                 team_a_id=1, team_b_id=2, team_strength_a=60, team_strength_b=40,
                 team_strength_winner_id=1, matchup_a=60, matchup_b=40, matchup_winner_id=1,
                 ml_a_probability=.6, ml_b_probability=.4, ml_winner_id=1, actual_winner_id=actual))

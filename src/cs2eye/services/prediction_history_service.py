@@ -1,4 +1,6 @@
 from __future__ import annotations
+from cs2eye.services.prediction_result_eligibility import eligibility
+from cs2eye.services.match_result_sync_service import result_metadata
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -221,7 +223,8 @@ class PredictionHistoryService:
         rows = list((await self.session.execute(query)).all())
         all_items = []
         for snapshot, match in rows:
-            if match.winner_team_id is not None and snapshot.actual_winner_id != match.winner_team_id:
+            if ({snapshot.team_a_id, snapshot.team_b_id} == {match.team_a_id, match.team_b_id}
+                    and match.winner_team_id is not None and snapshot.actual_winner_id != match.winner_team_id):
                 snapshot.actual_winner_id = match.winner_team_id
             item = await self._item(snapshot, match)
             all_items.append(item)
@@ -267,6 +270,7 @@ class PredictionHistoryService:
             select(Team).where(Team.id.in_((row.team_a_id, row.team_b_id)))
         )).all()}
         tournament = await self.session.get(Tournament, row.tournament_id) if row.tournament_id else None
+        eligible, exclusion_reason = eligibility(row, match)
         retrospective = row.source == "retrospective"
         effective_ml_winner = None if retrospective else row.ml_winner_id
         effective_ml_a = None if retrospective else row.ml_a_probability
@@ -278,7 +282,7 @@ class PredictionHistoryService:
         def prediction(winner_id, a, b, *, probability=False, evaluation_status=None):
             return {"team_a_value": None if a is None else float(a), "team_b_value": None if b is None else float(b),
                     "predicted_winner_id": winner_id, "predicted_winner": teams.get(winner_id),
-                    "correct": None if row.actual_winner_id is None or winner_id is None else winner_id == row.actual_winner_id,
+                    "correct": None if not eligible or row.actual_winner_id is None or winner_id is None else winner_id == row.actual_winner_id,
                     "probability": probability,
                     "evaluation_status": evaluation_status or ("available" if winner_id is not None else "unavailable")}
         conflict = self._conflict_values(row, predictions, effective_ml_a, effective_ml_b)
@@ -287,7 +291,9 @@ class PredictionHistoryService:
             "id": row.id, "match_id": row.match_id, "tournament_id": row.tournament_id,
             "tournament": tournament.name if tournament else None, "match_date": match.match_date.isoformat(),
             "as_of": row.as_of.isoformat(), "created_at": row.created_at.isoformat(), "source": row.source,
-            "evaluation": {"eligible": not retrospective, "reason": "retrospective" if retrospective else None},
+            "evaluation": {"eligible": eligible, "reason": exclusion_reason},
+            "score": {"team_a": match.team_a_maps_won, "team_b": match.team_b_maps_won},
+            "result_sync": result_metadata(match),
             "versions": {"team_strength": row.team_strength_model_version,
                          "matchup": row.matchup_model_version, "ml": row.ml_model_version,
                          "ml_feature_schema": row.ml_feature_schema_version},
@@ -301,7 +307,7 @@ class PredictionHistoryService:
                              evaluation_status="not_evaluable_retrospective" if retrospective else None),
             "consensus": {"winner_id": consensus_winner, "winner": teams.get(consensus_winner),
                           "votes": consensus_votes, "total": 3 if consensus_winner else 0,
-                          "correct": None if row.actual_winner_id is None or consensus_winner is None else consensus_winner == row.actual_winner_id},
+                          "correct": None if not eligible or row.actual_winner_id is None or consensus_winner is None else consensus_winner == row.actual_winner_id},
             "comparison": comparison,
             "conflict": {**conflict,
                          "majority_winner": teams.get(conflict["majority_winner_id"]),

@@ -1,3 +1,4 @@
+import {PandaScoreMatchPage} from "./pages/PandaScoreMatchPage";
 import {PredictionsPage} from "./pages/PredictionsPage";
 import { MapsV3Panel, MapV3Page } from "./components/MapsV3";
 
@@ -604,6 +605,8 @@ export default function App() {
   if (/^\/demos\/?$/.test(window.location.pathname)) return <DemosPage />;
   if (/^\/matches\/?$/.test(window.location.pathname)) return <MatchesPage />;
   const seriesMatch = window.location.pathname.match(/^\/matches\/(\d+)\/?$/);
+  const providerMatch = window.location.pathname.match(/^\/matches\/(\d+)\/pandascore\/?$/);
+  if (providerMatch) return <PandaScoreMatchPage matchId={Number(providerMatch[1])}/>;
   if (seriesMatch) return <MatchDetailPage matchId={Number(seriesMatch[1])} />;
   if (/^\/tournaments\/new\/?$/.test(window.location.pathname)) return <AddTournamentPage />;
   const tournamentMatchNew = window.location.pathname.match(/^\/tournaments\/(\d+)\/matches\/new\/?$/);
