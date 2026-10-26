@@ -27,6 +27,11 @@ async def verify(factory=AsyncSessionLocal, base_url='http://127.0.0.1:8000', tr
             response = await client.get('/api/v1' + path)
             response.raise_for_status()
             return response.json()
+        teams = await get('/teams')
+        if teams:
+            team = await get(f"/teams/{teams[0]['id']}")
+            if team['id'] != teams[0]['id']:
+                raise ValueError('Released API does not expose the team detail page.')
         tournaments = await get('/tournaments')
         visible = {row['id'] for row in tournaments['items']}
         if not tournament_ids.issubset(visible):

@@ -114,3 +114,22 @@ async def test_strong_win_has_more_quality_and_weak_loss_more_penalty(form_db) -
     # The loss to highly ranked Team 2 is not punished like a loss to a weak team.
     loss=next(row for row in rows if row["match_id"]==2)
     assert loss["result_quality_score"]>-1
+
+
+async def test_tournament_context_with_json_and_repeated_matches(form_db):
+    await seed(form_db)
+    async with form_db() as session:
+        from sqlalchemy import event
+        tournament = await session.get(Tournament, 1)
+        tournament.pandascore_data = {'id':22222,'name':'Group Stage'}
+        await session.commit()
+        queries=[]
+        def capture(conn,cursor,statement,parameters,context,executemany):
+            queries.append(statement)
+        engine=session.bind.sync_engine
+        event.listen(engine,'before_cursor_execute',capture)
+        try:
+            assert await FormContextService(session)._context_tournament(1,AS_OF)==1
+        finally:
+            event.remove(engine,'before_cursor_execute',capture)
+        assert not any('SELECT DISTINCT tournaments.' in query for query in queries)

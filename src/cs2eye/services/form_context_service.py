@@ -315,12 +315,14 @@ class FormContextService:
         return row.rank if row else None
 
     async def _context_tournament(self, team_id: int, as_of: date) -> int | None:
-        rows = list((await self.session.scalars(select(Tournament).join(
-            Match, Match.tournament_id == Tournament.id
-        ).where(or_(Match.team_a_id == team_id, Match.team_b_id == team_id),
+        # Deduplicate integer IDs, not full rows: PostgreSQL JSON has no equality operator.
+        tournament_ids = select(Match.tournament_id).where(
+            or_(Match.team_a_id == team_id, Match.team_b_id == team_id))
+        rows = list((await self.session.scalars(select(Tournament).where(
+            Tournament.id.in_(tournament_ids),
             Tournament.end_date >= as_of - timedelta(days=7),
-            or_(Tournament.start_date.is_(None), Tournament.start_date <= as_of + timedelta(days=30)))
-            .distinct())).all())
+            or_(Tournament.start_date.is_(None), Tournament.start_date <= as_of + timedelta(days=30))
+        ))).all())
         if not rows:
             return None
         def distance(item: Tournament) -> tuple[int, int]:
