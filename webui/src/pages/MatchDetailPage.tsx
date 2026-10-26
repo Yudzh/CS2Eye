@@ -80,7 +80,9 @@ export function MatchDetailPage({matchId}: {matchId: number}) {
       {rosterLoading && <p role="status">Получаю и сохраняю турнирные составы…</p>}
       {rosters?.teams.map(team => <div key={team.team_id}>
         <strong>{team.team_id === match.team_a.id ? match.team_a.name : match.team_b.name}</strong>
-        {team.status === "saved" ? <><p>{team.players.map(p => p.nickname).join(" / ")}</p><small>Состав сохранён для турнира{team.checked_at ? ` · получен ${new Date(team.checked_at).toLocaleString("ru-RU")}` : ""}</small></> : <p role="alert">{team.error}</p>}
+        {team.status === "saved" ? <><p>{team.players.map(p => p.nickname).join(" / ")}</p>{team.roster_classification === "permanent" && <p>Совпадает с основным составом · временных замен нет</p>}
+        {team.roster_classification === "temporary" && <><p>Временные замены на турнир</p>{team.replacements?.map(r => <p className="warning" key={r.id}>⚠ {r.player_out.nickname} → {r.player_in.nickname}</p>)}</>}
+        <small>Состав сохранён для турнира{team.checked_at ? ` · получен ${new Date(team.checked_at).toLocaleString("ru-RU")}` : ""}</small></> : <p role="alert">{team.error}</p>}
       </div>)}
       {rosterError && <p role="alert">{rosterError}</p>}
       {(rosterError || rosters?.teams.some(team => team.status === "error")) && <button className="button" disabled={loading} onClick={() => setRefresh(value => value + 1)}>Повторить получение составов</button>}

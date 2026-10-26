@@ -44,12 +44,16 @@ async def main_roster(team_id: int, session: AsyncSession = Depends(get_db_sessi
 
 @router.post('/teams/{team_id}/pandascore/roster/refresh')
 async def refresh_main_roster(team_id: int, session: AsyncSession = Depends(get_db_session)):
-    return await mutate(session, lambda: PandaScoreRosterService(session).refresh_main(team_id))
+    result = await mutate(session, lambda: PandaScoreRosterService(session).refresh_main(team_id))
+    await mutate(session, lambda: PandaScoreRosterService(session).reconcile_team(team_id))
+    return result
 
 
 @router.post('/teams/{team_id}/pandascore/roster/select')
 async def select_main_roster(team_id: int, payload: RosterSelection, session: AsyncSession = Depends(get_db_session)):
-    return await mutate(session, lambda: PandaScoreRosterService(session).apply_main(team_id, payload.player_ids))
+    result = await mutate(session, lambda: PandaScoreRosterService(session).apply_main(team_id, payload.player_ids))
+    await mutate(session, lambda: PandaScoreRosterService(session).reconcile_team(team_id))
+    return result
 
 
 @router.get('/tournaments/{tournament_id}/pandascore')
@@ -96,7 +100,9 @@ async def ensure_match_rosters(match_id: int, session: AsyncSession = Depends(ge
             roster = await EffectiveRosterService(session).get_effective_roster(team_id, tournament_id, match_id)
             results.append({'team_id':team_id, 'status':'saved', 'created':result['created'],
                             'players':roster['roster_check']['roster'], 'source':result['source'],
-                            'checked_at':roster['roster_check']['checked_at']})
+                            'checked_at':roster['roster_check']['checked_at'],
+                            'replacements':roster['replacements'], 'has_temporary_replacement':roster['has_temporary_replacement'],
+                            'stand_in_penalty':roster['stand_in_penalty'], 'roster_classification':roster['roster_classification']})
         except (ValueError, PandaScoreError, IntegrityError) as exc:
             await session.rollback()
             message = str(exc) if not isinstance(exc, IntegrityError) else 'Конфликт привязки игрока; повторите получение состава.'

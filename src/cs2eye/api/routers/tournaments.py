@@ -198,6 +198,9 @@ async def patch_roster_override(tournament_id: int, override_id: int, payload: T
     for key, value in changes.items(): setattr(row, key, value)
     if row.player_in_id == row.player_out_id:
         await session.rollback(); raise HTTPException(422, "player_in and player_out must differ")
+    await EffectiveRosterService(session).sync_analyst_factor(row)
+    from cs2eye.services.tournament_prediction_service import invalidate_tournament_predictions
+    await invalidate_tournament_predictions(session, tournament_id)
     await session.commit(); await session.refresh(row); return row
 
 
@@ -207,9 +210,13 @@ async def disable_roster_override(tournament_id: int, override_id: int,
     row = await session.get(TournamentRosterOverride, override_id)
     if row is None or row.tournament_id != tournament_id: raise HTTPException(404, "Override not found")
     row.is_active = False
+    if row.source_type == "AUTO":
+        row.status = "REJECTED"
     if row.analyst_factor_id:
         factor = await session.get(AnalystFactor, row.analyst_factor_id)
         if factor is not None: factor.is_active = False
+    from cs2eye.services.tournament_prediction_service import invalidate_tournament_predictions
+    await invalidate_tournament_predictions(session, tournament_id)
     await session.commit()
 
 

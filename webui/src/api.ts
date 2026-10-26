@@ -451,5 +451,5 @@ export function bindPandaScoreTournament(id:number, external_id:number):Promise<
 
 export function previewPandaScoreTournament(externalId:number):Promise<Record<string,unknown>>{return request(`/api/v1/pandascore/tournaments/${externalId}`)}
 
-export interface MatchTournamentRosters {match_id:number;tournament_id:number;teams:Array<{team_id:number;status:"saved"|"error";created?:number;players:Array<{id:number;nickname:string}>;checked_at?:string;source?:string;error?:string}>}
+export interface MatchTournamentRosters {match_id:number;tournament_id:number;teams:Array<{team_id:number;status:"saved"|"error";created?:number;players:Array<{id:number;nickname:string}>;checked_at?:string;source?:string;error?:string;roster_classification?:"permanent"|"temporary"|"unavailable";stand_in_penalty?:number;replacements?:Array<{id:number;player_out:{id:number;nickname:string};player_in:{id:number;nickname:string};status:string}>}>}
 export function ensureMatchTournamentRosters(id:number):Promise<MatchTournamentRosters>{return request(`/api/v1/matches/${id}/pandascore/rosters`,{method:"POST"})}

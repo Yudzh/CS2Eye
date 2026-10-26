@@ -143,6 +143,8 @@ function TournamentRosters({ view }: { view: TournamentView }) {
                   <b>Effective:</b>{" "}
                   {r.effective_roster.map((x) => x.nickname).join(" / ") || "—"}
                 </p>
+                {r.roster_classification === "permanent" && <p>Совпадает с основой · временных замен нет</p>}
+                {r.roster_classification === "temporary" && <p>Турнирный состав отличается от основы · временная замена</p>}
                 {r.roster_check && <div>
                   <p>{r.roster_check.source_label}</p>
                   <p>Проверка: {r.roster_check.status} · {r.roster_check.checked_at ? new Date(r.roster_check.checked_at).toLocaleString() : "—"}</p>

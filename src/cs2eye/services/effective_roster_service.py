@@ -108,7 +108,7 @@ class EffectiveRosterService:
             and (not capture.checked_at or capture.checked_at.date() <= point)
             and (known_before is None or (capture.checked_at is not None and capture.checked_at.date() < known_before)))
         manual = any(x.status == "MANUAL" for x in overrides)
-        if snapshot_active:
+        if snapshot_active and not ('api.pandascore.co/' in capture.source and point >= date.today() and known_before is None):
             permanent_ids = list(capture.baseline_ids)
         # Resolve each outgoing slot independently; this supports multiple replacements.
         selected: dict[int, TournamentRosterOverride] = {}
@@ -143,19 +143,24 @@ class EffectiveRosterService:
         if "DETECTED" in statuses:
             warnings.append("Обнаружено изменение состава, временный статус не подтверждён.")
         source = "MANUAL" if "MANUAL" in statuses else "AUTO" if statuses else ("PANDASCORE_TOURNAMENT_ROSTER" if "api.pandascore.co/" in capture.source else "BO3_TEAM_ROSTER") if snapshot_active else "PERMANENT"
+        classification_ids = list(capture.roster_ids) if snapshot_active and "api.pandascore.co/" in capture.source else effective_ids
+        comparison_baseline = permanent_ids if snapshot_active and 'api.pandascore.co/' in capture.source else (capture.baseline_ids if capture else [])
+        comparison_added = sorted(set(capture.roster_ids or []) - set(comparison_baseline)) if capture else []
+        comparison_missing = sorted(set(comparison_baseline) - set(capture.roster_ids or [])) if capture else []
         return {"team_id": team_id, "tournament_id": tournament_id,
                 "permanent_roster": [serialize(x) for x in permanent_ids],
                 "effective_roster": [serialize(x) for x in effective_ids],
                 "players": [serialize(x) for x in effective_ids], "roster_source": source,
+                "roster_classification": ("temporary" if set(permanent_ids) != set(classification_ids) else "permanent") if len(set(permanent_ids)) == 5 and len(set(classification_ids)) == 5 else "unavailable",
                 "override_status": max(statuses, key=lambda x: PRIORITY[x]) if statuses else None,
                 "replacements": replacements, "has_temporary_replacement": bool(temporary),
                 "stand_in_penalty": stand_in_penalty(len(temporary)),
                 "reliability": "confirmed" if statuses and all(x in {"MANUAL", "CONFIRMED"} for x in statuses) else "detected" if statuses or snapshot_active else "permanent",
                 "warnings": list(dict.fromkeys(warnings)),
-                "roster_check": {"status": capture.status, "baseline": [serialize(x) for x in capture.baseline_ids],
+                "roster_check": {"status": capture.status, "baseline": [serialize(x) for x in comparison_baseline],
                     "roster": [serialize(x) for x in (capture.roster_ids or [])],
-                    "added": [serialize(x) for x in (capture.added_ids or [])],
-                    "missing": [serialize(x) for x in (capture.missing_ids or [])],
+                    "added": [serialize(x) for x in comparison_added],
+                    "missing": [serialize(x) for x in comparison_missing],
                     "checked_at": capture.checked_at, "source": capture.source, "error": capture.error,
                     "source_label": ("Ожидаемый состав турнира PandaScore; не подтверждённая пятёрка конкретного матча" if "api.pandascore.co/" in capture.source else "Командный Roster BO3.gg; не подтверждённая заявка организатора")} if capture else None,
                 "analytical_factors": [{"type": "TEMPORARY_REPLACEMENT", "sign": "NEGATIVE", "scope": "TOURNAMENT",

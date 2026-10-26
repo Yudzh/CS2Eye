@@ -90,10 +90,10 @@ async def test_tournament_roster_separate_and_immutable(roster_db,monkeypatch):
         assert capture.added_ids==[6] and capture.missing_ids==[5]
         assert (await s.get(Team,1)).current_roster_id==1
         effective=await EffectiveRosterService(s).get_effective_roster(1,1)
-        assert effective['roster_source']=='PANDASCORE_TOURNAMENT_ROSTER'
+        assert effective['roster_source']=='AUTO'
         assert {p['id'] for p in effective['players']}=={1,2,3,4,6}
-        assert effective['stand_in_penalty']==0
-        assert await s.scalar(select(func.count()).select_from(TournamentRosterOverride))==0
+        assert effective['stand_in_penalty']==-3
+        assert await s.scalar(select(func.count()).select_from(TournamentRosterOverride))==1
         result=await service(s,status=500).refresh_tournament(1,1)
         assert result['created']==0 and capture.checked_at==stamp
         historical=await EffectiveRosterService(s).get_effective_roster(1,1,known_before=date.today())
@@ -268,3 +268,115 @@ async def test_match_endpoint_saves_both_teams_once_for_whole_event(roster_db,mo
         assert all(team['created']==0 for team in second['teams'])
         assert (await s.get(Team,1)).current_roster_id==1
         assert (await s.get(Match,10)).status=='scheduled'
+
+
+async def test_equal_rosters_have_no_temporary_factor(roster_db,monkeypatch):
+    from cs2eye.models.team import AnalystFactor
+    async with roster_db() as s:
+        await setup(s,monkeypatch)
+        await service(s).refresh_tournament(1,1);await s.commit()
+        value=await EffectiveRosterService(s).get_effective_roster(1,1)
+        assert value['roster_classification']=='permanent'
+        assert not value['has_temporary_replacement'] and value['stand_in_penalty']==0
+        assert await s.scalar(select(func.count()).select_from(AnalystFactor))==0
+
+
+async def test_auto_temporary_replacement_is_scoped_and_idempotent(roster_db,monkeypatch):
+    from cs2eye.models.team import AnalystFactor
+    from cs2eye.deployment.pandascore_replacements import POLICY,apply
+    async with roster_db() as s:
+        await setup(s,monkeypatch)
+        await service(s,tournament=rows()[:4]+[rows(6)[5]]).refresh_tournament(1,1);await s.commit()
+        first=await s.scalar(select(TournamentRosterOverride))
+        assert first.status=='CONFIRMED' and first.source_type=='AUTO'
+        assert first.notes==POLICY and first.valid_from==date.today()
+        assert first.player_out_id==5 and first.player_in_id==6
+        assert first.valid_until==(await s.get(Tournament,1)).end_date
+        stamp=first.detected_at
+        await s.run_sync(apply);await s.commit()
+        await s.run_sync(apply);await s.commit()
+        assert await s.scalar(select(func.count()).select_from(TournamentRosterOverride))==1
+        assert await s.scalar(select(func.count()).select_from(AnalystFactor))==1
+        assert first.detected_at==stamp
+        value=await EffectiveRosterService(s).get_effective_roster(1,1)
+        assert value['roster_classification']=='temporary' and value['stand_in_penalty']==-3
+        expired=await EffectiveRosterService(s).get_effective_roster(1,1,as_of=date.today()+timedelta(days=4))
+        assert not expired['has_temporary_replacement']
+
+
+async def test_matching_updated_main_closes_automatic_factor(roster_db,monkeypatch):
+    from cs2eye.models.team import AnalystFactor
+    async with roster_db() as s:
+        await setup(s,monkeypatch)
+        svc=service(s,main=rows(6),tournament=rows()[:4]+[rows(6)[5]])
+        await svc.refresh_tournament(1,1);await s.commit()
+        capture=await s.scalar(select(TournamentRosterCheck))
+        captured_at=capture.checked_at
+        await svc.refresh_main(1);await s.commit()
+        await svc.apply_main(1,[101,102,103,104,106]);await s.commit()
+        await svc.reconcile_team(1);await s.commit()
+        value=await EffectiveRosterService(s).get_effective_roster(1,1)
+        assert value['roster_classification']=='permanent'
+        assert not value['has_temporary_replacement'] and value['stand_in_penalty']==0
+        assert not (await s.scalar(select(AnalystFactor))).is_active
+        assert capture.checked_at==captured_at and capture.baseline_ids==[1,2,3,4,5]
+
+
+async def test_migration_applies_comparison_without_touching_forecasts(roster_db,monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from cs2eye.models.prediction import PredictionHistorySnapshot
+    from cs2eye.models.match import Match
+    async with roster_db() as s:
+        await setup(s,monkeypatch)
+        s.add(Team(id=2,bo3_id=222,bo3_slug='opponent',name='Opponent'))
+        s.add(Match(id=20,tournament_id=1,team_a_id=1,team_b_id=2,match_date=date.today(),format='bo3',status='completed',winner_team_id=1,team_a_maps_won=2,team_b_maps_won=1))
+        s.add(TournamentRosterCheck(tournament_id=1,team_id=1,baseline_ids=[1,2,3,4,5],roster_ids=[1,2,3,4,6],source='https://api.pandascore.co/tournaments/22222/rosters',checked_at=datetime.now(UTC)))
+        stamp=datetime.now(UTC)-timedelta(days=1)
+        s.add(PredictionHistorySnapshot(match_id=20,tournament_id=1,as_of=stamp,created_at=stamp,
+            team_a_id=1,team_b_id=2,team_strength_a=50,team_strength_b=50,matchup_a=50,matchup_b=50,
+            ml_model_version='authentic-v1',ml_a_probability=.6,ml_b_probability=.4,actual_winner_id=1))
+        await s.commit()
+        spec=importlib.util.spec_from_file_location('auto_replacements_migration',Path(__file__).parents[1]/'alembic/versions/0066_pandascore_replacements.py')
+        migration=importlib.util.module_from_spec(spec);spec.loader.exec_module(migration)
+        def upgrade(connection):
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.upgrade()
+                migration.upgrade()
+        connection=await s.connection()
+        await connection.run_sync(upgrade)
+        await s.commit()
+        assert await s.scalar(select(func.count()).select_from(TournamentRosterOverride))==1
+        snapshot=await s.scalar(select(PredictionHistorySnapshot))
+        assert snapshot.ml_model_version=='authentic-v1' and float(snapshot.ml_a_probability)==.6
+        assert snapshot.created_at.replace(tzinfo=UTC)==stamp
+        assert snapshot.actual_winner_id==1
+        match=await s.get(Match,20)
+        assert (match.status,match.winner_team_id,match.team_a_maps_won,match.team_b_maps_won)==('completed',1,2,1)
+
+
+async def test_two_set_differences_create_two_scoped_replacements(roster_db,monkeypatch):
+    async with roster_db() as s:
+        await setup(s,monkeypatch)
+        tour=rows()[:3]+[rows(6)[5],dict(id=107,name='Y',slug='ps-y',nationality='FR')]
+        await service(s,tournament=tour).refresh_tournament(1,1);await s.commit()
+        value=await EffectiveRosterService(s).get_effective_roster(1,1)
+        assert len(value['replacements'])==2 and value['stand_in_penalty']==-6
+        assert {p['id'] for p in value['effective_roster']}=={1,2,3,6,7}
+
+
+async def test_owner_rejection_is_not_recreated_by_automatic_check(roster_db,monkeypatch):
+    from cs2eye.api.routers.tournaments import disable_roster_override
+    from cs2eye.models.team import AnalystFactor
+    async with roster_db() as s:
+        await setup(s,monkeypatch)
+        svc=service(s,tournament=rows()[:4]+[rows(6)[5]])
+        await svc.refresh_tournament(1,1);await s.commit()
+        row=await s.scalar(select(TournamentRosterOverride))
+        await disable_roster_override(1,row.id,s)
+        await svc.refresh_tournament(1,1);await s.commit()
+        assert await s.scalar(select(func.count()).select_from(TournamentRosterOverride))==1
+        assert row.status=='REJECTED' and not row.is_active
+        assert not (await s.scalar(select(AnalystFactor))).is_active

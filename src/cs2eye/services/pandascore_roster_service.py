@@ -235,6 +235,7 @@ class PandaScoreRosterService:
             TournamentRosterCheck.tournament_id == tournament_id, TournamentRosterCheck.team_id == team_id))
         # Return the event snapshot even if provider configuration is temporarily unavailable.
         if capture and capture.roster_ids and 'api.pandascore.co/' in capture.source:
+            await self.reconcile_replacements(tournament_id, team_id)
             return {'status':capture.status, 'source':capture.source, 'created':0}
         if not team.pandascore_id:
             raise ValueError('Сначала привяжите команду к PandaScore в её карточке.')
@@ -252,6 +253,7 @@ class PandaScoreRosterService:
         capture = await self.session.scalar(select(TournamentRosterCheck).where(
             TournamentRosterCheck.tournament_id == tournament_id, TournamentRosterCheck.team_id == team_id).execution_options(populate_existing=True))
         if capture and capture.roster_ids and 'api.pandascore.co/' in capture.source:
+            await self.reconcile_replacements(tournament_id, team_id)
             return {'status':capture.status, 'source':capture.source, 'created':0}
         from cs2eye.services.effective_roster_service import EffectiveRosterService
         baseline = await EffectiveRosterService(self.session).get_effective_roster(team_id, None)
@@ -275,7 +277,21 @@ class PandaScoreRosterService:
         from cs2eye.services.tournament_prediction_service import invalidate_tournament_predictions
         await invalidate_tournament_predictions(self.session, tournament_id)
         await self.session.flush()
+        await self.reconcile_replacements(tournament_id, team_id)
         return {'status':capture.status, 'source':capture.source, 'created':1}
+
+    async def reconcile_replacements(self, tournament_id, team_id):
+        from cs2eye.deployment.pandascore_replacements import reconcile
+        return await self.session.run_sync(lambda session: reconcile(session, tournament_id, team_id))
+
+    async def reconcile_team(self, team_id):
+        ids = list((await self.session.scalars(select(TournamentRosterCheck.tournament_id)
+            .join(Tournament, Tournament.id == TournamentRosterCheck.tournament_id)
+            .where(TournamentRosterCheck.team_id == team_id,
+                TournamentRosterCheck.source.like('https://api.pandascore.co/%'),
+                Tournament.end_date >= datetime.now(UTC).date()))).all())
+        for tournament_id in ids:
+            await self.reconcile_replacements(tournament_id, team_id)
 
     async def refresh_due_main(self):
         now = datetime.now(UTC)
@@ -286,6 +302,8 @@ class PandaScoreRosterService:
                 continue
             try:
                 await self.refresh_main(team_id)
+                await self.session.commit()
+                await self.reconcile_team(team_id)
                 await self.session.commit()
             except (ValueError, PandaScoreError):
                 await self.session.rollback()

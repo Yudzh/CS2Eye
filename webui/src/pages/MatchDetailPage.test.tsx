@@ -112,3 +112,16 @@ it("obtains and shows both tournament rosters when the match opens",async()=>{
  expect(api.ensureMatchTournamentRosters).toHaveBeenCalledWith(7);
  expect(api.capturePredictionHistory).not.toHaveBeenCalled();
 });
+
+it("shows automatic temporary replacements next to the tournament roster",async()=>{
+ api.getMatch.mockResolvedValue(match);
+ api.getPredictionHistory.mockResolvedValue({items:[]});api.getPredictionResults.mockResolvedValue({items:[]});
+ api.ensureMatchTournamentRosters.mockResolvedValueOnce({match_id:7,tournament_id:3,teams:[
+  {team_id:1,status:"saved",players:[{id:11,nickname:"Stand-in"}],roster_classification:"temporary",replacements:[{id:4,player_out:{id:10,nickname:"Main Player"},player_in:{id:11,nickname:"Stand-in"},status:"CONFIRMED"}]},
+  {team_id:2,status:"saved",players:[{id:12,nickname:"Bravo Player"}],roster_classification:"permanent",replacements:[]}
+ ]});
+ render(<MatchDetailPage matchId={7}/>);
+ expect(await screen.findByText("Временные замены на турнир")).toBeTruthy();
+ expect(await screen.findByText(/Main Player → Stand-in/)).toBeTruthy();
+ expect(await screen.findByText(/Совпадает с основным составом/)).toBeTruthy();
+});
