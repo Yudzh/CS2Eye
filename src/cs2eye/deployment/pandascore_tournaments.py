@@ -121,7 +121,7 @@ def apply(session, bundle):
                 match.round_label = label.split(':')[0][:160]
                 match.group_name = stage['name'] if not playoff else None
                 match.is_playoff = playoff
-                match.stage = next((v for k,v in [('quarterfinal','quarterfinal'),('semifinal','semifinal'),('grand final','final')] if k in label.lower()), 'group' if not playoff else 'unknown')
+                match.stage = next((v for k,v in [('quarterfinal','quarterfinal'),('semifinal','semifinal'),('grand final','final')] if k in label.lower()), 'unknown') if playoff else 'group'
                 match.bracket_section = 'lower' if 'lower' in label.lower() else 'upper' if 'upper' in label.lower() else 'main' if playoff else 'group'
                 digits = re.findall(r'\d+', label.split(':')[0])
                 match.bracket_position = int(digits[-1]) if digits else 1
@@ -129,6 +129,8 @@ def apply(session, bundle):
                 match.round_number = int(round_match[1]) if round_match else {'quarterfinal':1,'semifinal':2,'final':3}.get(match.stage, 1)
                 match.environment = tournament.environment
                 match.resolution_status = 'resolved'
+            if not playoff:
+                match.stage = 'group'
             if row.get('status') == 'finished' and pair:
                 scores = {s['team_id']:s['score'] for s in row.get('results', [])}
                 inverse = {local:ext for ext,local in team_map.items()}

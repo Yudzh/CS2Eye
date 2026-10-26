@@ -64,3 +64,26 @@ it("opens tournament rosters and checks the selected team through the button",as
   await waitFor(()=>expect(api.checkTournamentRoster).toHaveBeenCalledWith(11,1));
   expect(await screen.findByText("Проверка: changed")).toBeTruthy();
 });
+
+it('renders both imported Beijing groups with identical round positions',async()=>{
+  const matches=['Group A','Group B'].map((group,index)=>({
+    id:index+1,stage:'group',group_name:group,bracket_section:'upper',round_number:1,
+    bracket_position:1,round_label:'Upper Bracket Quarterfinal 1',
+    team_a:{id:index*2+1,name:`${group} first`},team_b:{id:index*2+2,name:`${group} second`},
+    status:'scheduled',score:{team_a:0,team_b:0},winner_team_id:null,maps:[],format:'bo3',
+    environment:'lan',match_date:'2026-11-02',resolution_status:'resolved',is_playoff:false,
+    is_elimination:false,tournament:null,veto_data_status:'not_available',veto_expected:false,
+    veto:[],next_match_id:null,next_match_slot:null,
+  }));
+  api.getTournamentView.mockResolvedValue({
+    tournament:{id:11136,name:'IEM Beijing',year:2026,tier:'S',environment:'lan',start_date:'2026-11-02',end_date:'2026-11-08',structure_type:'groups_playoff'},
+    summary:{series_count:2,map_count:0,parsed_maps:0,review_series:0,missing_veto_series:2,participant_count:4,scheduled_series:2},
+    matches,stages:['group'],bracket_links:[],problems:[],participants:[],
+  });
+  api.getTournamentPredictions.mockResolvedValue(null);
+  render(<TournamentsPage tournamentId={11136}/>);
+  expect(await screen.findByRole('region',{name:'Группа Group A'})).toBeTruthy();
+  expect(screen.getByRole('region',{name:'Группа Group B'})).toBeTruthy();
+  expect(screen.getByText('Group A first')).toBeTruthy();
+  expect(screen.getByText('Group B first')).toBeTruthy();
+});

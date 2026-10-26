@@ -194,3 +194,34 @@ async def test_import_stores_complete_provider_evidence_for_match_page(db):
     assert evidence['league']['name']=='IEM'
     assert evidence['scheduled_at']=='2026-11-02T07:00:00Z'
     assert evidence['status']=='not_started'
+
+
+async def test_group_quarterfinals_remain_separate_from_playoffs(db):
+    from copy import deepcopy
+    data=bundle()
+    second=deepcopy(data['stages'][0]);second.update(id=22268,name='Group B')
+    second['matches'][0]['id']=200
+    data['stages'].append(second)
+    result=await db.run_sync(lambda s:apply(s,data));await db.commit()
+    rows=(await db.scalars(select(Match).where(Match.tournament_id==result['id']))).all()
+    assert {(m.group_name,m.stage) for m in rows}=={('Group A','group'),('Group B','group')}
+    assert all(not m.is_playoff for m in rows)
+    # Reimport repairs the previous importer version's classification too.
+    for match in rows:match.stage='quarterfinal'
+    await db.commit()
+    await db.run_sync(lambda s:apply(s,data))
+    assert all(m.stage=='group' for m in rows)
+
+
+async def test_group_stage_migration_preserves_results_and_other_matches(db):
+    from cs2eye.deployment.pandascore_group_stages import apply as repair
+    data=bundle();result=await db.run_sync(lambda s:apply(s,data))
+    match=await db.scalar(select(Match).where(Match.tournament_id==result['id']))
+    match.stage='quarterfinal'
+    before=(match.id,match.result_external_id,match.team_a_id,match.team_b_id,match.starts_at,match.team_a_maps_won)
+    unrelated=await db.get(Match,1);unrelated.stage='quarterfinal'
+    await db.commit()
+    assert await db.run_sync(repair)==1
+    assert await db.run_sync(repair)==0
+    assert match.stage=='group' and unrelated.stage=='quarterfinal'
+    assert before==(match.id,match.result_external_id,match.team_a_id,match.team_b_id,match.starts_at,match.team_a_maps_won)
