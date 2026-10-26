@@ -105,7 +105,8 @@ class EffectiveRosterService:
         snapshot_active = bool(capture and capture.roster_ids
             and (not tournament.start_date or point >= tournament.start_date)
             and (not tournament.end_date or point <= tournament.end_date)
-            and (not capture.checked_at or capture.checked_at.date() <= point))
+            and (not capture.checked_at or capture.checked_at.date() <= point)
+            and (known_before is None or (capture.checked_at is not None and capture.checked_at.date() < known_before)))
         manual = any(x.status == "MANUAL" for x in overrides)
         if snapshot_active:
             permanent_ids = list(capture.baseline_ids)
@@ -130,7 +131,7 @@ class EffectiveRosterService:
             else:
                 warnings.append(f"Override {row.id} is inconsistent with permanent/effective roster and was ignored.")
         if snapshot_active and manual and set(capture.roster_ids) != set(effective_ids):
-            warnings.append("BO3 team Roster conflicts with manual override; manual roster preserved.")
+            warnings.append("Состав источника расходится с ручной заменой; ручной состав сохранён.")
         players = list((await self.session.scalars(select(Player).where(Player.id.in_(set(permanent_ids + effective_ids + ((capture.roster_ids or []) + capture.baseline_ids if capture else [])))))).all())
         by_id = {x.id: x for x in players}
         serialize = lambda pid: {"id": pid, "nickname": by_id[pid].nickname} if pid in by_id else {"id": pid, "nickname": str(pid)}
@@ -141,7 +142,7 @@ class EffectiveRosterService:
         statuses = [x.status for x in valid_applied]
         if "DETECTED" in statuses:
             warnings.append("Обнаружено изменение состава, временный статус не подтверждён.")
-        source = "MANUAL" if "MANUAL" in statuses else "AUTO" if statuses else "BO3_TEAM_ROSTER" if snapshot_active else "PERMANENT"
+        source = "MANUAL" if "MANUAL" in statuses else "AUTO" if statuses else ("PANDASCORE_TOURNAMENT_ROSTER" if "api.pandascore.co/" in capture.source else "BO3_TEAM_ROSTER") if snapshot_active else "PERMANENT"
         return {"team_id": team_id, "tournament_id": tournament_id,
                 "permanent_roster": [serialize(x) for x in permanent_ids],
                 "effective_roster": [serialize(x) for x in effective_ids],
@@ -156,7 +157,7 @@ class EffectiveRosterService:
                     "added": [serialize(x) for x in (capture.added_ids or [])],
                     "missing": [serialize(x) for x in (capture.missing_ids or [])],
                     "checked_at": capture.checked_at, "source": capture.source, "error": capture.error,
-                    "source_label": "Командный Roster BO3.gg; не подтверждённая заявка организатора"} if capture else None,
+                    "source_label": ("Ожидаемый состав турнира PandaScore; не подтверждённая пятёрка конкретного матча" if "api.pandascore.co/" in capture.source else "Командный Roster BO3.gg; не подтверждённая заявка организатора")} if capture else None,
                 "analytical_factors": [{"type": "TEMPORARY_REPLACEMENT", "sign": "NEGATIVE", "scope": "TOURNAMENT",
                     "player_in": x["player_in"], "player_out": x["player_out"],
                     "text": f"Временная замена: {x['player_in']['nickname']} играет вместо {x['player_out']['nickname']}. Состав имеет ограниченную сыгранность."} for x in replacements if x["status"] in {"MANUAL", "CONFIRMED"}]}

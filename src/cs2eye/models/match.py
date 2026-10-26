@@ -24,6 +24,8 @@ class Tournament(Base):
     environment: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown", server_default="unknown")
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
+    pandascore_id: Mapped[int | None] = mapped_column(Integer, unique=True)
+    pandascore_data: Mapped[dict | None] = mapped_column(JSON)
     structure_type: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown", server_default="unknown")
 
 

@@ -440,3 +440,13 @@ export function searchPandaScoreTeams(query:string):Promise<PandaScoreTeamProfil
 export function updatePandaScoreTeam(teamId:number, externalId:number):Promise<Team> {
   return request(`/api/v1/teams/${teamId}/pandascore`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({external_id:externalId})});
 }
+
+export interface PandaScoreRosterPlayer {id:number;name:string;slug:string;nationality:string|null}
+export interface PandaScoreRosterSnapshot {players:PandaScoreRosterPlayer[];checked_at:string;source:string;status:string;selected_ids:number[]}
+export function getPandaScoreRoster(id:number):Promise<PandaScoreRosterSnapshot|null>{return request(`/api/v1/teams/${id}/pandascore/roster`)}
+export function refreshPandaScoreRoster(id:number):Promise<PandaScoreRosterSnapshot>{return request(`/api/v1/teams/${id}/pandascore/roster/refresh`,{method:"POST"})}
+export function selectPandaScoreRoster(id:number, player_ids:number[]):Promise<PandaScoreRosterSnapshot>{return request(`/api/v1/teams/${id}/pandascore/roster/select`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({player_ids})})}
+export function getPandaScoreTournament(id:number):Promise<{external_id:number|null;event:Record<string,unknown>|null}>{return request(`/api/v1/tournaments/${id}/pandascore`)}
+export function bindPandaScoreTournament(id:number, external_id:number):Promise<Record<string,unknown>>{return request(`/api/v1/tournaments/${id}/pandascore`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({external_id})})}
+
+export function previewPandaScoreTournament(externalId:number):Promise<Record<string,unknown>>{return request(`/api/v1/pandascore/tournaments/${externalId}`)}

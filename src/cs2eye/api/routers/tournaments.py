@@ -18,6 +18,7 @@ from cs2eye.models.match import Tournament, TournamentRosterOverride
 from cs2eye.models.team import AnalystFactor
 from cs2eye.services.effective_roster_service import EffectiveRosterService
 from cs2eye.services.tournament_lineup_monitor import TournamentLineupMonitor
+from cs2eye.integrations.pandascore.client import PandaScoreError
 from cs2eye.services.tournament_view_service import TournamentNotFoundError, TournamentViewService
 from cs2eye.services.team_import_service import TeamImportService
 from cs2eye.services.match_service import MatchService
@@ -225,5 +226,5 @@ async def check_roster(tournament_id: int, team_id: int,
     try:
         result = await TournamentLineupMonitor(session).check(tournament_id, team_id)
         await session.commit(); return result
-    except ValueError as error:
+    except (ValueError, PandaScoreError) as error:
         await session.rollback(); raise HTTPException(422, str(error)) from error

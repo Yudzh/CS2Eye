@@ -3,7 +3,7 @@ import {afterEach,describe,expect,it,vi} from "vitest";
 import {GroupBracket,PredictionCard,TournamentsPage} from "./TournamentsPage";
 import type {MatchSeries,TournamentPredictionMatch,TournamentPredictions,TournamentView} from "../types";
 
-const api=vi.hoisted(()=>({getTournamentView:vi.fn(),getTournamentPredictions:vi.fn(),generateTournamentPredictions:vi.fn(),getEffectiveTournamentRoster:vi.fn(),checkTournamentRoster:vi.fn(),createTournamentRosterOverride:vi.fn(),disableTournamentRosterOverride:vi.fn()}));
+const api=vi.hoisted(()=>({getTournamentView:vi.fn(),getTournamentPredictions:vi.fn(),generateTournamentPredictions:vi.fn(),getEffectiveTournamentRoster:vi.fn(),checkTournamentRoster:vi.fn(),getPandaScoreTournament:vi.fn().mockResolvedValue({external_id:22222,event:null}),bindPandaScoreTournament:vi.fn(),previewPandaScoreTournament:vi.fn(),createTournamentRosterOverride:vi.fn(),disableTournamentRosterOverride:vi.fn()}));
 vi.mock("../api",()=>({...api,captureTournamentPredictionHistory:vi.fn(),getTournaments:vi.fn(),patchMatchSeries:vi.fn(),patchTournament:vi.fn(),updateMatchVeto:vi.fn(),updateMatchVetoText:vi.fn()}));
 afterEach(()=>cleanup());
 
@@ -60,7 +60,7 @@ it("opens tournament rosters and checks the selected team through the button",as
   render(<TournamentsPage tournamentId={11}/>);
   fireEvent.click(await screen.findByRole("button",{name:"Составы"}));
   expect(await screen.findByRole("heading",{name:"Составы на турнир"})).toBeTruthy();
-  fireEvent.click(await screen.findByRole("button",{name:"Проверить состав"}));
+  fireEvent.click(await screen.findByRole("button",{name:"Получить состав PandaScore"}));
   await waitFor(()=>expect(api.checkTournamentRoster).toHaveBeenCalledWith(11,1));
   expect(await screen.findByText("Проверка: changed")).toBeTruthy();
 });

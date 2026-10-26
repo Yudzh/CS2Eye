@@ -254,6 +254,8 @@ async def refresh_player(
     player = await session.get(Player, player_id)
     if player is None:
         return None
+    if player.bo3_id is None or not player.bo3_slug:
+        raise ValueError("У игрока нет привязки BO3; профиль получен из PandaScore.")
     owned_source = Bo3Client() if source is None else None
     player_source = source or owned_source
     try:

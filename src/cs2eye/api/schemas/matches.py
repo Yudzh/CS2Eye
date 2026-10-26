@@ -13,6 +13,8 @@ MatchResolution = Literal["resolved", "needs_review", "unresolved"]
 
 
 class TournamentResponse(BaseModel):
+    pandascore_id: int | None = None
+    pandascore_data: dict | None = None
     id: int; name: str; year: int; tier: str | None
     environment: MatchEnvironment; start_date: date | None; end_date: date | None
     structure_type: Literal["single_elimination", "double_elimination", "swiss", "groups", "groups_playoff", "mixed", "unknown"] = "unknown"

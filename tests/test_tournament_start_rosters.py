@@ -143,7 +143,7 @@ async def test_actual_bo3_request_and_player_id_mapping(roster_db, monkeypatch):
     monkeypatch.setattr(Bo3Client,'fetch_team',fetch)
     async with roster_db() as s:
         await start_today(s)
-        await TournamentLineupMonitor(s).check(1,1)
+        await TournamentLineupMonitor(s, Bo3LineupSourceAdapter(s)).check(1,1)
         fetch.assert_awaited_once_with(1,'vitality')
         row=await s.scalar(select(TournamentRosterCheck))
         assert row.source.endswith('/api/v1/teams/vitality') and len(row.roster_ids)==5

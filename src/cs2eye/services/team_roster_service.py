@@ -63,7 +63,7 @@ async def get_or_create_roster(
         TeamRosterMember(
             roster_id=roster.id, player_id=player.id,
             player_name_snapshot=player.nickname,
-            player_external_id=player.steam_id or str(player.bo3_id),
+            player_external_id=player.steam_id or (f"pandascore:{player.pandascore_id}" if player.pandascore_id else str(player.bo3_id)),
         ) for player in resolved
     ])
     return roster, True

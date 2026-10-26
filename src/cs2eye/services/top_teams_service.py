@@ -169,6 +169,8 @@ class TopTeamsService:
                 Player.is_analytics_active.is_(True),
                 TeamParticipantMembership.is_active.is_(True),
                 TeamParticipantMembership.participant_type != "coach",
+                Player.bo3_id.is_not(None),
+                Player.bo3_slug.is_not(None),
             )
         )
         players = list({
@@ -340,8 +342,11 @@ class TopTeamsService:
             )
             players_by_bo3_id = {
                 player.bo3_id: player
-                for player in player_result.scalars()
+                for player in player_result.scalars() if player.bo3_id is not None
             }
+            protected = {t.id: t.bo3_id for t in (await self._session.scalars(select(Team).where(
+                Team.pandascore_roster_synced_at.is_not(None)))).all()}
+            protected_bo3_ids = set(protected.values())
             membership_result = await self._session.execute(
                 select(
                     TeamParticipantMembership,
@@ -375,7 +380,7 @@ class TopTeamsService:
                 for detail in team_details.values()
             }
             for key, membership in active_memberships.items():
-                if key not in incoming_memberships:
+                if key[0] not in protected_bo3_ids and key not in incoming_memberships:
                     membership.is_active = False
                     membership.left_at = self._left_at_from_bo3(
                         key[0],
@@ -389,6 +394,13 @@ class TopTeamsService:
             for detail in team_details.values():
                 for participant in detail.players:
                     player = players_by_bo3_id.get(participant.id)
+                    if player is None:
+                        from cs2eye.services.pandascore_roster_service import find_unlinked_pandascore_player
+                        player = await find_unlinked_pandascore_player(self._session, participant.nickname,
+                            participant.country.code if participant.country else None)
+                        if player is not None:
+                            player.bo3_id = participant.id
+                            players_by_bo3_id[participant.id] = player
                     if player is None:
                         player = Player(
                             bo3_id=participant.id,
@@ -456,7 +468,7 @@ class TopTeamsService:
 
                 await self._session.flush()
                 detail = team_details[item.team.id]
-                for participant in detail.players:
+                for participant in ([] if team.id in protected else detail.players):
                     player = players_by_bo3_id[participant.id]
 
                     membership = active_memberships.get(
@@ -495,7 +507,7 @@ class TopTeamsService:
                     for participant in detail.players
                     if not participant.is_coach and not participant.is_substitute
                 ]
-                if len({player.id for player in main_players}) == 5:
+                if team.id not in protected and len({player.id for player in main_players}) == 5:
                     joined_dates = [
                         membership.joined_at.date()
                         for participant in detail.players
@@ -549,6 +561,13 @@ class TopTeamsService:
                         for player in item.roster_players
                     ]
 
+            if protected:
+                for player, active in (await self._session.execute(select(Player, Team.is_analytics_active)
+                    .join(TeamParticipantMembership, TeamParticipantMembership.player_id == Player.id)
+                    .join(Team, Team.id == TeamParticipantMembership.team_id)
+                    .where(Team.id.in_(protected), TeamParticipantMembership.is_active.is_(True),
+                           TeamParticipantMembership.participant_type == 'player'))).all():
+                    player.is_analytics_active = active
             run.status = "succeeded"
             run.finished_at = synced_at
             run.ranking_date = ranking.meta.ranking_date

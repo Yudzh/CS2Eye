@@ -98,6 +98,8 @@ class Team(Base):
     pandascore_slug: Mapped[str | None] = mapped_column(String(160))
     pandascore_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pandascore_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    pandascore_roster_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    pandascore_roster_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     team_strength_v3: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
     team_strength_v3_reliability: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
@@ -110,12 +112,14 @@ class Player(Base):
     __tablename__ = "players"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    bo3_id: Mapped[int] = mapped_column(
-        Integer, unique=True, nullable=False,
+    bo3_id: Mapped[int | None] = mapped_column(
+        Integer, unique=True, nullable=True,
     )
-    bo3_slug: Mapped[str] = mapped_column(
-        String(160), nullable=False,
+    bo3_slug: Mapped[str | None] = mapped_column(
+        String(160), nullable=True,
     )
+    pandascore_id: Mapped[int | None] = mapped_column(Integer, unique=True)
+    pandascore_slug: Mapped[str | None] = mapped_column(String(160))
     nickname: Mapped[str] = mapped_column(
         String(160), nullable=False,
     )
@@ -279,7 +283,7 @@ class TeamRoster(Base):
         Index("uq_team_rosters_one_current", "team_id", unique=True,
               postgresql_where=text("is_current"), sqlite_where=text("is_current = 1")),
         CheckConstraint(
-            "source IN ('team_import', 'manual', 'demo', 'migration', 'tournament')",
+            "source IN ('team_import', 'manual', 'demo', 'migration', 'tournament', 'pandascore')",
             name="ck_team_rosters_source",
         ),
         CheckConstraint(

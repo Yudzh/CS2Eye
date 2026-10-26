@@ -8,8 +8,8 @@ from cs2eye.api.schemas.analyst_factors import AnalystFactorResponse
 
 class TeamParticipantResponse(BaseModel):
     id: int
-    bo3_id: int
-    bo3_slug: str
+    bo3_id: int | None
+    bo3_slug: str | None
     nickname: str
     image_url: str | None
     country_code: str | None

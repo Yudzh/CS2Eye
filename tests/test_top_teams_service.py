@@ -476,3 +476,28 @@ async def test_ranking_refresh_preserves_pandascore_profile(session):
     assert team.logo_url == 'https://cdn.example.org/team.png'
     assert team.country_code == 'RU'
     assert team.current_rank == 1
+
+
+async def test_bo3_ranking_does_not_replace_pandascore_main_roster(session):
+    from cs2eye.services.pandascore_roster_service import PandaScoreRosterService
+    source = FakeRankingSource(make_response(1))
+    service = TopTeamsService(session, source)
+    await service.refresh()
+    team = await session.scalar(select(Team).where(Team.bo3_id == 2))
+    team.pandascore_id = 999
+    provider_players = [dict(id=800+i,name=f'Player 2-{i}',slug=f'ps-{i}',nationality='EU') for i in range(1,5)]
+    provider_players.append(dict(id=899,name='PandaScore-only player',slug='new',nationality='EU'))
+    team.pandascore_roster_data = {'players':provider_players,'checked_at':datetime.now(UTC).isoformat(),'selected_ids':[],'source':'PandaScore','status':'pending'}
+    await session.commit()
+    await PandaScoreRosterService(session).apply_main(team.id,[p['id'] for p in provider_players])
+    await session.commit()
+    roster_id = team.current_roster_id
+    await service.refresh()
+    assert team.current_roster_id == roster_id
+    members = list((await session.execute(select(Player,TeamParticipantMembership)
+        .join(TeamParticipantMembership,TeamParticipantMembership.player_id==Player.id)
+        .where(TeamParticipantMembership.team_id==team.id,TeamParticipantMembership.is_active.is_(True),
+               TeamParticipantMembership.participant_type=='player'))).all())
+    assert {player.pandascore_id for player,_ in members} == {800+i for i in range(1,5)} | {899}
+    assert all(player.is_analytics_active for player,_ in members)
+    assert team.current_rank == 2

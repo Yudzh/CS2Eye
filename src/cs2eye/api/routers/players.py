@@ -91,7 +91,10 @@ async def read_strength_v3(player_id: int, as_of: date | None = None,
 
 @router.post("/{player_id}/refresh", response_model=PlayerResponse)
 async def update_player(player_id: int, session: AsyncSession = Depends(get_db_session)):
-    result = await refresh_player(session, player_id)
+    try:
+        result = await refresh_player(session, player_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="Игрок не найден.")
     return await _response(result, session)

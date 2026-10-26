@@ -17,8 +17,8 @@ class PlayerTeamResponse(BaseModel):
 
 class PlayerResponse(BaseModel):
     id: int
-    bo3_id: int
-    bo3_slug: str
+    bo3_id: int | None
+    bo3_slug: str | None
     nickname: str
     first_name: str | None
     last_name: str | None

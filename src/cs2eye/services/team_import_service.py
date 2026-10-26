@@ -27,9 +27,16 @@ class TeamImportService:
             team.country_name = country.get("name")
         team.region = raw.get("region") or team.region; team.roster_synced_at = datetime.now(UTC)
         await self.session.flush()
+        if team.pandascore_roster_synced_at is not None:
+            return team
         current_players = []
         for item in detail.players:
             player = (await self.session.execute(select(Player).where(Player.bo3_id == item.id))).scalar_one_or_none()
+            if player is None:
+                from cs2eye.services.pandascore_roster_service import find_unlinked_pandascore_player
+                player = await find_unlinked_pandascore_player(self.session, item.nickname,
+                    item.country.code if item.country else None)
+                if player is not None: player.bo3_id = item.id
             if player is None:
                 player = Player(bo3_id=item.id, bo3_slug=item.slug, nickname=item.nickname, is_analytics_active=False); self.session.add(player)
             player.bo3_slug=item.slug; player.nickname=item.nickname; player.image_url=item.image_url

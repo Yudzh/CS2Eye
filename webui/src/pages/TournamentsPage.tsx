@@ -1,3 +1,4 @@
+import {PandaScoreTournamentPanel} from "../components/PandaScoreTournamentPanel";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   captureTournamentPredictionHistory,
@@ -126,6 +127,7 @@ function TournamentRosters({ view }: { view: TournamentView }) {
   return (
     <section className="tournament-rosters">
       <h2>Составы на турнир</h2>
+      <PandaScoreTournamentPanel tournamentId={view.tournament.id}/>
       {view.participants.map((p) => {
         const r = items[p.team_id];
         return (
@@ -144,7 +146,7 @@ function TournamentRosters({ view }: { view: TournamentView }) {
                 {r.roster_check && <div>
                   <p>{r.roster_check.source_label}</p>
                   <p>Проверка: {r.roster_check.status} · {r.roster_check.checked_at ? new Date(r.roster_check.checked_at).toLocaleString() : "—"}</p>
-                  <p>BO3: {r.roster_check.roster.map(x => x.nickname).join(" / ") || "—"}</p>
+                  <p>Состав источника: {r.roster_check.roster.map(x => x.nickname).join(" / ") || "—"}</p>
                   <p>Добавлены: {r.roster_check.added.map(x => x.nickname).join(", ") || "—"}</p>
                   <p>Отсутствуют: {r.roster_check.missing.map(x => x.nickname).join(", ") || "—"}</p>
                   <p>Источник: {r.roster_check.source}</p>
@@ -183,9 +185,10 @@ function TournamentRosters({ view }: { view: TournamentView }) {
                         ),
                       )
                       .then(load)
+                      .catch(e => setMessage(errorText(e)))
                   }
                 >
-                  Проверить состав
+                  Получить состав PandaScore
                 </button>
               </>
             )}

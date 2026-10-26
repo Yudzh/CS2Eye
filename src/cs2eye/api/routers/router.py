@@ -50,3 +50,6 @@ api_router.include_router(prediction_history_router)
 
 from cs2eye.api.routers.match_results import router as match_results_router
 api_router.include_router(match_results_router)
+
+from cs2eye.api.routers.pandascore_rosters import router as pandascore_rosters_router
+api_router.include_router(pandascore_rosters_router)

@@ -71,9 +71,6 @@ class TournamentViewService:
         for item in matches:
             await service.create_scheduled(tournament_id=tournament.id, environment=environment, **item)
         await self.session.flush()
-        monitor = TournamentLineupMonitor(self.session)
-        for team_id in team_ids:
-            await monitor.check(tournament.id, team_id)
         return tournament
 
     async def update(self, tournament_id: int, **changes: object) -> Tournament:
@@ -85,8 +82,6 @@ class TournamentViewService:
         if tournament.start_date and tournament.end_date and tournament.start_date > tournament.end_date:
             raise ValueError("Дата начала турнира не может быть позже даты окончания.")
         await self.session.flush()
-        for link, _ in await self.participants(tournament_id):
-            await TournamentLineupMonitor(self.session).check(tournament_id, link.team_id)
         return tournament
 
     async def view(self, tournament_id: int) -> TournamentView:

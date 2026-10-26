@@ -17,7 +17,10 @@ async def roster_check_loop():
     while True:
         try:
             async with AsyncSessionLocal() as session:
-                await TournamentLineupMonitor(session).check_due()
+                from cs2eye.services.pandascore_roster_service import PandaScoreRosterService
+                if settings.pandascore_api_token.get_secret_value():
+                    await PandaScoreRosterService(session).refresh_due_main()
+                    await TournamentLineupMonitor(session).check_due()
         except Exception:
             logging.getLogger(__name__).exception("Tournament roster check failed")
         await asyncio.sleep(900)

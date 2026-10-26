@@ -481,8 +481,8 @@ export interface RosterSwingProfile {status:string;source:string;avg_swing?:numb
 
 export interface TeamParticipant {
   id: number;
-  bo3_id: number;
-  bo3_slug: string;
+  bo3_id: number | null;
+  bo3_slug: string | null;
   nickname: string;
   image_url: string | null;
   country_code: string | null;
@@ -536,8 +536,8 @@ export interface StrengthFactor {
 
 export interface Player {
   id: number;
-  bo3_id: number;
-  bo3_slug: string;
+  bo3_id: number | null;
+  bo3_slug: string | null;
   nickname: string;
   first_name: string | null;
   last_name: string | null;

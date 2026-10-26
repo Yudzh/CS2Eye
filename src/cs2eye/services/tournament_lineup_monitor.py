@@ -53,9 +53,12 @@ class Bo3LineupSourceAdapter:
 class TournamentLineupMonitor:
     def __init__(self, session: AsyncSession, adapter=None):
         self.session = session
-        self.adapter = adapter or Bo3LineupSourceAdapter(session)
+        self.adapter = adapter
 
     async def check(self, tournament_id: int, team_id: int, match_id: int | None = None) -> dict:
+        if self.adapter is None:
+            from cs2eye.services.pandascore_roster_service import PandaScoreRosterService
+            return await PandaScoreRosterService(self.session).refresh_tournament(tournament_id, team_id)
         # Event lock serializes automatic/manual requests, including first-row creation.
         tournament = await self.session.scalar(select(Tournament).where(
             Tournament.id == tournament_id).with_for_update())
@@ -125,5 +128,11 @@ class TournamentLineupMonitor:
                    (Tournament.end_date >= today) | (Tournament.end_date.is_(None) & (Tournament.start_date == today)))
             .order_by(TournamentTeam.tournament_id, TournamentTeam.team_id))).all()
         for tournament_id, team_id in participants:
-            await self.check(tournament_id, team_id)
-            await self.session.commit()
+            try:
+                await self.check(tournament_id, team_id)
+                await self.session.commit()
+            except Exception as exc:
+                # One unavailable provider or unbound participant must not starve the rest.
+                await self.session.rollback()
+                import logging
+                logging.getLogger(__name__).warning("Roster check unavailable for tournament %s team %s: %s", tournament_id, team_id, exc)

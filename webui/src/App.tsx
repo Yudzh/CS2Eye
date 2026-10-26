@@ -1,3 +1,4 @@
+import {PandaScoreRosterPanel} from "./components/PandaScoreRosterPanel";
 import {PandaScoreTeamPanel} from "./components/PandaScoreTeamPanel";
 import {PandaScoreMatchPage} from "./pages/PandaScoreMatchPage";
 import {PredictionsPage} from "./pages/PredictionsPage";
@@ -121,7 +122,7 @@ function RosterGroup({
         {members.map((participant) => (
           <a
             className="roster-member"
-            key={`${participant.participant_type}-${participant.bo3_id}`}
+            key={`${participant.participant_type}-${participant.id}`}
             title={participant.country_name || undefined}
             href={`/players/${participant.id}`}
           >
@@ -270,7 +271,7 @@ function PlayerPage({ id }: { id: number }) {
       <section className="player-hero">
         {player.image_url ? <img className="player-photo" src={player.image_url} alt={player.nickname} /> : <div className="player-photo player-photo--empty">{player.nickname.slice(0, 2)}</div>}
         <div className="player-heading">
-          <p className="eyebrow">Игрок · BO3.gg</p>
+          <p className="eyebrow">Игрок · {player.bo3_id == null ? "PandaScore" : "BO3.gg"}</p>
           <h1>{player.nickname}</h1>
           <p className="lead">{fullName || "Настоящее имя не указано"} · {player.country_name || player.country_code || "страна не указана"}</p>
           <div className="player-team-status">
@@ -278,7 +279,7 @@ function PlayerPage({ id }: { id: number }) {
             <span className={currentTeam ? "status-active" : "status-former"}>{currentTeam ? "активный игрок команды" : "бывший игрок команды"}</span>
           </div>
         </div>
-        <button className="button button--primary" disabled={refreshing} onClick={() => void update()}>{refreshing ? "Обновляю…" : "Обновить из BO3.gg"}</button>
+        <button className="button button--primary" disabled={refreshing || player.bo3_id == null} onClick={() => void update()}>{refreshing ? "Обновляю…" : "Обновить из BO3.gg"}</button>
       </section>
       {error && <div className="notice notice--error">{error}</div>}
       <section className="player-grid">
@@ -334,6 +335,7 @@ const mapWarningLabels: Record<string, string> = {
 };
 
 function TeamPage({ id }: { id: number }) {
+  const [rosterRevision, setRosterRevision] = useState(0);
   const [team, setTeam] = useState<TeamDetail | null>(null);
   const [teamStrength, setTeamStrength] = useState<TeamDetail["team_strength_v3"] | null>(null);
   const [teamStrengthError, setTeamStrengthError] = useState<string | null>(null);
@@ -363,7 +365,7 @@ function TeamPage({ id }: { id: number }) {
     });
     void basicTeam.then(() => active ? getTeamFormV3(id) : null).then((value)=>{if(active && value)setTeamForm(value)}).catch(() => undefined);
     return ()=>{active=false};
-  }, [id]);
+  }, [id, rosterRevision]);
 
   useEffect(() => {
     setMapDetails({});
@@ -372,11 +374,11 @@ function TeamPage({ id }: { id: number }) {
       setMapStats([]);
       setMapsError(value instanceof Error ? value.message : "Не удалось загрузить статистику карт.");
     }).finally(() => setMapsLoading(false));
-  }, [id, aggregationLevel]);
+  }, [id, aggregationLevel, rosterRevision]);
 
-  useEffect(() => { void getTeamMatchStats(id, aggregationLevel).then(setMatchStats).catch(() => setMatchStats(null)); }, [id, aggregationLevel]);
-  useEffect(() => { void getTeamVeto(id, aggregationLevel).then(setVeto).catch(() => setVeto(null)); }, [id, aggregationLevel]);
-  useEffect(() => { void getOpponentContext(id).then(setOpponentContext).catch(() => setOpponentContext(null)); }, [id]);
+  useEffect(() => { void getTeamMatchStats(id, aggregationLevel).then(setMatchStats).catch(() => setMatchStats(null)); }, [id, aggregationLevel, rosterRevision]);
+  useEffect(() => { void getTeamVeto(id, aggregationLevel).then(setVeto).catch(() => setVeto(null)); }, [id, aggregationLevel, rosterRevision]);
+  useEffect(() => { void getOpponentContext(id).then(setOpponentContext).catch(() => setOpponentContext(null)); }, [id, rosterRevision]);
 
   if (error) return <main className="page"><a className="back-link" href="/">← К командам</a><div className="empty-state empty-state--error">{error}</div></main>;
   if (!team) return <main className="page"><div className="empty-state">Загружаю команду…</div></main>;
@@ -440,6 +442,8 @@ function TeamPage({ id }: { id: number }) {
       </section>
 
       <PandaScoreTeamPanel key={team.id} team={team} onUpdated={profile => setTeam(current => current ? {...current, ...profile, roster: current.roster, analyst_factors: current.analyst_factors} : current)} />
+
+      {team.pandascore_id && <PandaScoreRosterPanel teamId={team.id} onSaved={async () => {setRosterRevision(value => value + 1);}} />}
 
       <section className="team-metrics">
         <article className="metric-card"><span>Активных игроков</span><strong>{strength.active_players_count}<small>/5</small></strong></article>

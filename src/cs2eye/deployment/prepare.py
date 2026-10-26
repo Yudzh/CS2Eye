@@ -56,6 +56,11 @@ async def main():
         from cs2eye.deployment.player_steam_aliases import prepare as prepare_player_aliases
         aliases = await prepare_player_aliases(AsyncSessionLocal)
         print("Player account readiness: " + json.dumps(aliases), flush=True)
+        from cs2eye.deployment.rosters import verify_rosters
+        roster_report = await verify_rosters(AsyncSessionLocal)
+        print("Roster readiness: " + json.dumps(roster_report), flush=True)
+        if roster_report['errors']:
+            raise SystemExit("Deployment incomplete: PandaScore roster identities are inconsistent")
         report = await prepare_forecasts()
         print("Forecast readiness: " + json.dumps(report, ensure_ascii=False), flush=True)
         if report["errors"]:
