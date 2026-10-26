@@ -437,14 +437,15 @@ class TopTeamsService:
 
                 country = item.team.country
                 team.bo3_slug = item.team.slug
-                team.name = item.team.name
-                team.logo_url = item.team.image_url
-                team.country_code = (
-                    country.code if country else None
-                )
-                team.country_name = (
-                    country.name if country else None
-                )
+                if team.pandascore_synced_at is None:
+                    team.name = item.team.name
+                    team.logo_url = item.team.image_url
+                    team.country_code = (
+                        country.code if country else None
+                    )
+                    team.country_name = (
+                        country.name if country else None
+                    )
                 team.region = item.region
                 team.current_rank = item.rank
                 team.current_points = item.score

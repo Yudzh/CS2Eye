@@ -94,6 +94,11 @@ class Team(Base):
         ForeignKey("team_rosters.id", ondelete="SET NULL", use_alter=True),
         index=True,
     )
+    pandascore_id: Mapped[int | None] = mapped_column(Integer, unique=True)
+    pandascore_slug: Mapped[str | None] = mapped_column(String(160))
+    pandascore_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pandascore_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
     team_strength_v3: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
     team_strength_v3_reliability: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
     team_strength_v3_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSON)

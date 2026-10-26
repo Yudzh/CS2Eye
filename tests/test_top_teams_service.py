@@ -457,3 +457,22 @@ async def test_player_role_can_be_updated_manually(
     assert membership.role == "igl"
     assert response.roster[0].role == "igl"
     assert "igl" not in response.strength.missing_required_roles
+
+
+async def test_ranking_refresh_preserves_pandascore_profile(session):
+    source = FakeRankingSource(make_response(1))
+    service = TopTeamsService(session, source)
+    await service.refresh()
+    team = await session.scalar(select(Team).where(Team.bo3_id == 1))
+    team.name = 'Provider canonical name'
+    team.logo_url = 'https://cdn.example.org/team.png'
+    team.country_code = 'RU'
+    team.country_name = None
+    team.pandascore_id = 131505
+    team.pandascore_synced_at = datetime.now(UTC)
+    await session.commit()
+    await service.refresh()
+    assert team.name == 'Provider canonical name'
+    assert team.logo_url == 'https://cdn.example.org/team.png'
+    assert team.country_code == 'RU'
+    assert team.current_rank == 1

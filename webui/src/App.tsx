@@ -1,3 +1,4 @@
+import {PandaScoreTeamPanel} from "./components/PandaScoreTeamPanel";
 import {PandaScoreMatchPage} from "./pages/PandaScoreMatchPage";
 import {PredictionsPage} from "./pages/PredictionsPage";
 import { MapsV3Panel, MapV3Page } from "./components/MapsV3";
@@ -437,6 +438,8 @@ function TeamPage({ id }: { id: number }) {
         </div>
         <div className="team-strength-score"><small>Сила команды {strength.model_version.toUpperCase()}</small><strong>{strength.team_strength_score.toFixed(2)}</strong><span>/100 · надёжность {(strength.reliability * 100).toFixed(0)}%</span></div>
       </section>
+
+      <PandaScoreTeamPanel key={team.id} team={team} onUpdated={profile => setTeam(current => current ? {...current, ...profile, roster: current.roster, analyst_factors: current.analyst_factors} : current)} />
 
       <section className="team-metrics">
         <article className="metric-card"><span>Активных игроков</span><strong>{strength.active_players_count}<small>/5</small></strong></article>

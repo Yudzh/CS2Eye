@@ -2,6 +2,9 @@ export interface Team {
   id: number;
   bo3_id: number;
   bo3_slug: string;
+  pandascore_id?: number | null;
+  pandascore_slug?: string | null;
+  pandascore_synced_at?: string | null;
   name: string;
   logo_url: string | null;
   country_code: string | null;

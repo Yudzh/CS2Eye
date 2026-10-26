@@ -114,6 +114,9 @@ class TeamListItem(BaseModel):
     ranking_date: date | None
     is_analytics_active: bool
     roster_synced_at: datetime | None
+    pandascore_id: int | None = None
+    pandascore_slug: str | None = None
+    pandascore_synced_at: datetime | None = None
     roster: list[TeamParticipantResponse] = Field(
         default_factory=list,
     )

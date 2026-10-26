@@ -18,9 +18,13 @@ class TeamImportService:
         if team is None:
             team = Team(bo3_id=detail.id, bo3_slug=detail.slug, name=raw.get("name") or detail.slug, is_analytics_active=False)
             self.session.add(team)
-        team.bo3_slug = detail.slug; team.name = raw.get("name") or team.name
-        team.logo_url = raw.get("image_url") or raw.get("logo_url")
-        country = raw.get("country") or {}; team.country_code = country.get("code"); team.country_name = country.get("name")
+        team.bo3_slug = detail.slug
+        if team.pandascore_synced_at is None:
+            team.name = raw.get("name") or team.name
+            team.logo_url = raw.get("image_url") or raw.get("logo_url")
+            country = raw.get("country") or {}
+            team.country_code = country.get("code")
+            team.country_name = country.get("name")
         team.region = raw.get("region") or team.region; team.roster_synced_at = datetime.now(UTC)
         await self.session.flush()
         current_players = []

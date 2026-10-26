@@ -432,3 +432,11 @@ export const checkMatchResult = (id: number) => request(`/api/v1/matches/${id}/r
 export const bindMatchResult = (id: number, payload: object) => request(`/api/v1/matches/${id}/result/link`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
 export const correctMatchResult = (id: number, payload: object) => request(`/api/v1/matches/${id}/result`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
 export const getMatchResultAudit = (id: number) => request<{items: Array<{id: number; at: string; actor: string; reason: string; before: object; after: object}>}>(`/api/v1/matches/${id}/result/audit`);
+
+export interface PandaScoreTeamProfile {id:number;name:string;slug:string;location:string|null;image_url:string|null}
+export function searchPandaScoreTeams(query:string):Promise<PandaScoreTeamProfile[]> {
+  return request(`/api/v1/teams/pandascore/search?query=${encodeURIComponent(query)}`);
+}
+export function updatePandaScoreTeam(teamId:number, externalId:number):Promise<Team> {
+  return request(`/api/v1/teams/${teamId}/pandascore`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({external_id:externalId})});
+}

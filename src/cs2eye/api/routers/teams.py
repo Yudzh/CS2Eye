@@ -1,6 +1,8 @@
 from datetime import date
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cs2eye.api.schemas.teams import (
@@ -16,6 +18,8 @@ from cs2eye.api.schemas.teams import (
     TeamStrengthResponse,
 )
 from cs2eye.db.session import get_db_session
+from cs2eye.services.pandascore_team_service import PandaScoreTeamService, PandaScoreTeam
+from cs2eye.integrations.pandascore.client import PandaScoreError
 from cs2eye.services.top_teams_service import (
     list_ranked_teams,
     list_active_rosters,
@@ -45,6 +49,39 @@ router = APIRouter(
     prefix="/teams",
     tags=["teams"],
 )
+
+
+class PandaScoreTeamUpdate(BaseModel):
+    external_id: int = Field(gt=0)
+
+
+@router.get("/pandascore/search")
+async def search_pandascore_teams(query: str = Query(min_length=2, max_length=100),
+                                  session: AsyncSession = Depends(get_db_session)) -> list[PandaScoreTeam]:
+    if len(query.strip()) < 2:
+        raise HTTPException(status_code=422, detail="Введите хотя бы два символа названия команды.")
+    try:
+        return await PandaScoreTeamService(session).search(query.strip())
+    except PandaScoreError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/{team_id}/pandascore", response_model=TeamListItem)
+async def update_pandascore_team(team_id: int, payload: PandaScoreTeamUpdate,
+                                 session: AsyncSession = Depends(get_db_session)):
+    if await session.get(Team, team_id) is None:
+        raise HTTPException(status_code=404, detail="Команда не найдена.")
+    try:
+        team = await PandaScoreTeamService(session).update(team_id, payload.external_id)
+        result = TeamListItem.model_validate(team)
+        await session.commit()
+        return result
+    except PandaScoreError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (ValueError, IntegrityError) as exc:
+        await session.rollback()
+        message = str(exc) if isinstance(exc, ValueError) else "Этот PandaScore ID уже привязан к другой команде."
+        raise HTTPException(status_code=409, detail=message) from exc
 
 
 @router.get("/{team_id}/performance-profile")

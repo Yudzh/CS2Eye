@@ -29,7 +29,13 @@ class PandaScoreClient:
     async def upcoming(self, **params):
         return await self.matches('upcoming', **params)
 
+    async def teams(self, **params):
+        return await self.list_items('/csgo/teams', 'name', **params)
+
     async def matches(self, kind, **params):
+        return await self.list_items(f'/csgo/matches/{kind}', 'begin_at', **params)
+
+    async def list_items(self, endpoint, sort, **params):
         """Complete paginated list, or fail without applying a partial candidate set."""
         items = []
         for page in range(1, settings.result_sync_max_requests + 1):
@@ -38,8 +44,8 @@ class PandaScoreClient:
             await self.reserve()
             self.calls += 1
             try:
-                response = await self.client.get(f'/csgo/matches/{kind}', params={
-                    **params, 'per_page': 100, 'page': page, 'sort': 'begin_at'})
+                response = await self.client.get(endpoint, params={
+                    **params, 'per_page': 100, 'page': page, 'sort': sort})
             except httpx.RequestError:
                 raise PandaScoreError("PandaScore: ошибка сети или таймаут.") from None
             now = datetime.now(UTC)
