@@ -10,6 +10,12 @@ PLAYER_NICKNAME_ALIASES = {
     "v$m": "vsm",
 }
 
+# Explicitly approved additional accounts, keyed by their canonical Steam ID.
+# Keep the original account on Player and the actual account in demo records.
+PLAYER_STEAM_ID_ALIASES = {
+    "76561198712713132": "76561198194325317",  # dumau, October 2026
+}
+
 
 def normalize_nickname(value: str) -> str:
     normalized = value.strip().casefold()
@@ -20,11 +26,18 @@ async def link_demo_player(
     session: AsyncSession, steam_id: str | None, nickname: str,
 ) -> Player | None:
     if steam_id:
+        canonical_id = PLAYER_STEAM_ID_ALIASES.get(steam_id, steam_id)
+        if canonical_id != steam_id:
+            owner = await session.scalar(select(Player.id).where(Player.steam_id == steam_id))
+            if owner is not None:
+                raise ValueError(f"Additional Steam account {steam_id} already has a primary owner")
         player = (
-            await session.execute(select(Player).where(Player.steam_id == steam_id))
+            await session.execute(select(Player).where(Player.steam_id == canonical_id))
         ).scalar_one_or_none()
         if player is not None:
             return player
+        if canonical_id != steam_id:
+            return None
     normalized = normalize_nickname(nickname)
     matches = [
         player for player in (await session.execute(select(Player))).scalars().all()

@@ -53,6 +53,9 @@ async def prepare_forecasts(factory=AsyncSessionLocal, *, now=None):
 
 async def main():
     try:
+        from cs2eye.deployment.player_steam_aliases import prepare as prepare_player_aliases
+        aliases = await prepare_player_aliases(AsyncSessionLocal)
+        print("Player account readiness: " + json.dumps(aliases), flush=True)
         report = await prepare_forecasts()
         print("Forecast readiness: " + json.dumps(report, ensure_ascii=False), flush=True)
         if report["errors"]:

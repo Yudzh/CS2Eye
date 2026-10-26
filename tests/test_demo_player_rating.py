@@ -376,6 +376,75 @@ async def test_player_linking_rules(db_session) -> None:
     assert await link_demo_player(db_session, None, "unknown") is None
 
 
+async def test_additional_steam_account_preserves_primary_and_rejects_unknown(db_session):
+    dumau = Player(bo3_id=41, bo3_slug="dumau", nickname="dumau", steam_id="76561198194325317")
+    db_session.add(dumau)
+    await db_session.flush()
+    assert await link_demo_player(db_session, "76561198712713132", "dumau") is dumau
+    assert await link_demo_player(db_session, "76561198712713132", "changed nickname") is dumau
+    assert await link_demo_player(db_session, "76561198194325317", "dumau") is dumau
+    assert await link_demo_player(db_session, "unknown-account", "dumau") is None
+    assert dumau.steam_id == "76561198194325317"
+    db_session.add(Player(bo3_id=42, bo3_slug="other", nickname="other", steam_id="76561198712713132"))
+    await db_session.flush()
+    with pytest.raises(ValueError, match="primary owner"):
+        await link_demo_player(db_session, "76561198712713132", "dumau")
+
+
+async def test_additional_account_migration_and_preparation_are_repeatable(db_session):
+    from datetime import date
+    from cs2eye.deployment.player_steam_aliases import apply, prepare
+    from cs2eye.models.demo import DemoMapResult, DemoRound, DemoUtilityEvent
+
+    dumau = Player(bo3_id=41, bo3_slug="dumau", nickname="dumau", steam_id="76561198194325317")
+    demo = DemoFile(tournament_name="Cup", tournament_slug="cup", match_date=date(2026, 10, 25),
+                    original_filename="legacy.dem", storage_path="legacy.dem", file_size_bytes=1, sha256="a" * 64)
+    db_session.add_all([dumau, demo])
+    await db_session.flush()
+    run = DemoParseRun(demo_file_id=demo.id, status="success", parser_name="test", parser_version="1")
+    db_session.add(run)
+    await db_session.flush()
+    result = DemoMapResult(demo_file_id=demo.id, result_source="demo_parser", metadata_status="partial")
+    db_session.add(result)
+    await db_session.flush()
+    round_row = DemoRound(demo_file_id=demo.id, demo_map_result_id=result.id, round_number=1,
+                          phase="regulation", half="first", team_a_side="T", team_b_side="CT",
+                          winner_side="T", end_reason="elimination", is_complete=True)
+    db_session.add(round_row)
+    await db_session.flush()
+    stat = DemoPlayerStat(demo_file_id=demo.id, parse_run_id=run.id, steam_id="76561198712713132",
+                          identity_key="steam:76561198712713132", nickname="dumau", rounds_played=20,
+                          kills=10, deaths=10, assists=3, total_damage=1600, adr=Decimal("80"),
+                          kast_rounds=15, kast_percent=Decimal("75"), internal_rating=Decimal("7"),
+                          internal_rating_version=INTERNAL_RATING_VERSION)
+    event = DemoUtilityEvent(demo_file_id=demo.id, demo_map_result_id=result.id, round_id=round_row.id,
+                             event_kind="throw", tick=1, player_name="dumau", raw_grenade_type="flashbang",
+                             player_identity_key=stat.identity_key, grenade_type="flashbang")
+    db_session.add_all([stat, event])
+    await db_session.commit()
+    expected = ({demo.id}, {dumau.id})
+    assert await db_session.run_sync(apply) == expected
+    assert await db_session.run_sync(apply) == expected
+    assert stat.player_id == dumau.id
+    assert event.player_id == dumau.id
+    assert stat.steam_id == "76561198712713132"
+    assert dumau.steam_id == "76561198194325317"
+    await db_session.commit()
+    factory = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    for _ in range(2):
+        assert await prepare(factory) == {"demos": [demo.id], "players": [dumau.id]}
+    await db_session.refresh(dumau)
+    assert dumau.internal_rating_maps_count == 1
+    assert dumau.internal_rating_rounds_count == 20
+    assert dumau.internal_rating == Decimal("7")
+    # Fail clearly rather than treating an unresolved canonical identity as a
+    # new account or silently leaving existing demo statistics unlinked.
+    dumau.steam_id = None
+    await db_session.flush()
+    with pytest.raises(ValueError, match="requires primary account"):
+        await db_session.run_sync(apply)
+
+
 async def test_players_get_groups_from_different_demo_opponents(db_session) -> None:
     navi = Team(bo3_id=101, bo3_slug="navi", name="NAVI", current_rank=3)
     astralis = Team(bo3_id=102, bo3_slug="astralis", name="Astralis", current_rank=22)
