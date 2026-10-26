@@ -36,13 +36,17 @@ backup="$CS2EYE_DEPLOY_ROOT/backups/$(date -u +%Y%m%dT%H%M%SZ)-$CS2EYE_RELEASE.d
 (umask 077; "${compose[@]}" exec -T db sh -c 'pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$backup")
 test -s "$backup"
 "${compose[@]}" exec -T db pg_restore --list < "$backup" > /dev/null
-# Stop background writers while applying migrations.
+# Capture the existing containers before stopping background writers. On failure
+# restart these exact containers without re-running failed Compose dependencies.
+mapfile -t previous_app_containers < <("${compose[@]}" ps --all --quiet api bot)
 "${compose[@]}" stop api bot
 resume_on_failure() {
   result=$?
   trap - ERR
   echo 'Deployment failed; trying to restart existing API and bot containers'
-  "${compose[@]}" start api bot || true
+  if (( ${#previous_app_containers[@]} )); then
+    docker start "${previous_app_containers[@]}" || true
+  fi
   exit "$result"
 }
 trap resume_on_failure ERR

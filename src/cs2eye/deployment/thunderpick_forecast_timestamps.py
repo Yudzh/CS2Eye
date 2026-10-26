@@ -16,6 +16,9 @@ from cs2eye.models.team import Team
 
 NAME = 'Thunderpick World Championship 2026'
 ARTIFACT = '234573bf4b896ac6ad40cc4ee4c928bad5122ee8f6f6443ae7a1f6572c6b5d3a.json'
+# BO3 IDs survive PandaScore profile renames. Values verified on production.
+TEAM_BO3_IDS = {'Aurora':3598, 'Ninjas in Pyjamas':785, '9z':324, 'Falcons':2713,
+                'PARIVISION':8171, 'BetBoom':7498, 'Legacy':8118, 'FURIA':648}
 KICKOFFS = (
     ('Aurora', 'Ninjas in Pyjamas', '08:30'),
     ('9z', 'Falcons', '11:30'),
@@ -35,9 +38,9 @@ def apply(session):
         return {'kickoffs': 0, 'archived_timestamp': 0}
     teams = list(session.scalars(select(Team)))
     def team_named(name):
-        rows = [t for t in teams if t.name == name]
+        rows = [t for t in teams if t.bo3_id == TEAM_BO3_IDS[name]]
         if len(rows) != 1:
-            raise ValueError(f'Thunderpick timestamp repair requires unique team {name}')
+            raise ValueError(f'Thunderpick timestamp repair requires unique BO3 team {TEAM_BO3_IDS[name]} ({name})')
         return rows[0]
     def fixture(a, b, day):
         ids = {a.id, b.id}

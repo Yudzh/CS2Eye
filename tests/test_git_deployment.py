@@ -33,6 +33,8 @@ import json, os, sys
 args = sys.argv[1:]
 with open(os.environ['DOCKER_LOG'], 'a') as log:
     log.write(json.dumps(args) + '\\n')
+if 'ps' in args and '--quiet' in args:
+    sys.stdout.write('existing-api-container\\nexisting-bot-container\\n')
 mode = os.environ.get('FAIL_MODE')
 if mode == 'build' and 'build' in args:
     sys.exit(1)
@@ -88,7 +90,8 @@ def test_missing_forecasts_prevent_successful_release(release_env):
     assert (root / "current").resolve() == root / "old"
     calls = [json.loads(line) for line in Path(env["DOCKER_LOG"]).read_text().splitlines()]
     assert not any("up" in call for call in calls)
-    assert any("start" in call and "api" in call and "bot" in call for call in calls)
+    assert ["start", "existing-api-container", "existing-bot-container"] in calls
+    assert not any(call[0] == "compose" and "start" in call for call in calls)
 
 
 def test_failed_ai_report_import_prevents_successful_release(release_env):

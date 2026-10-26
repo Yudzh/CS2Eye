@@ -9,7 +9,7 @@ from cs2eye.models.team import Team
 from cs2eye.models.match import Match, Tournament
 from cs2eye.models.prediction import PredictionHistorySnapshot
 from cs2eye.services.prediction_result_eligibility import eligibility
-from cs2eye.deployment.thunderpick_forecast_timestamps import apply, KICKOFFS, NAME
+from cs2eye.deployment.thunderpick_forecast_timestamps import apply, KICKOFFS, NAME, TEAM_BO3_IDS
 
 
 @pytest.fixture
@@ -18,7 +18,7 @@ def data():
     Base.metadata.create_all(engine)
     with Session(engine, expire_on_commit=False) as session:
         names = list(dict.fromkeys(n for a,b,_ in KICKOFFS for n in (a,b)))
-        teams = {n: Team(id=100+i, name=n, bo3_id={'Legacy':8118,'PARIVISION':8171}.get(n,10000+i)) for i,n in enumerate(names)}
+        teams = {n: Team(id=100+i, name=n, bo3_id=TEAM_BO3_IDS[n]) for i,n in enumerate(names)}
         session.add_all(teams.values())
         tournament = Tournament(id=99, name=NAME, year=2026)
         session.add(tournament)
@@ -56,3 +56,13 @@ def test_incomplete_prerequisites_do_not_change_anything(data):
     with pytest.raises(ValueError,match='disagrees'):
         apply(data)
     assert all(data.get(Match,i).starts_at is None for i in range(200,204))
+
+
+def test_provider_renames_and_duplicate_display_names_use_stable_ids(data):
+    for team in data.scalars(select(Team)):
+        team.name = {'Aurora':'Aurora Gaming','Falcons':'Team Falcons','BetBoom':'BetBoom Team',
+                     'Ninjas in Pyjamas':'NIP'}.get(team.name,team.name)
+    data.add(Team(name='Aurora',bo3_id=999999))
+    data.commit()
+    assert apply(data) == {'kickoffs':4,'archived_timestamp':1}
+    assert apply(data) == {'kickoffs':0,'archived_timestamp':0}
