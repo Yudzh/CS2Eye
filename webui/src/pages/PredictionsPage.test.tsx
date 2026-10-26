@@ -13,9 +13,9 @@ it("shows upcoming picks first and switches to scored results", async () => {
   await screen.findByRole("link",{name:"Alpha — Bravo"});
   expect(screen.getByRole("tab", {name:/Предстоящие/}).getAttribute("aria-selected")).toBe("true");
   expect(screen.getByText("Ожидает игры")).toBeTruthy();
-  expect(screen.queryByText("✕ Не угадали")).toBeNull();
+  expect(screen.queryByText("✕ Не зашло")).toBeNull();
   fireEvent.click(screen.getByRole("tab",{name:/Сыгранные/}));
-  expect(screen.getByText("✕ Не угадали")).toBeTruthy();
+  expect(screen.getByText("✕ Не зашло")).toBeTruthy();
   expect(screen.getByText("0 : 2")).toBeTruthy();
   expect(window.location.search).toContain("tab=completed");
 });
@@ -25,7 +25,7 @@ it("includes restored picks without mixing them into pre-match accuracy", async 
   await screen.findByText("Восстановленный прогноз · v12");
   const stats = screen.getByRole("region", {name:"Точность прогнозов"});
   expect(within(stats).getByText("0.0%")).toBeTruthy();
-  expect(within(stats).getByText("100.0%")).toBeTruthy();
+  expect(within(stats).getAllByText("100.0%")).toHaveLength(2);
   fireEvent.change(screen.getByLabelText("Результат"),{target:{value:"miss"}});
   expect(screen.getAllByRole("link",{name:"Alpha — Bravo"})).toHaveLength(1);
   expect(within(stats).getByText("0.0%")).toBeTruthy();
@@ -61,4 +61,29 @@ it("retries a failed load", async () => {
   await screen.findByRole("alert");
   fireEvent.click(screen.getByRole("button",{name:"Повторить"}));
   await screen.findByText("Предстоящих матчей пока нет");
+});
+
+ it("counts both outcomes before result filtering and excludes unscored and restored picks", async () => {
+  api.getPredictionFeed.mockResolvedValue({items:[played,
+    {...played,match_id:3,correct:true}, {...played,match_id:4,correct:true},
+    {...played,match_id:5,correct:null}, {...played,match_id:6,source:"retrospective",correct:false},
+    {...played,match_id:7,tournament_id:2,tournament:"Other Cup",correct:false}]});
+  render(<PredictionsPage initialTab="completed"/>);
+  const stats = await screen.findByRole("region",{name:"Точность прогнозов"});
+  expect(within(stats).getAllByText("50.0%")).toHaveLength(2);
+  fireEvent.change(screen.getByLabelText("Турнир"),{target:{value:"1"}});
+  expect(within(stats).getByText("66.7%")).toBeTruthy();
+  expect(within(stats).getByText("33.3%")).toBeTruthy();
+  expect(within(stats).getByText("2 из 3 прогнозов")).toBeTruthy();
+  expect(within(stats).getByText("1 из 3 прогнозов")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Результат"),{target:{value:"miss"}});
+  expect(within(stats).getByText("66.7%")).toBeTruthy();
+  expect(within(stats).getByText("33.3%")).toBeTruthy();
+});
+it("shows no percentage when no pre-match forecast can be evaluated", async () => {
+  api.getPredictionFeed.mockResolvedValue({items:[{...played,correct:null}]});
+  render(<PredictionsPage initialTab="completed"/>);
+  const stats = await screen.findByRole("region",{name:"Точность прогнозов"});
+  expect(within(stats).getAllByText("—")).toHaveLength(3);
+  expect(within(stats).getAllByText("0 из 0 прогнозов")).toHaveLength(2);
 });

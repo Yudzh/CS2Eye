@@ -8,7 +8,7 @@ import {MatchCard} from "./MatchesPage";
 import {ManualForecastButton} from "../components/ManualForecastButton";
 import {MatchLLMAnalysisPanel} from "../components/MatchLLMAnalysisPanel";
 const percent = (value: number | null) => value == null ? "—" : `${(value * 100).toFixed(1)}%`;
-const outcome = (value: boolean | null) => value == null ? "Без оценки" : value ? "✓ Угадали" : "✕ Не угадали";
+const outcome = (value: boolean | null) => value == null ? "Без оценки" : value ? "✓ Как и ожидали" : "✕ Не зашло";
 export function MatchDetailPage({matchId}: {matchId: number}) {
   const [rosters, setRosters] = useState<MatchTournamentRosters | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);

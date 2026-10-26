@@ -1,3 +1,4 @@
+import {PandaScoreHistoryPanel} from "../components/PandaScoreHistoryPanel";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -1957,6 +1958,7 @@ export function TeamComparePage() {
               надёжность. Это не прогноз результата матча или вето.
             </p>
           </section>
+          <PandaScoreHistoryPanel key={`${comparison.team_a.id}-${comparison.team_b.id}`} teamId={comparison.team_a.id} opponentId={comparison.team_b.id} />
           <section className="h2h-section">
             <div className="section-heading">
               <div>

@@ -288,3 +288,39 @@ async def test_stale_team_json_is_not_used_as_baseline(map_db):
         v=await MapStrengthV3Service(s).calculate(1,"nuke")
         assert v["team_strength_v3"]==82.
         assert team.team_strength_v3_breakdown["score"]==1
+
+
+async def test_profile_population_shared_across_maps_and_baseline(map_db, monkeypatch):
+    from cs2eye.models.demo import DemoParseRun, DemoPlayerStat
+    from cs2eye.services.performance_profile_service import PerformanceProfileService
+    from cs2eye.services.player_strength_v3_service import PlayerStrengthV3Service
+    import cs2eye.services.performance_profile_service as profiles
+    async with map_db() as session:
+        for did in (1, 2, 3):
+            session.add(DemoParseRun(id=did, demo_file_id=did, status='success', parser_name='test', parser_version='1'))
+            session.add(DemoPlayerStat(demo_file_id=did, parse_run_id=did, player_id=1,
+                demo_team_id=1, nickname='P1', identity_key='p1', demo_team_name='Team 1',
+                rounds_played=20, kills=10, deaths=10, assists=3, total_damage=1600,
+                adr=80, kast_rounds=15, kast_percent=75, internal_rating=7, internal_rating_version="test"))
+        await session.commit()
+        service = PerformanceProfileService(session)
+        cutoff = date(2026, 10, 1)
+        await service._inputs(cutoff, None)
+        original_combat = profiles.calculate_combat
+        calls = []
+        def count_combat(*args, **kwargs):
+            calls.append(1)
+            return original_combat(*args, **kwargs)
+        monkeypatch.setattr(profiles, 'calculate_combat', count_combat)
+        async def no_query(*args, **kwargs):
+            raise AssertionError('Repeated population SQL')
+        monkeypatch.setattr(session, 'execute', no_query)
+        overall = await service._dataset(cutoff)
+        nuke = await service._dataset(cutoff, date(2026, 8, 2), 'nuke')
+        empty = await service._dataset(cutoff, map_name='mirage')
+        assert overall['player'][1]['overall']['firepower']['sample'] == 60
+        assert nuke['player'][1]['overall']['firepower']['sample'] == 40
+        assert not empty['player']
+        assert len(calls) == 3
+        # Player strength also consumes the population already loaded by Maps.
+        await PlayerStrengthV3Service(session).calculate(1, cutoff)

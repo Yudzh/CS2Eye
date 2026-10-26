@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -432,3 +432,33 @@ async def update_player_role(
     membership.role = payload.role
     await session.commit()
     return await get_team(team_id, session=session)
+
+
+async def _pandascore_history(team_id, opponent_id, as_of, refresh, session):
+    from cs2eye.services.pandascore_history_service import PandaScoreHistoryService
+    try:
+        result = await PandaScoreHistoryService(session).history(team_id, opponent_id, refresh, as_of)
+        await session.commit()
+        return result
+    except LookupError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PandaScoreError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get('/{team_id}/pandascore/history')
+async def pandascore_history(team_id: int, opponent_id: int | None = Query(default=None, gt=0),
+                             as_of: datetime | None = None,
+                             session: AsyncSession = Depends(get_db_session)):
+    return await _pandascore_history(team_id, opponent_id, as_of, False, session)
+
+
+@router.post('/{team_id}/pandascore/history/refresh')
+async def refresh_pandascore_history(team_id: int, opponent_id: int | None = Query(default=None, gt=0),
+                                     as_of: datetime | None = None,
+                                     session: AsyncSession = Depends(get_db_session)):
+    return await _pandascore_history(team_id, opponent_id, as_of, True, session)

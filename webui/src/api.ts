@@ -458,3 +458,15 @@ export interface PandaScoreEvent {id:number;name:string;year:number;begin_at:str
 export interface PandaScoreEventImport {id:number;name:string;teams:number;matches:number;warnings:string[]}
 export function searchPandaScoreEvents(query:string):Promise<PandaScoreEvent[]> {return request(`/api/v1/pandascore/events/search?query=${encodeURIComponent(query)}`)}
 export function importPandaScoreEvent(external_id:number):Promise<PandaScoreEventImport> {return request('/api/v1/pandascore/events/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({external_id})})}
+
+export interface PandaScoreHistory {
+  source: string; provider_team_id: number; synced_at: string; from: string; to: string;
+  warning: string | null; series_played: number; wins: number; losses: number;
+  matches: Array<{id: number; begin_at: string; tournament: string; winner_id: number;
+    teams: Array<{id: number; name: string; score: number}>}>;
+}
+export function getPandaScoreHistory(teamId: number, opponentId?: number, refresh = false): Promise<PandaScoreHistory> {
+  const query = new URLSearchParams();
+  if (opponentId) query.set("opponent_id", String(opponentId));
+  return request(`/api/v1/teams/${teamId}/pandascore/history${refresh ? "/refresh" : ""}?${query}`, {method: refresh ? "POST" : "GET"});
+}

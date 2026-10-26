@@ -42,7 +42,7 @@ it("shows result and only this match's saved prediction", async () => {
   expect(await screen.findByText(/Наш прогноз: Alpha · 80.0%/)).toBeTruthy();
   expect(screen.getByText("1 : 2")).toBeTruthy();
   expect(screen.getByText("Bravo", {selector: "strong"})).toBeTruthy();
-  expect(screen.getByText(/✕ Не угадали/)).toBeTruthy();
+  expect(screen.getByText(/✕ Не зашло/)).toBeTruthy();
   expect(screen.queryByText(/other-model/)).toBeNull();
   expect(screen.queryByText(/historical-model/)).toBeNull();
 });

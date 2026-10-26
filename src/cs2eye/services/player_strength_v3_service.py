@@ -89,7 +89,12 @@ class PlayerStrengthV3Service:
             query=query.where(DemoFile.match_date < (as_of if as_of is not None else date.today()))
             if exclude_match_id is not None:
                 query=query.where((DemoFile.match_id.is_(None)) | (DemoFile.match_id != exclude_match_id))
-            pairs=(await self.session.execute(query)).all();loaded=defaultdict(list)
+            shared = self.session.info.setdefault("analytics_player_stat_pairs", {})
+            shared_key = (as_of or date.today(), exclude_match_id)
+            if shared_key not in shared:
+                shared[shared_key] = (await self.session.execute(query)).all()
+            pairs = shared[shared_key]
+            loaded=defaultdict(list)
             self._match_dates[dataset_key]={row.id: match_date for row,match_date in pairs}
             for row,_ in pairs:loaded[row.player_id].append(row)
             self._datasets[dataset_key]=loaded

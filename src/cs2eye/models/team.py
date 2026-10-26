@@ -98,6 +98,7 @@ class Team(Base):
     pandascore_slug: Mapped[str | None] = mapped_column(String(160))
     pandascore_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pandascore_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    pandascore_history_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     pandascore_roster_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     pandascore_roster_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

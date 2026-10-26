@@ -1,3 +1,4 @@
+import {PandaScoreHistoryPanel} from "./components/PandaScoreHistoryPanel";
 import {PandaScoreRosterPanel} from "./components/PandaScoreRosterPanel";
 import {PandaScoreTeamPanel} from "./components/PandaScoreTeamPanel";
 import {PandaScoreMatchPage} from "./pages/PandaScoreMatchPage";
@@ -357,13 +358,13 @@ function TeamPage({ id }: { id: number }) {
   useEffect(() => {
     let active = true;
     setTeam(null); setError(null); setTeamStrength(null); setTeamStrengthError(null); setTeamForm(null);
-    const basicTeam = getTeam(id).then((value)=>{if(active)setTeam(value)}).catch((value: unknown) => {
+    void getTeam(id).then((value)=>{if(active)setTeam(value)}).catch((value: unknown) => {
       if(active)setError(value instanceof Error ? value.message : "Не удалось загрузить команду.");
     });
-    void basicTeam.then(() => active ? getTeamStrengthV3(id) : null).then((value)=>{if(active && value)setTeamStrength(value)}).catch((value:unknown) => {
+    void getTeamStrengthV3(id).then((value)=>{if(active && value)setTeamStrength(value)}).catch((value:unknown) => {
       if(active)setTeamStrengthError(value instanceof Error?value.message:"Team Strength V3 недоступен.");
     });
-    void basicTeam.then(() => active ? getTeamFormV3(id) : null).then((value)=>{if(active && value)setTeamForm(value)}).catch(() => undefined);
+    void getTeamFormV3(id).then((value)=>{if(active && value)setTeamForm(value)}).catch(() => undefined);
     return ()=>{active=false};
   }, [id, rosterRevision]);
 
@@ -441,6 +442,7 @@ function TeamPage({ id }: { id: number }) {
         <div className="team-strength-score"><small>Сила команды {strength.model_version.toUpperCase()}</small><strong>{strength.team_strength_score.toFixed(2)}</strong><span>/100 · надёжность {(strength.reliability * 100).toFixed(0)}%</span></div>
       </section>
 
+      <PandaScoreHistoryPanel key={`history-${team.id}-${team.pandascore_id}`} teamId={team.id} />
       <PandaScoreTeamPanel key={team.id} team={team} onUpdated={profile => setTeam(current => current ? {...current, ...profile, roster: current.roster, analyst_factors: current.analyst_factors} : current)} />
 
       {team.pandascore_id && <PandaScoreRosterPanel teamId={team.id} onSaved={async () => {setRosterRevision(value => value + 1);}} />}

@@ -432,6 +432,8 @@ class MapStrengthV3Service:
                 # the full population for each team's baseline.
                 baseline_session.info["performance_profile_datasets"] = self.session.info.setdefault(
                     "performance_profile_datasets", {})
+                for cache_name in ("performance_profile_inputs", "performance_profile_combat", "analytics_player_stat_pairs"):
+                    baseline_session.info[cache_name] = self.session.info.setdefault(cache_name, {})
                 baseline = await TeamStrengthV3Service(baseline_session).calculate(
                     team_id, cutoff if as_of is not None or match_id is not None else None,
                     exclude_match_id=exclude_match_id, tournament_id=tournament_id, match_id=match_id)
@@ -500,5 +502,14 @@ class MapStrengthV3Service:
             MapPoolEntry.active_from.is_(None) | (MapPoolEntry.active_from <= cutoff)))).all())
         names.update((await self.session.scalars(select(DemoMapResult.map_name).join(DemoFile,DemoFile.id==DemoMapResult.demo_file_id).where(
             DemoFile.match_date<cutoff,(DemoMapResult.team_a_id==team_id)|(DemoMapResult.team_b_id==team_id)))) .all())
+        # The pool and its team baseline need the whole population. Read it once
+        # before slicing by map; single-map/profile requests retain narrow SQL.
+        excluded = kwargs.get("exclude_match_id") or kwargs.get("match_id")
+        if kwargs.get("exclude_demo_id") is not None:
+            demo = await self.session.get(DemoFile, kwargs["exclude_demo_id"])
+            if demo:
+                excluded = excluded or demo.match_id
+        if any(names):
+            await self.profiles._inputs(cutoff, excluded)
         maps=[await self.calculate(team_id,n,as_of,**kwargs) for n in sorted(n for n in names if n)]
         return {"team_id":team_id,"as_of":maps[0]["as_of"] if maps else cutoff,"model_version":MODEL_VERSION,"maps":maps}

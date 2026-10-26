@@ -118,19 +118,33 @@ class PerformanceProfileService:
         # Reuse the same dataset across services in this request, never across sessions.
         self._cache = (session.info if session is not None else {}).setdefault("performance_profile_datasets", {})
 
-    async def _dataset(self, as_of: date | None, since: date | None = None, map_name: str | None = None,
-                       exclude_match_id: int | None = None) -> dict:
-        cache_key = (as_of, since, map_name, exclude_match_id)
-        if cache_key in self._cache: return self._cache[cache_key]
+    async def _inputs(self, as_of, exclude_match_id, since=None, map_name=None):
+        # One population read for all map slices and the overall team baseline.
+        cache = self.session.info.setdefault("performance_profile_inputs", {})
+        base_key = (as_of or date.today(), exclude_match_id)
+        broad_key = (*base_key, None, None)
+        if broad_key in cache:
+            return cache[broad_key]
+        key = (*base_key, since, map_name)
+        if key in cache:
+            return cache[key]
         query = select(DemoPlayerStat, DemoFile.match_date).join(DemoParseRun, DemoParseRun.id == DemoPlayerStat.parse_run_id).join(DemoFile, DemoFile.id == DemoPlayerStat.demo_file_id).where(DemoParseRun.status == "success", DemoPlayerStat.player_id.is_not(None))
         query = query.where(DemoFile.match_date < (as_of or date.today()))
-        if since is not None: query = query.where(DemoFile.match_date >= since)
         if exclude_match_id is not None:
             query = query.where((DemoFile.match_id.is_(None)) | (DemoFile.match_id != exclude_match_id))
+        if since is not None:
+            query = query.where(DemoFile.match_date >= since)
         if map_name is not None:
             query = query.join(DemoMapResult, DemoMapResult.demo_file_id == DemoFile.id).where(DemoMapResult.map_name == map_name)
-        rows = [row for row, _ in (await self.session.execute(query)).all()]
-        demo_ids = {row.demo_file_id for row in rows}; player_ids = {row.player_id for row in rows}; team_ids = {row.demo_team_id for row in rows if row.demo_team_id}
+        shared = self.session.info.setdefault("analytics_player_stat_pairs", {})
+        if since is None and map_name is None:
+            if base_key not in shared:
+                shared[base_key] = (await self.session.execute(query)).all()
+            pairs = shared[base_key]
+        else:
+            pairs = (await self.session.execute(query)).all()
+        rows = [row for row, _ in pairs]
+        demo_ids = {row.demo_file_id for row in rows}
         kill_q = select(DemoKill.demo_file_id, DemoKill.round_id, DemoKill.tick,
             DemoKill.attacker_identity_key, DemoKill.victim_identity_key,
             DemoKill.attacker_team_name, DemoKill.victim_team_name,
@@ -155,13 +169,32 @@ class PerformanceProfileService:
                          DemoRound.winner_team_name).where(
             DemoRound.demo_file_id.in_(demo_ids), DemoRound.is_complete.is_(True))
         rounds = (await self.session.execute(round_q)).all() if demo_ids else []
+        roster_links = list((await self.session.scalars(select(DemoTeamRoster).where(
+            DemoTeamRoster.demo_file_id.in_(demo_ids), DemoTeamRoster.resolution_status == "complete",
+            DemoTeamRoster.roster_id.is_not(None)))).all()) if demo_ids else []
+        map_rows = (await self.session.execute(select(DemoMapResult.demo_file_id, DemoMapResult.map_name)
+            .where(DemoMapResult.demo_file_id.in_(demo_ids)))).all() if demo_ids else []
+        value = (pairs, kills, damages, rounds, roster_links, dict(map_rows))
+        cache[key] = value
+        return value
+
+    async def _dataset(self, as_of: date | None, since: date | None = None, map_name: str | None = None,
+                       exclude_match_id: int | None = None) -> dict:
+        cache_key = (as_of, since, map_name, exclude_match_id)
+        if cache_key in self._cache: return self._cache[cache_key]
+        pairs, all_kills, all_damages, all_rounds, all_rosters, map_names = await self._inputs(as_of, exclude_match_id, since, map_name)
+        rows = [row for row, played in pairs
+                if (since is None or played >= since)
+                and (map_name is None or map_names.get(row.demo_file_id) == map_name)]
+        demo_ids = {row.demo_file_id for row in rows}
+        kills = [x for x in all_kills if x.demo_file_id in demo_ids]
+        damages = [x for x in all_damages if x[0] in demo_ids]
+        rounds = [x for x in all_rounds if x.demo_file_id in demo_ids]
+        roster_links = [x for x in all_rosters if x.demo_file_id in demo_ids]
         by_player = defaultdict(list); by_team = defaultdict(list); map_team_by_player = {}
         for row in rows:
             by_player[row.player_id].append(row)
             if row.demo_team_id: by_team[row.demo_team_id].append(row); map_team_by_player[(row.demo_file_id, row.player_id)] = row.demo_team_id
-        roster_links = list((await self.session.scalars(select(DemoTeamRoster).where(
-            DemoTeamRoster.demo_file_id.in_(demo_ids), DemoTeamRoster.resolution_status == "complete",
-            DemoTeamRoster.roster_id.is_not(None)))).all()) if demo_ids else []
         roster_by_demo_team = {(x.demo_file_id, x.team_id): x.roster_id for x in roster_links}
         by_team_roster = defaultdict(list)
         for row in rows:
@@ -174,7 +207,12 @@ class PerformanceProfileService:
         for round_row in rounds: rounds_by_demo[round_row.demo_file_id].append(round_row)
         for row in rows: stats_by_demo[row.demo_file_id].append(row)
         derived_combat: dict[tuple[int, int], dict] = {}
+        combat_cache = self.session.info.setdefault("performance_profile_combat", {})
         for demo_id, stat_rows in stats_by_demo.items():
+            combat_key = (as_of or date.today(), exclude_match_id, demo_id)
+            if combat_key in combat_cache:
+                derived_combat.update(combat_cache[combat_key])
+                continue
             rosters = defaultdict(set); identity_to_player = {}
             for row in stat_rows:
                 if row.demo_team_name and row.identity_key: rosters[row.demo_team_name].add(row.identity_key)
@@ -190,6 +228,8 @@ class PerformanceProfileService:
             _, player_combat, _, _ = calculate_combat(combat_events, dict(rosters), winners)
             for identity, payload in player_combat.items():
                 if identity in identity_to_player: derived_combat[(demo_id, identity_to_player[identity])] = payload
+            combat_cache[combat_key] = {(demo_id, row.player_id): derived_combat[(demo_id, row.player_id)]
+                for row in stat_rows if (demo_id, row.player_id) in derived_combat}
         event = defaultdict(lambda: defaultdict(float))
         for kill in kills:
             if kill.is_teamkill or kill.is_suicide: continue
