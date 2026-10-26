@@ -239,3 +239,32 @@ async def test_swiss_round_requires_seeded_tournament(deployment_db, round_numbe
     async with deployment_db() as session:
         with pytest.raises(ValueError, match='seeded tournament'):
             await session.run_sync(fill_round)
+
+
+async def test_tyloo_reference_ranking_is_repeatable_and_preserves_newer_data(deployment_db):
+    from cs2eye.deployment.bucharest_tyloo_ranking_2026 import apply as rank_tyloo
+
+    async with deployment_db() as session:
+        team = await session.scalar(select(Team).where(Team.name == "TYLOO"))
+        team.bo3_id = 757
+        team.is_analytics_active = False
+        await session.flush()
+        assert await session.run_sync(rank_tyloo) == team.id
+        assert await session.run_sync(rank_tyloo) == team.id
+        assert (team.current_rank, team.current_points, team.ranking_date) == (
+            44, Decimal("1150.3537"), date(2026, 10, 26))
+        assert team.is_analytics_active is False
+        team.current_rank, team.ranking_date = 43, date(2026, 10, 27)
+        await session.run_sync(rank_tyloo)
+        assert (team.current_rank, team.ranking_date) == (43, date(2026, 10, 27))
+        team.current_rank = None
+        with pytest.raises(ValueError, match="newer ranking date"):
+            await session.run_sync(rank_tyloo)
+
+
+async def test_tyloo_reference_ranking_requires_imported_team(deployment_db):
+    from cs2eye.deployment.bucharest_tyloo_ranking_2026 import apply as rank_tyloo
+
+    async with deployment_db() as session:
+        with pytest.raises(ValueError, match="requires the imported BO3 team"):
+            await session.run_sync(rank_tyloo)
