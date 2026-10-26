@@ -87,3 +87,12 @@ it("shows no percentage when no pre-match forecast can be evaluated", async () =
   expect(within(stats).getAllByText("—")).toHaveLength(3);
   expect(within(stats).getAllByText("0 из 0 прогнозов")).toHaveLength(2);
 });
+it("starts statistics at Thunderpick and allows expanding the date range", async () => {
+  api.getPredictionFeed.mockResolvedValue({items:[played,{...played,match_id:9,match_date:"2026-09-01",tournament:"BLAST",correct:true}]});
+  render(<PredictionsPage initialTab="completed"/>);
+  const stats = await screen.findByRole("region",{name:"Точность прогнозов"});
+  expect(within(stats).getByText("0 из 1 прогнозов")).toBeTruthy();
+  expect(within(stats).getByText("1 из 1 прогнозов")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("С даты"),{target:{value:""}});
+  expect(within(stats).getAllByText("1 из 2 прогнозов")).toHaveLength(2);
+});
