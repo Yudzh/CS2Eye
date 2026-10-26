@@ -23,13 +23,16 @@ export function PandaScoreTournamentPanel({tournamentId}:{tournamentId:number}) 
     <h3>Турнирные составы · PandaScore</h3>
     <p>Составы берутся из отдельной стадии турнира PandaScore. Ожидаемая пятёрка сохраняется отдельно от основы; ручные замены имеют приоритет.</p>
     {linked?<p>Стадия PandaScore #{linked}{event?` · ${title(event)}`:" · определена по привязанным матчам"}</p>:<>
+      <p>Стадия найдётся автоматически по матчу при получении состава.</p>
+      <details><summary>Указать стадию вручную</summary>
       <form onSubmit={e=>{e.preventDefault();void run(async()=>setPreview(await previewPandaScoreTournament(Number(id))));}}>
         <label>ID стадии турнира PandaScore<input type="number" min={1} required disabled={busy} value={id} onChange={e=>{setId(e.target.value);setPreview(null);}}/></label>
         <button className="button" disabled={busy||!id}>{busy?"Проверяю…":"Найти стадию"}</button>
       </form>
       {preview&&<div className="pandascore-binding"><strong>{title(preview)}</strong><span>#{String(preview.id)}</span><button className="button" disabled={busy} onClick={()=>void run(async()=>{setEvent(await bindPandaScoreTournament(tournamentId,Number(preview.id)));setLinked(Number(preview.id));setPreview(null);})}>Выбрать эту стадию</button></div>}
+      </details>
     </>}
     {error&&<p role="alert">{error}</p>}
-    <p>После привязки нажмите «Получить состав PandaScore» у команды. Успешная пятёрка фиксируется с датой получения и автоматически повторно не перезаписывается.</p>
+    <p>Откройте матч или нажмите «Получить состав PandaScore» у команды. Успешная пятёрка фиксируется с датой получения и автоматически повторно не перезаписывается.</p>
   </section>;
 }

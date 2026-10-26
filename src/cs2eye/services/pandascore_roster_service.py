@@ -1,5 +1,5 @@
 """PandaScore team lists and event snapshots, without guessing reserve roles."""
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, time
 import unicodedata
 
 from pydantic import BaseModel, Field, ValidationError
@@ -9,7 +9,7 @@ from cs2eye.core.config import settings
 from cs2eye.integrations.pandascore.client import PandaScoreClient, PandaScoreError
 from cs2eye.models.team import Player, Team, TeamParticipantMembership
 from cs2eye.models.match import Match, Tournament, TournamentTeam, TournamentRosterCheck, TournamentRosterOverride
-from cs2eye.services.match_result_sync_service import MatchResultSyncService
+from cs2eye.services.match_result_sync_service import MatchResultSyncService, normalized
 from cs2eye.services.team_roster_service import set_current_roster, get_or_create_roster
 
 
@@ -154,6 +154,57 @@ class PandaScoreRosterService:
         ids.discard(None)
         return next(iter(ids)) if len(ids) == 1 else None
 
+    async def discover_tournament(self, tournament_id, team_id, match_id=None):
+        tournament = await self.session.get(Tournament, tournament_id)
+        if tournament is None:
+            raise ValueError('Турнир не найден.')
+        matches = list((await self.session.scalars(select(Match).where(
+            Match.tournament_id == tournament_id,
+            (Match.team_a_id == team_id) | (Match.team_b_id == team_id)))).all())
+        if match_id is not None:
+            matches = [m for m in matches if m.id == match_id]
+        if not matches:
+            raise ValueError('Для поиска турнира PandaScore нужна известная пара команд в матче.')
+        today = datetime.now(UTC).date()
+        anchor = min(matches, key=lambda m: (abs((m.match_date - today).days), m.id))
+        teams = list((await self.session.scalars(select(Team).where(
+            Team.id.in_([anchor.team_a_id, anchor.team_b_id])))).all())
+        if len(teams) != 2 or any(not t.pandascore_id for t in teams):
+            raise ValueError('Для поиска турнира привяжите обе команды матча к PandaScore в их карточках.')
+        provider_ids = {t.pandascore_id for t in teams}
+        event_name, event_year = normalized(tournament.name), tournament.year
+        known_match_id = anchor.result_external_id
+        begin = datetime.combine(anchor.match_date, time.min, UTC) - timedelta(days=1)
+        end = begin + timedelta(days=3)
+        async def find(client):
+            rows = []
+            for kind in ('upcoming', 'running', 'past'):
+                rows.extend(await client.matches(kind, **{'range[begin_at]': f'{begin.isoformat()},{end.isoformat()}'}))
+            return rows
+        rows = await self.fetch(find)
+        candidates = {}
+        for row in rows:
+            league, serie = row.get('league') or {}, row.get('serie') or {}
+            event_names = {normalized(' '.join(str(v or '') for v in (league.get('name'), serie.get(key))))
+                           for key in ('name', 'full_name')}
+            opponents = row.get('opponents') or []
+            ids = {(o.get('opponent') or {}).get('id') for o in opponents if o.get('type') == 'Team'}
+            if (serie.get('year') != event_year or event_name not in event_names or ids != provider_ids
+                    or (known_match_id is not None and row.get('id') != known_match_id)):
+                continue
+            stage_id = (row.get('tournament') or {}).get('id')
+            if isinstance(stage_id, int) and stage_id > 0:
+                candidates[stage_id] = row
+        if len(candidates) != 1:
+            if candidates:
+                raise ValueError('PandaScore вернул несколько стадий для этого матча; автоматический выбор неоднозначен.')
+            raise ValueError('Матч с этой парой команд и турниром пока не найден в PandaScore. Повторите получение состава позже.')
+        external_id = next(iter(candidates))
+        await self.bind_tournament(tournament_id, external_id)
+        # Persist the discovered identity before independently saving each participant's roster.
+        await self.session.commit()
+        return external_id
+
     async def bind_tournament(self, tournament_id, external_id):
         row = await self.fetch(lambda c: c.tournament(external_id))
         tournament = await self.session.scalar(select(Tournament).where(Tournament.id == tournament_id).with_for_update())
@@ -173,21 +224,23 @@ class PandaScoreRosterService:
         await self.session.flush()
         return tournament.pandascore_data
 
-    async def refresh_tournament(self, tournament_id, team_id):
+    async def refresh_tournament(self, tournament_id, team_id, match_id=None):
         tournament = await self.session.get(Tournament, tournament_id)
         team = await self.session.get(Team, team_id)
         participant = await self.session.scalar(select(TournamentTeam.id).where(
             TournamentTeam.tournament_id == tournament_id, TournamentTeam.team_id == team_id))
         if not tournament or not team or not participant:
             raise ValueError('Команда не является участником турнира.')
-        external_id = await self.tournament_external_id(tournament)
-        if not external_id or not team.pandascore_id:
-            raise ValueError('Нужна привязка команды и стадии турнира к PandaScore.')
         capture = await self.session.scalar(select(TournamentRosterCheck).where(
             TournamentRosterCheck.tournament_id == tournament_id, TournamentRosterCheck.team_id == team_id))
-        # Successful PandaScore event snapshots remain immutable, including timestamps.
+        # Return the event snapshot even if provider configuration is temporarily unavailable.
         if capture and capture.roster_ids and 'api.pandascore.co/' in capture.source:
             return {'status':capture.status, 'source':capture.source, 'created':0}
+        if not team.pandascore_id:
+            raise ValueError('Сначала привяжите команду к PandaScore в её карточке.')
+        external_id = await self.tournament_external_id(tournament)
+        if not external_id:
+            external_id = await self.discover_tournament(tournament_id, team_id, match_id)
         rows = await self.fetch(lambda c: c.tournament_rosters(external_id))
         candidates = [r for r in rows if isinstance(r, dict) and r.get('id') == team.pandascore_id]
         if len(candidates) != 1:

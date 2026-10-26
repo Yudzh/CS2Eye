@@ -450,3 +450,6 @@ export function getPandaScoreTournament(id:number):Promise<{external_id:number|n
 export function bindPandaScoreTournament(id:number, external_id:number):Promise<Record<string,unknown>>{return request(`/api/v1/tournaments/${id}/pandascore`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({external_id})})}
 
 export function previewPandaScoreTournament(externalId:number):Promise<Record<string,unknown>>{return request(`/api/v1/pandascore/tournaments/${externalId}`)}
+
+export interface MatchTournamentRosters {match_id:number;tournament_id:number;teams:Array<{team_id:number;status:"saved"|"error";created?:number;players:Array<{id:number;nickname:string}>;checked_at?:string;source?:string;error?:string}>}
+export function ensureMatchTournamentRosters(id:number):Promise<MatchTournamentRosters>{return request(`/api/v1/matches/${id}/pandascore/rosters`,{method:"POST"})}

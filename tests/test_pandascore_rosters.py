@@ -193,3 +193,78 @@ def test_roster_migration_preserves_existing_rows_and_allows_provider_only_playe
             conn.execute(text('DELETE FROM players WHERE id=2'))
             migration.downgrade()
             assert conn.execute(text('SELECT bo3_slug FROM players WHERE id=1')).scalar_one()=='old-player'
+
+
+async def discovery_setup(session,monkeypatch):
+    from cs2eye.models.match import Match
+    await setup(session,monkeypatch)
+    event=await session.get(Tournament,1);event.pandascore_id=None
+    session.add(Team(id=2,bo3_id=222,bo3_slug='opponent',name='Opponent',pandascore_id=998))
+    from cs2eye.models.match import TournamentTeam
+    session.add(TournamentTeam(tournament_id=1,team_id=2))
+    session.add(Match(id=10,tournament_id=1,team_a_id=1,team_b_id=2,match_date=date.today(),format='bo3',status='scheduled'))
+    await session.commit()
+
+
+def discovery_service(session, calls, ambiguous=False):
+    row={'id':12345,'league':{'name':'Cup'},'serie':{'name':'1','full_name':'1 2026','year':2026},
+         'tournament':{'id':22222},'opponents':[{'type':'Team','opponent':{'id':999}}, {'type':'Team','opponent':{'id':998}}]}
+    def handler(request):
+        calls.append(request.url.path)
+        if '/matches/' in request.url.path:
+            if request.url.path.endswith('/upcoming'):
+                data=[row,{**row,'league':{'name':'Other Cup'},'tournament':{'id':99999}}]
+                if ambiguous:data.append({**row,'tournament':{'id':33333}})
+                return httpx.Response(200,json=data)
+            return httpx.Response(200,json=[])
+        if request.url.path=='/tournaments/22222':
+            return httpx.Response(200,json={'id':22222,'name':'Group Stage','serie':{'year':2026},'videogame':{'slug':'cs-go'}})
+        assert request.url.path=='/tournaments/22222/rosters'
+        other=[dict(id=200+i,name=f'Opponent {i}',slug=f'o{i}') for i in range(1,6)]
+        return httpx.Response(200,json={'type':'Team','rosters':[{'id':999,'players':rows()},{'id':998,'players':other}]})
+    return PandaScoreRosterService(session,lambda quota,reserve:PandaScoreClient(quota,reserve,transport=httpx.MockTransport(handler)))
+
+
+async def test_discovers_stage_from_match_pair_and_event_without_kickoff(roster_db,monkeypatch):
+    async with roster_db() as s:
+        await discovery_setup(s,monkeypatch)
+        calls=[]
+        result=await discovery_service(s,calls).refresh_tournament(1,1,match_id=10)
+        await s.commit()
+        assert result['created']==1
+        assert (await s.get(Tournament,1)).pandascore_id==22222
+        assert {path for path in calls if '/matches/' in path}=={'/csgo/matches/upcoming','/csgo/matches/running','/csgo/matches/past'}
+        stamp=(await s.scalar(select(TournamentRosterCheck))).checked_at
+        before=len(calls)
+        await discovery_service(s,calls).refresh_tournament(1,1,match_id=10)
+        assert len(calls)==before
+        assert (await s.scalar(select(TournamentRosterCheck))).checked_at==stamp
+
+
+async def test_ambiguous_stages_do_not_save_a_wrong_binding(roster_db,monkeypatch):
+    async with roster_db() as s:
+        await discovery_setup(s,monkeypatch)
+        with pytest.raises(ValueError,match='неоднозначен'):
+            await discovery_service(s,[],ambiguous=True).refresh_tournament(1,1,match_id=10)
+        assert (await s.get(Tournament,1)).pandascore_id is None
+        assert await s.scalar(select(func.count()).select_from(TournamentRosterCheck))==0
+
+
+async def test_match_endpoint_saves_both_teams_once_for_whole_event(roster_db,monkeypatch):
+    import cs2eye.api.routers.pandascore_rosters as routes
+    from cs2eye.models.match import Match
+    async with roster_db() as s:
+        await discovery_setup(s,monkeypatch)
+        calls=[]
+        monkeypatch.setattr(routes,'PandaScoreRosterService',lambda session:discovery_service(session,calls))
+        first=await routes.ensure_match_rosters(10,s)
+        assert all(team['status']=='saved' and len(team['players'])==5 for team in first['teams']), first
+        assert await s.scalar(select(func.count()).select_from(TournamentRosterCheck))==2
+        before=len(calls)
+        s.add(Match(id=11,tournament_id=1,team_a_id=1,team_b_id=2,match_date=date.today()+timedelta(days=2),format='bo3',status='scheduled'))
+        await s.commit()
+        second=await routes.ensure_match_rosters(11,s)
+        assert len(calls)==before
+        assert all(team['created']==0 for team in second['teams'])
+        assert (await s.get(Team,1)).current_roster_id==1
+        assert (await s.get(Match,10)).status=='scheduled'

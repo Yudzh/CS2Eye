@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cs2eye.db.session import get_db_session
 from cs2eye.integrations.pandascore.client import PandaScoreError
 from cs2eye.models.team import Team
-from cs2eye.models.match import Tournament
+from cs2eye.models.match import Tournament, Match
 from cs2eye.services.pandascore_roster_service import PandaScoreRosterService
 
 router = APIRouter(tags=['PandaScore rosters'])
@@ -76,3 +76,29 @@ async def preview_tournament(external_id: int, session: AsyncSession = Depends(g
             raise ValueError('Стадия PandaScore не найдена.')
         return {k:row.get(k) for k in ['id','name','league','serie','videogame']}
     return await mutate(session, preview)
+
+
+@router.post('/matches/{match_id}/pandascore/rosters')
+async def ensure_match_rosters(match_id: int, session: AsyncSession = Depends(get_db_session)):
+    match = await session.get(Match, match_id)
+    if match is None:
+        raise HTTPException(404, 'Матч не найден.')
+    if not match.tournament_id or not match.team_a_id or not match.team_b_id:
+        raise HTTPException(422, 'Для турнирного состава нужны турнир и обе команды матча.')
+    tournament_id = match.tournament_id
+    team_ids = [match.team_a_id, match.team_b_id]
+    from cs2eye.services.effective_roster_service import EffectiveRosterService
+    results = []
+    for team_id in team_ids:
+        try:
+            result = await PandaScoreRosterService(session).refresh_tournament(tournament_id, team_id, match_id=match_id)
+            await session.commit()
+            roster = await EffectiveRosterService(session).get_effective_roster(team_id, tournament_id, match_id)
+            results.append({'team_id':team_id, 'status':'saved', 'created':result['created'],
+                            'players':roster['roster_check']['roster'], 'source':result['source'],
+                            'checked_at':roster['roster_check']['checked_at']})
+        except (ValueError, PandaScoreError, IntegrityError) as exc:
+            await session.rollback()
+            message = str(exc) if not isinstance(exc, IntegrityError) else 'Конфликт привязки игрока; повторите получение состава.'
+            results.append({'team_id':team_id,'status':'error','error':message,'players':[]})
+    return {'match_id':match_id,'tournament_id':tournament_id,'teams':results}

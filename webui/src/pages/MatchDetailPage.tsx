@@ -1,7 +1,8 @@
 import {MatchTiming} from "../components/MatchTiming";
 import {MatchResultPanel} from "../components/MatchResultPanel";
 import {useEffect, useState} from "react";
-import {capturePredictionHistory, getMatch, getPredictionHistory, getPredictionResults, getPredictionFeed} from "../api";
+import {capturePredictionHistory, ensureMatchTournamentRosters, getMatch, getPredictionHistory, getPredictionResults, getPredictionFeed} from "../api";
+import type {MatchTournamentRosters} from "../api";
 import type {MatchSeries, PredictionHistoryItem, PredictionResult, PredictionFeedItem} from "../types";
 import {MatchCard} from "./MatchesPage";
 import {ManualForecastButton} from "../components/ManualForecastButton";
@@ -9,6 +10,9 @@ import {MatchLLMAnalysisPanel} from "../components/MatchLLMAnalysisPanel";
 const percent = (value: number | null) => value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 const outcome = (value: boolean | null) => value == null ? "Без оценки" : value ? "✓ Угадали" : "✕ Не угадали";
 export function MatchDetailPage({matchId}: {matchId: number}) {
+  const [rosters, setRosters] = useState<MatchTournamentRosters | null>(null);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+  const [rosterLoading, setRosterLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [match, setMatch] = useState<MatchSeries | null>(null);
   const [history, setHistory] = useState<PredictionHistoryItem[]>([]);
@@ -20,12 +24,23 @@ export function MatchDetailPage({matchId}: {matchId: number}) {
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     let active = true;
+    setRosters(null); setRosterError(null); setRosterLoading(false);
     setLoading(true); setActionError(null); setMatch(null); setError(null); setPredictionError(null); setHistory([]); setResults([]); setSavedPick(null);
     async function load() {
       try {
         const value = await getMatch(matchId);
         if (!active) return;
         setMatch(value);
+        if (value.tournament && value.team_a.id != null && value.team_b.id != null) {
+          setRosterLoading(true);
+          try {
+            const result = await ensureMatchTournamentRosters(matchId);
+            if (active) setRosters(result);
+          } catch (error) {
+            if (active) setRosterError(error instanceof Error ? error.message : "Не удалось получить составы турнира.");
+          } finally { if (active) setRosterLoading(false); }
+          if (!active) return;
+        }
         let pick: PredictionFeedItem | undefined;
         if (value.status !== "completed") {
           try {
@@ -60,6 +75,17 @@ export function MatchDetailPage({matchId}: {matchId: number}) {
     {error && <div className="empty-state empty-state--error" role="alert">{error}</div>}
     {match && <><MatchTiming startsAt={match.starts_at} status={match.status} result={match.result_sync}/><section className="summary-grid"><article className="summary-card"><span>Результат серии</span><strong>{match.status === "scheduled" ? "Матч ещё не сыгран" : `${match.score.team_a} : ${match.score.team_b}`}</strong><small>{match.format.toUpperCase()}</small></article><article className="summary-card"><span>Победитель</span><strong>{winner ?? "Пока неизвестен"}</strong></article><article className="summary-card"><span>Турнир</span><strong>{match.tournament?.name ?? "Не указан"}</strong><small>{new Date(`${match.match_date}T00:00:00`).toLocaleDateString("ru-RU")}</small></article></section>
     {match && <MatchResultPanel matchId={match.id} teamA={match.team_a} teamB={match.team_b} value={match.result_sync} changed={() => setRefresh(value => value + 1)}/>}
+    {match.tournament && <section className="strength-panel">
+      <h2>Составы на турнир · PandaScore</h2>
+      {rosterLoading && <p role="status">Получаю и сохраняю турнирные составы…</p>}
+      {rosters?.teams.map(team => <div key={team.team_id}>
+        <strong>{team.team_id === match.team_a.id ? match.team_a.name : match.team_b.name}</strong>
+        {team.status === "saved" ? <><p>{team.players.map(p => p.nickname).join(" / ")}</p><small>Состав сохранён для турнира{team.checked_at ? ` · получен ${new Date(team.checked_at).toLocaleString("ru-RU")}` : ""}</small></> : <p role="alert">{team.error}</p>}
+      </div>)}
+      {rosterError && <p role="alert">{rosterError}</p>}
+      {(rosterError || rosters?.teams.some(team => team.status === "error")) && <button className="button" disabled={loading} onClick={() => setRefresh(value => value + 1)}>Повторить получение составов</button>}
+      <p>Сохранённая пятёрка используется в пределах этого турнира. Дата получения сохраняется; состав не выдаётся за известный до этой даты.</p>
+    </section>}
     {actionError && <p role="alert">{actionError}</p>}
     {match.team_a.id != null && match.team_b.id != null && <MatchLLMAnalysisPanel
       key={match.id} teamAId={match.team_a.id} teamBId={match.team_b.id}

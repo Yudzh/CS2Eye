@@ -1,6 +1,6 @@
 import {cleanup, fireEvent, render, screen} from "@testing-library/react";
 import {afterEach, expect, it, vi} from "vitest";
-const api = vi.hoisted(() => ({capturePredictionHistory: vi.fn(), createManualForecast: vi.fn(), getMatch: vi.fn(), getPredictionHistory: vi.fn(), getPredictionResults: vi.fn(), getPredictionFeed: vi.fn().mockResolvedValue({items: []})}));
+const api = vi.hoisted(() => ({capturePredictionHistory: vi.fn(), ensureMatchTournamentRosters: vi.fn().mockResolvedValue({match_id:7,tournament_id:3,teams:[]}), createManualForecast: vi.fn(), getMatch: vi.fn(), getPredictionHistory: vi.fn(), getPredictionResults: vi.fn(), getPredictionFeed: vi.fn().mockResolvedValue({items: []})}));
 vi.mock("../api", () => api);
 vi.mock("./MatchesPage", () => ({MatchCard: () => <div>Карты матча</div>}));
 vi.mock("../components/MatchLLMAnalysisPanel", () => ({MatchLLMAnalysisPanel: (props: {
@@ -96,4 +96,19 @@ it("shows a restored forecast for an overdue scheduled match", async () => {
   expect(await screen.findByText("Наш прогноз: Aurora · 70.3%")).toBeTruthy();
   expect(screen.queryByText("Сохранённого прогноза для этого матча нет.")).toBeNull();
   expect(api.capturePredictionHistory).not.toHaveBeenCalled();
+});
+
+it("obtains and shows both tournament rosters when the match opens",async()=>{
+ api.getMatch.mockResolvedValue(match);
+ api.getPredictionHistory.mockResolvedValue({items:[]});
+ api.getPredictionResults.mockResolvedValue({items:[]});
+ api.ensureMatchTournamentRosters.mockResolvedValueOnce({match_id:7,tournament_id:3,teams:[
+  {team_id:1,status:"saved",players:[{id:11,nickname:"Alpha Player"}],checked_at:"2026-10-26T00:00:00Z"},
+  {team_id:2,status:"saved",players:[{id:12,nickname:"Bravo Player"}],checked_at:"2026-10-26T00:00:00Z"},
+ ]});
+ render(<MatchDetailPage matchId={7}/>);
+ expect(await screen.findByText("Alpha Player")).toBeTruthy();
+ expect(await screen.findByText("Bravo Player")).toBeTruthy();
+ expect(api.ensureMatchTournamentRosters).toHaveBeenCalledWith(7);
+ expect(api.capturePredictionHistory).not.toHaveBeenCalled();
 });
