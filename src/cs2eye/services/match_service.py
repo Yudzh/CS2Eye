@@ -120,7 +120,7 @@ class MatchService:
             query = query.where(Match.resolution_status == "resolved", Match.format.in_(("bo1", "bo3", "bo5")), Match.team_a_id.is_not(None), Match.team_b_id.is_not(None), Match.veto_data_status == "not_available")
         elif veto_filter == "has_veto": query = query.where(Match.veto_data_status != "not_available")
         elif veto_filter is not None: raise MatchValidationError("veto_filter must be expected_missing or has_veto")
-        return [await self.get(item.id) for item in (await self.session.execute(query)).scalars().all()]
+        return await self.get_many([item.id for item in (await self.session.execute(query)).scalars().all()])
 
     async def backfill(self) -> MatchBackfillResult:
         rows = (await self.session.execute(

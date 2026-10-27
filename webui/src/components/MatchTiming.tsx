@@ -9,7 +9,11 @@ function duration(milliseconds: number) {
 }
 export function MatchTiming({startsAt, status, result}: {startsAt?: string | null; status: string; result?: ResultSync | null}) {
   const [now, setNow] = useState(Date.now);
-  useEffect(() => {const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer);}, []);
+  useEffect(() => {
+    if (status === "completed" || !startsAt || !Number.isFinite(Date.parse(startsAt))) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [status, startsAt]);
   const start = startsAt ? Date.parse(startsAt) : NaN;
   const next = result?.next_check_at ? Date.parse(result.next_check_at) : NaN;
   const completed = status === "completed";

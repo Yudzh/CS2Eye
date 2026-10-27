@@ -1,0 +1,37 @@
+import {cleanup, fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {afterEach, expect, it, vi} from "vitest";
+import {MatchesPage} from "./MatchesPage";
+import type {MatchSeries} from "../types";
+const api = vi.hoisted(() => ({getMatches: vi.fn(), getMatch: vi.fn(), updateMatchVetoText: vi.fn()}));
+vi.mock("../api", () => ({...api, backfillMatches: vi.fn(), createMatchSeries: vi.fn(), patchMatchSeries: vi.fn(), reorderMatchSeries: vi.fn(), splitMatchSeries: vi.fn()}));
+vi.mock("../components/MatchResultPanel", () => ({MatchResultPanel: () => null, ResultStatus: () => null}));
+afterEach(() => {cleanup();vi.clearAllMocks();});
+const match = (id: number): MatchSeries => ({id, team_a:{id:1,name:`Team ${id}`},team_b:{id:2,name:"Opponent"},match_date:"2026-10-27",status:"completed",format:"bo3",environment:"lan",stage:"group",resolution_status:"resolved",score:{team_a:2,team_b:0},maps:[],veto:[],veto_data_status:"not_available",veto_expected:true,tournament:{id:id <= 20 ? 1 : 2,name:id <= 20 ? "Alpha Cup" : "Beta Cup",year:2026,tier:null,environment:"lan",start_date:null,end_date:null,structure_type:"unknown"},is_playoff:false,is_elimination:false,winner_team_id:1,round_number:null,round_label:null,group_name:null,bracket_section:null,bracket_position:null,next_match_id:null,next_match_slot:null});
+it("limits mounted editors and filters matches by tournament", async () => {
+  api.getMatches.mockResolvedValue({items:Array.from({length:25}, (_, i) => match(i+1))});
+  render(<MatchesPage/>);
+  await screen.findByText("Страница 1 из 2 · Матчей: 25");
+  expect(screen.getAllByRole("textbox")).toHaveLength(21);
+  fireEvent.click(screen.getByRole("button",{name:"Следующая"}));
+  expect(screen.getByText("Страница 2 из 2 · Матчей: 25")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Турнир"),{target:{value:"2"}});
+  expect(screen.getAllByRole("textbox")).toHaveLength(6);
+  expect(screen.getByRole("link",{name:/Team 21 2 : 0/})).toBeTruthy();
+  expect(screen.queryByRole("link",{name:/Team 1 2 : 0/})).toBeNull();
+});
+it("keeps another veto draft mounted while refreshing after a save", async () => {
+  api.getMatches.mockResolvedValue({items:[match(1),match(2)]});
+  api.updateMatchVetoText.mockResolvedValue(match(1));
+  render(<MatchesPage/>);
+  await screen.findAllByText("Сохранить фактический veto");
+  const editors = screen.getAllByRole("textbox");
+  fireEvent.change(editors[2],{target:{value:"unsaved draft"}});
+  let finish!: (value: unknown) => void;
+  api.getMatches.mockImplementationOnce(() => new Promise(resolve => {finish=resolve;}));
+  fireEvent.click(screen.getAllByText("Сохранить фактический veto")[0]);
+  await waitFor(() => expect(api.getMatches).toHaveBeenCalledTimes(2));
+  expect((screen.getAllByRole("textbox")[2] as HTMLTextAreaElement).value).toBe("unsaved draft");
+  finish({items:[match(1),match(2)]});
+  await waitFor(() => expect(screen.queryByText("Загружаю серии…")).toBeNull());
+  expect((screen.getAllByRole("textbox")[2] as HTMLTextAreaElement).value).toBe("unsaved draft");
+});
