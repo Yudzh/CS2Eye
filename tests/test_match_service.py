@@ -385,3 +385,51 @@ async def test_manual_grouping_rejects_ambiguous_schedule(match_db) -> None:
             await MatchService(session).create_manual([1], format="bo3")
         assert len(list(await session.scalars(select(Match.id)))) == 2
         assert (await session.get(DemoFile, 1)).match_id is None
+
+async def test_alias_migration_links_parsed_maps_without_changing_series(match_db):
+    from cs2eye.models.demo import DemoParseRun
+    from cs2eye.models.match import MatchVetoAction
+    from cs2eye.deployment.mongolz_demo_links import apply
+    await add_map(match_db, 1, 7, 13, filename="the-mongolz-vs-mouz-m1-nuke.dem")
+    async with match_db() as session:
+        (await session.get(Team, 1)).name = "TheMongolz"
+        (await session.get(Team, 2)).name = "MOUZ"
+        tournament = Tournament(name="IEM", year=DAY.year)
+        session.add(tournament)
+        await session.flush()
+        series = Match(tournament_id=tournament.id, match_date=DAY, team_a_id=1, team_b_id=2,
+                       format="bo3", status="completed", resolution_status="resolved",
+                       team_a_maps_won=0, team_b_maps_won=2, winner_team_id=2, veto_data_status="complete")
+        session.add(series)
+        await session.flush()
+        sid = series.id
+        session.add(MatchVetoAction(match_series_id=sid, order_index=3, team_id=2,
+                                  team_name="MOUZ", action="pick", map_name="mirage", source="manual"))
+        result = await session.scalar(select(DemoMapResult))
+        result.team_a_id = None
+        result.team_a_name, result.team_b_name = "The MongolZ", "MOUZ"
+        result.metadata_status = "needs_review"
+        result.rounds_count = 20
+        session.add(DemoParseRun(demo_file_id=1, status="success",parser_name="test", parser_version="v1"))
+        await session.commit()
+    # Execute through Alembic's async connection, including session close.
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("alias_migration", Path(__file__).parents[1] / "alembic/versions/0072_mongolz_demo_links.py")
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    def upgrade(connection):
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.upgrade()
+    async with match_db.kw["bind"].begin() as connection:
+        await connection.run_sync(upgrade)
+    async with match_db() as session:
+        demo = await session.get(DemoFile, 1)
+        assert (demo.match_id, demo.map_number) == (sid, 1)
+        assert (await session.scalar(select(DemoMapResult))).metadata_status == "complete"
+        series = await session.get(Match, sid)
+        assert (series.team_a_maps_won, series.team_b_maps_won, series.winner_team_id, series.veto_data_status) == (0, 2, 2, "complete")
+        assert await apply(session) == []
+        assert len((await session.scalars(select(MatchVetoAction))).all()) == 1
