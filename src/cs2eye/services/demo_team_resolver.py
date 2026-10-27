@@ -15,6 +15,7 @@ TEAM_NAME_ALIASES = {
     "natus vincer": "natus vincere",
     "team vitality": "vitality",
     "mongolz": "the mongolz",
+    "themongolz": "the mongolz",
     "100t": "100 thieves",
     "aurora gaming": "aurora",
     "pain gaming": "pain",

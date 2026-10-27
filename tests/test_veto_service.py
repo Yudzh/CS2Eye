@@ -67,3 +67,21 @@ def test_human_readable_unknown_map_cannot_be_complete():
 def test_map_outside_known_series_pool_needs_review():
     status,issues=validate_actions(match(),[action(1,1,"ban","cache")],{"inferno","mirage","nuke"})
     assert status=="needs_review" and issues==["map_outside_pool:cache"]
+
+@pytest.mark.parametrize("stored_name", ["TheMongolz", "The MongolZ", "Mongolz"])
+def test_human_readable_veto_accepts_mongolz_name_variants(stored_name):
+    mongolz = SimpleNamespace(id=1, name=stored_name)
+    mouz = SimpleNamespace(id=2, name="MOUZ")
+    actions = parse_veto_text(match(), mongolz, mouz, """1. MOUZ removed Anubis
+2. The MongolZ removed Cache
+3. MOUZ picked Nuke
+4. The MongolZ picked Mirage
+5. The MongolZ removed Ancient
+6. MOUZ removed Dust2
+7. Inferno was left over""")
+    assert [(item["team_id"], item["action"], item["map_name"]) for item in actions] == [
+        (2, "ban", "anubis"), (1, "ban", "cache"), (2, "pick", "nuke"),
+        (1, "pick", "mirage"), (1, "ban", "ancient"), (2, "ban", "dust2"),
+        (None, "decider", "inferno"),
+    ]
+    assert validate_actions(match(), actions) == ("complete", [])
